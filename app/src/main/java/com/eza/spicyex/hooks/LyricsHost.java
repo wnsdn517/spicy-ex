@@ -23,6 +23,20 @@ interface LyricsHost {
 
     boolean seekSpotifyTo(long positionMs);
 
+    boolean toggleSavedTrack();
+
+    boolean skipToNextTrack();
+
+    boolean togglePlayback();
+
+    /** True while readBestMeasuredProgressMs() is still returning a recent seek's forced value
+     *  instead of genuine backend-reported state - see PlaybackBridge.isSeekOverrideActive(). */
+    boolean isSeekOverrideActive();
+
+    boolean canSeek();
+
+    boolean canSkipToNext();
+
     void markExplicitLyricsExit(Activity activity);
 
     // Re-arm the "keep lyrics activity open across track changes" window. The shell calls this

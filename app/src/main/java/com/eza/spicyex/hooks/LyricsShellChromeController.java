@@ -38,6 +38,7 @@ final class LyricsShellChromeController {
             Runnable onBack,
             Runnable onRomanToggle,
             Runnable onTranslationToggle,
+            Runnable onSaveToggle,
             Runnable onSettings
     ) {
         LinearLayout header = new LinearLayout(activity);
@@ -77,6 +78,14 @@ final class LyricsShellChromeController {
 
         float density = activity.getResources().getDisplayMetrics().density;
         int iconColor = Color.rgb(232, 232, 238);
+        ImageButton saveToggle = createRoundIconButton(activity,
+                new ActionIconDrawable(ActionIconDrawable.Kind.STAR, iconColor, density),
+                "Add to Liked Songs", chromeButtonDp, landscape ? 10 : 11);
+        saveToggle.setOnClickListener(v -> onSaveToggle.run());
+        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(dp(chromeButtonDp), dp(chromeButtonDp));
+        saveLp.leftMargin = dp(landscape ? 6 : 8);
+        header.addView(saveToggle, saveLp);
+
         ImageButton settingsButton = createRoundIconButton(activity,
                 new ActionIconDrawable(ActionIconDrawable.Kind.SETTINGS, iconColor, density),
                 "Spicy EX settings", chromeButtonDp, landscape ? 11 : 12);
@@ -87,18 +96,25 @@ final class LyricsShellChromeController {
 
         romanToggle.setForeground(romanSpinner);
         translationToggle.setForeground(translationSpinner);
-        return new ChromeViews(header, romanToggle, translationToggle);
+        return new ChromeViews(header, romanToggle, translationToggle, saveToggle, iconColor, density);
     }
 
     static final class ChromeViews {
         final ImageButton romanToggle;
         final ImageButton translationToggle;
+        final ImageButton saveToggle;
+        final int iconColor;
+        final float density;
         final ViewGroup header;
 
-        ChromeViews(ViewGroup header, ImageButton romanToggle, ImageButton translationToggle) {
+        ChromeViews(ViewGroup header, ImageButton romanToggle, ImageButton translationToggle,
+                    ImageButton saveToggle, int iconColor, float density) {
             this.header = header;
             this.romanToggle = romanToggle;
             this.translationToggle = translationToggle;
+            this.saveToggle = saveToggle;
+            this.iconColor = iconColor;
+            this.density = density;
         }
     }
 }
