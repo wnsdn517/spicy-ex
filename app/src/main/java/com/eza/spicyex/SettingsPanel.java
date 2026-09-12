@@ -227,7 +227,7 @@ public final class SettingsPanel {
         java.util.LinkedHashMap<Settings.Section, java.util.List<Settings.Setting<?>>> grouped =
                 new java.util.LinkedHashMap<>();
         for (Settings.Setting<?> setting : Settings.ALL) {
-            if (setting.section == Settings.INTERNAL) continue;
+            if (setting.section == Settings.INTERNAL || setting.section == Settings.DEBUG) continue;
             if (!shouldRender(setting)) continue;
             java.util.List<Settings.Setting<?>> items = grouped.get(setting.section);
             if (items == null) {
@@ -267,6 +267,8 @@ public final class SettingsPanel {
     private void appendDebugCard(LinearLayout parent, int at) {
         LinearLayout card = newCard();
         card.setTag(TAG_CARD_PREFIX + Settings.DEBUG.id);
+        renderSetting(card, Settings.ANIM_CONFLICT_LOGGER);
+        renderSetting(card, Settings.LYRICS_SYNC_TRACER);
         renderActions(card);
         renderStatus(card);
         renderDiagnostics(card);
@@ -449,6 +451,15 @@ public final class SettingsPanel {
     }
 
     private boolean shouldRender(Settings.Setting<?> setting) {
+        if (setting == Settings.APPLE_EDGE_MELT_TOP
+                || setting == Settings.APPLE_EDGE_MELT_BOTTOM
+                || setting == Settings.APPLE_STRONG_DISTANCE_BLUR
+                || setting == Settings.APPLE_FADE_PASSED_LINES
+                || setting == Settings.APPLE_RELEASE_BLUR_ON_TOUCH
+                || setting == Settings.APPLE_COMPACT_TEXT
+                || setting == Settings.APPLE_CJK_WRAP_FIX) {
+            return Boolean.TRUE.equals(store.get(Settings.APPLE_STYLE_PRESET));
+        }
         if (setting == Settings.SPICY_MANUAL_TOKEN) {
             return LyricsSourcePreferences.sourceEnabled(context, LyricsSourcePreferences.Source.SPICY);
         }
@@ -505,6 +516,12 @@ public final class SettingsPanel {
 
     /** UI language rebuilds every label; dependency settings rebuild only their own section. */
     private void onSettingChanged(Settings.Setting<?> setting) {
+        if (setting == Settings.APPLE_STYLE_PRESET) {
+            AppleStylePreset.apply(store, Boolean.TRUE.equals(store.get(Settings.APPLE_STYLE_PRESET)));
+            rebuildSection(setting.section);
+            rebuildSection(Settings.APPLE_STYLE);
+            return;
+        }
         if (setting == Settings.LYRICS_SOURCE_MODE) {
             LyricsSourcePreferences.setRankingMode(context,
                     LyricsSourcePreferences.RankingMode.parse(String.valueOf(store.get(setting))));
@@ -529,7 +546,6 @@ public final class SettingsPanel {
                 || setting == Settings.LIVE_CARD_TEXT_SIZE
                 || setting == Settings.LYRICS_SOURCE_OVERRIDE
                 || setting == Settings.LYRICS_SOURCE_MODE;
-
     }
 
     /**

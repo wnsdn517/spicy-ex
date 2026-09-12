@@ -27,6 +27,7 @@ public final class Settings {
     public static final Section ANIMATION = LYRICS_SCREEN;
     public static final Section BACKGROUND = LYRICS_SCREEN;
     public static final Section AI = new Section("AI", "ai");
+    public static final Section APPLE_STYLE = new Section("Apple Style", "apple_style");
     public static final Section DEBUG = new Section("About & Diagnostics", "debug");
     public static final Section DISPLAY = TEXT;
     public static final Section INTERNAL = new Section("Internal", "internal");
@@ -56,6 +57,10 @@ public final class Settings {
 
     public static final Setting<Boolean> AUTO_RESUME_FOLLOW = boolSetting(
             "lyric_auto_resume_follow", LYRICS, "Auto-resume lyric follow", true
+    );
+
+    public static final Setting<Boolean> AUTO_SKIP_INTRO_OUTRO = boolSetting(
+            "lyric_auto_skip_intro_outro", LYRICS, "Auto-skip intro/outro", false
     );
 
     public static final IntegerSetting SYNC_OFFSET_MS = intSetting(
@@ -215,10 +220,9 @@ public final class Settings {
             "small", "normal", "large", "xlarge", "custom"
     );
 
-    // Multiplier x100 for the "custom" text size mode (0.0-5.0 in 0.1 steps).
     public static final IntegerSetting LYRICS_TEXT_SIZE_CUSTOM = intSetting(
             "lyrics_text_size_custom", TEXT, "Custom size",
-            100, 0, 500, 5
+            100, 0, 800, 5
     );
 
     // When on, long lines shrink (23-28sp by length) so they fit; when off, every line
@@ -254,7 +258,7 @@ public final class Settings {
 
     public static final Setting<String> WORD_BOUNCE_STYLE = enumSetting(
             "lyric_word_bounce_style", ANIMATION, "Bounce style",
-            "Phrase zoom", "Phrase zoom", "Word zoom", "Phrase lift", "Word lift"
+            "Word lift", "Phrase zoom", "Word zoom", "Phrase lift", "Word lift", "Apple lift"
     );
 
 
@@ -263,7 +267,15 @@ public final class Settings {
     );
 
     public static final Setting<Boolean> ENABLE_LINE_BLUR = boolSetting(
-            "lyric_enable_line_blur", ANIMATION, "Blur distant lines", false
+            "lyric_enable_line_blur", ANIMATION, "Blur distant lines", true
+    );
+
+    public static final Setting<Boolean> LINE_SLIDE_ANIMATION = boolSetting(
+            "lyric_line_slide_animation", ANIMATION, "Apple Music-style slide", true
+    );
+
+    public static final Setting<Boolean> APPLE_STYLE_PRESET = boolSetting(
+            "lyric_apple_style_preset", ANIMATION, "Apple Music style (auto-tune)", false
     );
 
     // Direction the karaoke gradient fills each line as it plays: down the line ("Top to bottom")
@@ -272,6 +284,34 @@ public final class Settings {
             "lyric_line_sync_fill", ANIMATION, "Lyric fill direction",
             "Top to bottom",
             "Top to bottom", "Left to right (block)", "Left to right (sentence)"
+    );
+
+    public static final Setting<Boolean> APPLE_EDGE_MELT_TOP = boolSetting(
+            "lyric_apple_edge_melt_top", APPLE_STYLE, "Top edge melt", true
+    );
+
+    public static final Setting<Boolean> APPLE_EDGE_MELT_BOTTOM = boolSetting(
+            "lyric_apple_edge_melt_bottom", APPLE_STYLE, "Bottom edge melt", true
+    );
+
+    public static final Setting<Boolean> APPLE_STRONG_DISTANCE_BLUR = boolSetting(
+            "lyric_apple_strong_distance_blur", APPLE_STYLE, "Strong distance blur", true
+    );
+
+    public static final Setting<Boolean> APPLE_FADE_PASSED_LINES = boolSetting(
+            "lyric_apple_fade_passed_lines", APPLE_STYLE, "Fade passed lines", true
+    );
+
+    public static final Setting<Boolean> APPLE_RELEASE_BLUR_ON_TOUCH = boolSetting(
+            "lyric_apple_release_blur_on_touch", APPLE_STYLE, "Release blur on touch", true
+    );
+
+    public static final Setting<Boolean> APPLE_COMPACT_TEXT = boolSetting(
+            "lyric_apple_compact_text", APPLE_STYLE, "Compact text size", true
+    );
+
+    public static final Setting<Boolean> APPLE_CJK_WRAP_FIX = boolSetting(
+            "lyric_apple_cjk_wrap_fix", APPLE_STYLE, "Wrap long CJK words", true
     );
 
     // --- Background ---
@@ -508,6 +548,22 @@ public final class Settings {
             "native_spicy_enabled", "Enable native Spicy lyrics screen", true
     );
 
+    public static final Setting<Boolean> APPLE_STYLE_PRIOR_SLIDE = internalBoolSetting(
+            "lyric_apple_style_prior_slide", "Prior slide animation", true
+    );
+
+    public static final Setting<String> APPLE_STYLE_PRIOR_BOUNCE_STYLE = internalSetting(
+            "lyric_apple_style_prior_bounce_style", "Prior bounce style", "Word lift"
+    );
+
+    public static final Setting<Boolean> APPLE_STYLE_PRIOR_LINE_BLUR = internalBoolSetting(
+            "lyric_apple_style_prior_line_blur", "Prior line blur", true
+    );
+
+    public static final Setting<String> APPLE_STYLE_PRIOR_FONT = internalSetting(
+            "lyric_apple_style_prior_font", "Prior lyric font", "spotify"
+    );
+
     public static final Setting<Boolean> SEND_TOKEN = internalBoolSetting(
             "lyrics_send_token", "Send token", true
     );
@@ -590,6 +646,26 @@ public final class Settings {
 
     public static final Setting<String> LAST_CACHE_CLEAR_VERSION = internalSetting(
             "last_cache_clear_version", "last_cache_clear_version", ""
+    );
+
+    // Rendered explicitly in SettingsPanel.appendDebugCard, not through the generic per-section
+    // loop (see groupVisibleSettings' DEBUG exclusion) - logs to logcat (tag [LyricsAnimTracer])
+    // when two different code paths write a row's RenderEffect/alpha in the same rendered frame,
+    // or when a value jumps by more than an easing step should in one frame. Off by default: the
+    // per-write bookkeeping is real overhead you only want while actively chasing a visual glitch.
+    public static final Setting<Boolean> ANIM_CONFLICT_LOGGER = boolSetting(
+            "lyric_anim_conflict_logger", DEBUG, "Animation conflict logger (logcat)", false
+    );
+
+    // Rendered explicitly in SettingsPanel.appendDebugCard, same as ANIM_CONFLICT_LOGGER above.
+    // Logs to logcat (tag [LyricsSyncTracer]) once per document load (provider/source + each raw
+    // line's server-reported startMs, no lyric text) and once per active-line transition (raw vs
+    // Settings.SYNC_OFFSET_MS-adjusted playback position, the line's own startMs, and the delta
+    // between them) - built specifically to separate "the provider's timestamps are wrong" from
+    // "our own offset/processing shifted it" from "something upstream is just late" without
+    // guessing, the same way ANIM_CONFLICT_LOGGER did for visual glitches.
+    public static final Setting<Boolean> LYRICS_SYNC_TRACER = boolSetting(
+            "lyric_sync_tracer", DEBUG, "Lyrics sync tracer (logcat)", false
     );
 
     // --- Helper classes ---
