@@ -69,6 +69,12 @@ public final class Settings {
             "Off", "On demand", "Auto"
     );
 
+    // Silently ducks the media volume for the duration of a spotify:ad: track and restores it
+    // once real playback resumes - see AdMuteController.
+    public static final Setting<Boolean> AUTO_MUTE_ADS = boolSetting(
+            "auto_mute_ads", LYRICS, "Auto-mute ads", false
+    );
+
     // Adds a button to Spotify's persistent mini player (every non-lyrics screen) that jumps
     // straight to the native fullscreen lyrics - see LyricsActivityTakeoverHook.
     public static final Setting<Boolean> MINI_PLAYER_LYRICS_ICON = boolSetting(
@@ -389,6 +395,14 @@ public final class Settings {
             LyricsBackgroundStyle.GRADIENT,
             LyricsBackgroundStyle.STATIC_TEXTURE,
             LyricsBackgroundStyle.ANIMATED_TEXTURE
+    );
+
+    // Only meaningful when BACKGROUND_STYLE is ANIMATED_TEXTURE - gates whether the shader's warp
+    // intensity reacts to the live audio level measured by AudioReactiveController, independent of
+    // turning the animated texture on at all (some people want the flow without the kick). Off also
+    // means the Visualizer behind that level is never attached, so this costs nothing when unused.
+    public static final Setting<Boolean> BEAT_REACTIVE_BACKGROUND = boolSetting(
+            "lyric_beat_reactive_background", BACKGROUND, "Beat-reactive background", false
     );
 
     public static final Setting<Boolean> FORCE_DARK_BACKGROUND = boolSetting(

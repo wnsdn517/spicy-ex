@@ -32,6 +32,7 @@
     <string name="settings_label_lyric_stay_on_track_change">Stay in lyric screen on song change</string>
     <string name="settings_label_lyric_auto_resume_follow">Auto-resume lyric follow</string>
     <string name="settings_label_lyric_auto_skip_intro_outro">Auto-skip intro/outro</string>
+    <string name="settings_label_auto_mute_ads">Auto-mute ads</string>
     <string name="settings_label_mini_player_lyrics_icon">Show lyrics icon on mini player</string>
     <string name="settings_label_lyric_liked_songs_button">Add to Liked Songs button</string>
     <string name="settings_option_heart">Heart</string>
@@ -139,6 +140,7 @@
     <string name="settings_label_lyric_line_sync_fill">Lyric fill direction</string>
     <string name="settings_label_lyric_enable_background">Animated background</string>
     <string name="settings_label_lyric_background_style">Background style</string>
+    <string name="settings_label_lyric_beat_reactive_background">Beat-reactive background</string>
     <string name="settings_label_lyric_force_dark_background">Force dark background</string>
     <string name="settings_label_lyric_extra_dark_background">Darken background</string>
     <string name="settings_label_lyrics_transliteration_enabled">Transliterate lyrics</string>

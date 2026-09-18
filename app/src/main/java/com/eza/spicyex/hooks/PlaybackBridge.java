@@ -32,6 +32,15 @@ import org.luckypray.dexkit.query.matchers.MethodMatcher;
 final class PlaybackBridge {
     private static final Pattern DIGITS = Pattern.compile("\\d+");
 
+    /** Fired synchronously, right after References.playerState/playerStateStrong are updated,
+     *  every time Spotify's own state machine builds a new PlayerState - e.g. AdMuteController
+     *  uses this for near-instant ad-track detection instead of a slower poll. */
+    private static volatile Runnable stateUpdateListener;
+
+    static void setStateUpdateListener(Runnable listener) {
+        stateUpdateListener = listener;
+    }
+
     private volatile boolean isPlaying;
     private volatile long mediaPositionMs = -1;
     private volatile long mediaPositionUpdatedAtElapsedMs = 0;
@@ -57,6 +66,15 @@ final class PlaybackBridge {
                         if (state == null) return;
                         References.playerStateStrong = state;
                         References.playerState = new WeakReference<>(state);
+                        Runnable listener = stateUpdateListener;
+                        if (listener != null) {
+                            try {
+                                listener.run();
+                            } catch (Throwable t) {
+                                XpLog.log(NativeSpicyLyricsHook.TAG
+                                        + " state update listener failed: " + t);
+                            }
+                        }
                     });
             XpLog.log(NativeSpicyLyricsHook.TAG + " player state builder hook installed");
         } catch (Throwable t) {

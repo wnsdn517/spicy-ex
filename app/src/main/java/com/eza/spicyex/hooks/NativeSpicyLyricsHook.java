@@ -36,6 +36,9 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
     private final NowPlayingInjector nowPlayingInjector = new NowPlayingInjector(this);
     private final LyricsActivityTakeoverHook activityTakeoverHook =
             new LyricsActivityTakeoverHook(this, nowPlayingInjector);
+    private volatile float audioReactiveLevel;
+    private final AudioReactiveController audioReactiveController =
+            new AudioReactiveController(level -> audioReactiveLevel = level);
     private final PlaybackBridge playbackBridge = new PlaybackBridge();
     private final LyricsFetchCoordinator lyricsFetchCoordinator =
             new LyricsFetchCoordinator(
@@ -88,6 +91,12 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
             bridgeCoordinator = new SpicyLyricBridgeCoordinator(
                     lyricsSessionManager, applicationContext);
             bridgeCoordinator.start();
+            // Ad ducking runs process-wide, not per screen: it applies to local playback
+            // everywhere, not only while the fullscreen lyrics happen to be open.
+            new AdMuteController(this, applicationContext).start();
+            // Installs only the AudioTrack#play hook, which is cheap. The Visualizer it can
+            // trigger stays off until the lyrics screen asks for it - see setListeningEnabled.
+            audioReactiveController.start();
             Diagnostics.event("bootstrap", "hook_ready",
                     Diagnostics.context("result", "main_process"));
         } else {
@@ -195,6 +204,18 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
     @Override
     public void restoreLyricsLayer(com.eza.spicyex.lyrics.session.LayerKind layer) {
         lyricsSessionManager.restoreLayer(layer);
+    }
+
+    /** Smoothed 0..1 real audio level from AudioReactiveController; 0 whenever no session is
+     *  attached (feature off, nothing playing, or the device refused the Visualizer). */
+    @Override
+    public float currentAudioLevel() {
+        return audioReactiveLevel;
+    }
+
+    @Override
+    public void setAudioReactiveListening(boolean enabled) {
+        audioReactiveController.setListeningEnabled(enabled);
     }
 
     @Override

@@ -131,6 +131,12 @@ public final class LyricsAmbientController {
         inFlightArtImageId = "";
     }
 
+    /** Real audio level (0..1) from AudioReactiveController - see NativeSpicyLyricsHook. */
+    public void updateAudioLevel(float level0to1) {
+        AmbientBackgroundLayer layer = animatedBackground;
+        if (layer != null) layer.setAudioLevel(level0to1);
+    }
+
     /** Apply the "Animated background" setting live: show+resume or hide+pause the layer. */
     public void applyEnabled(boolean enabled) {
         applySettings(enabled ? LyricsBackgroundStyle.ANIMATED_TEXTURE

@@ -18,6 +18,7 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
             + "uniform float time;\n"
             + "uniform float dark;\n"
             + "uniform float brightness;\n"
+            + "uniform float warpIntensity;\n"
             + "  float3 mod289(float3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }\n"
             + "  float2 mod289(float2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }\n"
             + "  float3 permute(float3 x) { return mod289(((x*34.0)+1.0)*x); }\n"
@@ -72,7 +73,7 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
             + "      n2 * 0.65 + n4 * 0.35\n"
             + "    ) * centerWeight;\n"
             + "\n"
-            + "    float2 warpedUV = uv + warp * 1.0;\n"
+            + "    float2 warpedUV = uv + warp * warpIntensity;\n"
             + "    warpedUV = clamp(warpedUV, 0.0, 1.0);\n"
             + "\n"
             + "\n"
@@ -105,10 +106,18 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
     private double elapsedSeconds;
     private int colorA = Color.rgb(30,21,18), colorB = Color.rgb(16,15,16);
     private final Choreographer.FrameCallback frame = this::tick;
+    /**
+     * Beat reactivity: the live audio level is applied as a transient boost on top of the shader's
+     * steady-state warp amount, so the background visibly kicks with the music instead of only
+     * flowing at a constant rate. Written from the capture thread, read on the next draw.
+     */
+    private static final float BEAT_BOOST = 0.65f;
+    private volatile float audioLevel;
 
     public AmbientArtworkBackgroundView(Context context, boolean dark) {
         super(context);
         shader.setFloatUniform("brightness", 1f);
+        shader.setFloatUniform("warpIntensity", 1f);
         setForceDark(dark);
     }
 
@@ -213,8 +222,19 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
         fallback.setShader(new LinearGradient(0,0,Math.max(1,getWidth()),Math.max(1,getHeight()),
                 colorA,colorB,Shader.TileMode.CLAMP));
     }
+    @Override
+    public void setAudioLevel(float level0to1) {
+        audioLevel = Math.max(0f, Math.min(1f, level0to1));
+    }
+
     protected void onDraw(Canvas canvas) {
-        if (texture != null) shader.setFloatUniform("time", (float) elapsedSeconds);
+        if (texture != null) {
+            shader.setFloatUniform("time", (float) elapsedSeconds);
+            // A paused or stopped background must not keep pulsing: the measured level can still
+            // be non-zero for a beat after the shell stops advancing time.
+            float reactivity = moving && playing ? audioLevel : 0f;
+            shader.setFloatUniform("warpIntensity", 1f + BEAT_BOOST * reactivity);
+        }
         canvas.drawRect(0,0,getWidth(),getHeight(),texture == null ? fallback : paint);
     }
 }

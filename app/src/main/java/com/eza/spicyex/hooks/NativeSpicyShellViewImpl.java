@@ -275,6 +275,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         panelMediaMode = config.get(Settings.PANEL_MEDIA_CONTROLS);
         if (!PanelMediaMode.gesturesEnabled(panelMediaMode)) hideColumnOverlay();
         applyRenderConfigChanges("preference changed", false);
+        beatReactiveBackground = config.get(Settings.BEAT_REACTIVE_BACKGROUND);
         ambientController.applySettings(renderConfig.backgroundStyle, renderConfig.forceDarkBackground,
                 renderConfig.extraDarkBackground);
         if (trackInfoController != null) trackInfoController.onPreferenceChanged();
@@ -878,10 +879,15 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         });
     }
 
+    /** Mirrors Settings.BEAT_REACTIVE_BACKGROUND; also gates whether the Visualizer is ever
+     *  attached, so the feature costs nothing at all while off. */
+    private boolean beatReactiveBackground;
+
     void start() {
         dbgEnter("NativeSpicyShellView.start");
         if (running) return;
         running = true;
+        host.setAudioReactiveListening(beatReactiveBackground);
         ambientController.start();
         revealChrome();
         documentGate.start();
@@ -896,6 +902,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     void stop() {
         dbgEnter("NativeSpicyShellView.stop");
         running = false;
+        host.setAudioReactiveListening(false);
         documentGate.stop();
         if (lyricRequest != null) lyricRequest.close();
         lyricRequest = null;
@@ -1174,6 +1181,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         SpotifyTrack track = currentTrackThrottled();
         boolean playingNow = host.isPlayerActuallyPlaying();
         ambientController.setPlaying(playingNow);
+        ambientController.updateAudioLevel(beatReactiveBackground ? host.currentAudioLevel() : 0f);
         updateJumpToCurrentVisibility();
         updateToggleSpinners();
         if (track == null) {
@@ -1375,6 +1383,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             updateToggleVisuals();
         }
         if (diff.needsBackgroundToggle) {
+            beatReactiveBackground = config.get(Settings.BEAT_REACTIVE_BACKGROUND);
+            if (running) host.setAudioReactiveListening(beatReactiveBackground);
             ambientController.applySettings(next.backgroundStyle, next.forceDarkBackground,
                     next.extraDarkBackground);
             SpotifyTrack track = host.getCurrentTrackSafely();

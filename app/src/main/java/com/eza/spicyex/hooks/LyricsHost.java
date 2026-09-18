@@ -15,6 +15,13 @@ import com.eza.spicyex.lyrics.CacheClearKind;
  * activity instead of the rerouted Spotify fullscreen activity).
  */
 interface LyricsHost {
+    /** Gates the AudioReactiveController Visualizer to when it can actually be seen (see its own
+     *  javadoc for why that matters). */
+    void setAudioReactiveListening(boolean enabled);
+
+    /** Smoothed 0..1 real audio level; 0 whenever no session is attached. */
+    float currentAudioLevel();
+
     SpotifyTrack getCurrentTrackSafely();
 
     boolean isPlayerActuallyPlaying();

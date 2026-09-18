@@ -47,6 +47,7 @@ public final class SettingsUiSchema {
             Settings.STAY_IN_LYRICS,
             Settings.AUTO_RESUME_FOLLOW,
             Settings.AUTO_SKIP_INTRO_OUTRO,
+            Settings.AUTO_MUTE_ADS,
             Settings.MINI_PLAYER_LYRICS_ICON,
             Settings.SYNC_OFFSET_MS,
             Settings.HYPERGLOW_ENABLED,
@@ -95,6 +96,7 @@ public final class SettingsUiSchema {
             Settings.ENABLE_LINE_BLUR,
             Settings.LINE_SYNC_FILL,
             Settings.BACKGROUND_STYLE,
+            Settings.BEAT_REACTIVE_BACKGROUND,
             Settings.FORCE_DARK_BACKGROUND,
             Settings.EXTRA_DARK_BACKGROUND,
             // Apple Music (dedicated section; renders only while the Animation style is Apple Music)
