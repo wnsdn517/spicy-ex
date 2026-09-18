@@ -83,6 +83,7 @@ public final class SettingsUiSchema {
             Settings.LIKED_SONGS_BUTTON,
             Settings.FULLSCREEN_CONTROLS,
             Settings.TRACK_INFO_POSITION,
+            Settings.TRACK_INFO_BACKGROUND,
             Settings.TRACK_INFO_TEXT_SIZE,
             Settings.TRACK_INFO_TEXT_SIZE_CUSTOM,
             Settings.TRACK_INFO_TEXT_OVERFLOW,

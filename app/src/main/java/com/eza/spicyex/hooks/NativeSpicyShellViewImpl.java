@@ -845,7 +845,9 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 host,
                 config,
                 this::revealChrome,
-                twoColumn);
+                twoColumn,
+                chrome.header,
+                chrome.headerTitle);
         trackInfoController.setSkipGapController(skipGapController);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         scrollLp.topMargin = 0;

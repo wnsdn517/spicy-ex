@@ -163,7 +163,14 @@ final class TrackInfoReadoutController {
     private String lastUri = "";
     private LinearLayout topRow;
     private FrameLayout.LayoutParams topRowLp;
+    /** Opaque fill for the Solid background choice; matches the shell's darkest backdrop. */
+    private static final int SOLID_BACKDROP = 0xFF0B0B0D;
+    /** Chrome header row and the flexible title the readout replaces in "Header" mode. */
+    private ViewGroup headerRow;
+    private View headerTitle;
     private View topGradientView;
+    private View bottomGradientView;
+    private View sideGradientView;
     private int topInsetPx;
     private boolean lastPlaying = true;
     private String lastTitle = "";
@@ -238,7 +245,8 @@ final class TrackInfoReadoutController {
 
     static TrackInfoReadoutController attach(Activity activity, FrameLayout shellRoot,
             LyricsJumpToCurrentController jumpController, LyricsTextFactory textFactory,
-            LyricsHost host, SpotifyPlusConfig config, Runnable onRevealChrome, boolean twoColumn) {
+            LyricsHost host, SpotifyPlusConfig config, Runnable onRevealChrome, boolean twoColumn,
+            ViewGroup headerRow, View headerTitle) {
         boolean landscape = activity.getResources().getConfiguration().orientation
                 == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
         int artTop = landscape ? ART_TOP_LANDSCAPE_DP : ART_TOP_PORTRAIT_DP;
@@ -450,7 +458,12 @@ final class TrackInfoReadoutController {
         holder[0] = controller;
         controller.topRow = topRow;
         controller.topRowLp = topRowLp;
+        controller.headerRow = headerRow;
+        controller.headerTitle = headerTitle;
         controller.topGradientView = topGradientView;
+        controller.bottomGradientView = gradientView;
+        controller.sideGradientView = sideGradientView;
+        controller.applyBackgroundStyle();
         controller.topInsetPx = topInset;
         controller.layoutTopRow();
         controller.installAccessibility(bottomArtFrame);
@@ -473,8 +486,56 @@ final class TrackInfoReadoutController {
         }
     }
 
+    /**
+     * Applies the "Track info background" choice.
+     *
+     * <p>The dock floats over the lyrics, so by default only a short edge scrim separates them and
+     * lyric lines run underneath the title. Solid fills the whole dock instead, so nothing reads
+     * through it; None removes the separation entirely.
+     */
+    private void applyBackgroundStyle() {
+        String style = config.get(Settings.TRACK_INFO_BACKGROUND);
+        boolean solid = "Solid".equals(style);
+        boolean none = "None".equals(style);
+        int fill = solid ? SOLID_BACKDROP : Color.TRANSPARENT;
+        topBox.setBackgroundColor(fill);
+        bottomBox.setBackgroundColor(fill);
+        sideBox.setBackgroundColor(fill);
+        int scrim = solid || none ? View.GONE : View.VISIBLE;
+        if (topGradientView != null) topGradientView.setVisibility(scrim);
+        if (bottomGradientView != null) bottomGradientView.setVisibility(scrim);
+        if (sideGradientView != null) sideGradientView.setVisibility(scrim);
+    }
+
+    /**
+     * Moves the readout between the floating top dock and the chrome header row.
+     *
+     * <p>Top and Bottom float the readout over the lyrics, so lines run underneath it. In Header
+     * mode the same art and title/artist take the chrome header's flexible slot instead: it sits
+     * in the row's own layout, reveals and fades with the rest of the chrome, and never covers a
+     * lyric line.
+     */
+    private void applyHeaderPlacement(boolean header) {
+        if (topRow == null) return;
+        ViewGroup target = header ? headerRow : topBox;
+        if (target == null || topRow.getParent() == target) return;
+        ViewGroup current = (ViewGroup) topRow.getParent();
+        if (current != null) current.removeView(topRow);
+        if (header) {
+            int index = headerTitle == null ? -1 : headerRow.indexOfChild(headerTitle);
+            topRow.setPadding(0, 0, dp(8), 0);
+            headerRow.addView(topRow, index >= 0 ? index : headerRow.getChildCount(),
+                    new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        } else {
+            topBox.addView(topRow, topRowLp);
+            layoutTopRow();
+        }
+        if (headerTitle != null) headerTitle.setVisibility(header ? View.GONE : View.VISIBLE);
+    }
+
     /** Re-reads settings (call at mount and from the preference listener). */
     void onPreferenceChanged() {
+        applyBackgroundStyle();
         panelMediaMode = readPanelMediaMode(config);
         if (!PanelMediaMode.gesturesEnabled(panelMediaMode)) hideOverlays();
         setMode(currentMode());
@@ -492,9 +553,11 @@ final class TrackInfoReadoutController {
         if (mode == null) mode = "Off";
         // Two-column owns landscape art itself; every overlay stands down while engaged.
         boolean side = !twoColumn && sideModeEngaged(landscape, aspect, mode);
-        boolean top = !twoColumn && !side && "Top".equals(mode);
-        boolean bottom = !twoColumn && !side && "Bottom".equals(mode);
-        boolean enabled = top || bottom || side;
+        boolean header = !twoColumn && !side && "Header".equals(mode);
+        boolean top = !twoColumn && !side && !header && "Top".equals(mode);
+        boolean bottom = !twoColumn && !side && !header && "Bottom".equals(mode);
+        boolean enabled = top || bottom || side || header;
+        applyHeaderPlacement(header);
         boolean wasEnabled = artworkEnabled;
         boolean modeChanged = lastMode == null || !mode.equals(lastMode);
         lastMode = mode;
@@ -530,6 +593,8 @@ final class TrackInfoReadoutController {
      */
     private void layoutTopRow() {
         if (topRow == null || topRowLp == null) return;
+        // In "Header" mode the row is a child of the chrome LinearLayout and is laid out by it.
+        if (topRow.getParent() != topBox) return;
         int sidePad;
         try {
             sidePad = sideSystemPadding(activity);

@@ -272,7 +272,14 @@ public final class Settings {
     // cluster stay. New-feature rule: default Off for all installs, no migration.
     public static final Setting<String> TRACK_INFO_POSITION = enumSetting(
             "lyrics_track_info_position", TEXT, "Track info position", "Off",
-            "Off", "Top", "Bottom"
+            "Off", "Top", "Bottom", "Header"
+    );
+
+    // What sits behind the readout. Gradient is the original edge scrim, which lets lyrics
+    // show through the dock; Solid fills the dock so nothing reads through it; None draws nothing.
+    public static final Setting<String> TRACK_INFO_BACKGROUND = enumSetting(
+            "lyrics_track_info_background", TEXT, "Track info background", "Gradient",
+            "Gradient", "Solid", "None"
     );
 
     // Readout title/artist size. Applies live; default Normal matches the original readout.

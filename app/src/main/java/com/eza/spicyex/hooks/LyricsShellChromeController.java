@@ -118,7 +118,7 @@ final class LyricsShellChromeController {
 
         romanToggle.setForeground(romanSpinner);
         translationToggle.setForeground(translationSpinner);
-        ChromeViews views = new ChromeViews(header, back, configCluster,
+        ChromeViews views = new ChromeViews(header, headerTitle, back, configCluster,
                 romanToggle, translationToggle, settingsButton, likeButton);
         applyTopMode(views, topActive, chromeButtonDp, landscape);
         return views;
@@ -185,6 +185,7 @@ final class LyricsShellChromeController {
 
     static final class ChromeViews {
         final ViewGroup header;
+        final TextView headerTitle;
         final TextView back;
         final LinearLayout configCluster;
         final ImageButton romanToggle;
@@ -192,10 +193,12 @@ final class LyricsShellChromeController {
         final ImageButton settingsButton;
         final ImageButton likeButton;
 
-        ChromeViews(ViewGroup header, TextView back, LinearLayout configCluster,
+        ChromeViews(ViewGroup header, TextView headerTitle, TextView back,
+                LinearLayout configCluster,
                 ImageButton romanToggle, ImageButton translationToggle,
                 ImageButton settingsButton, ImageButton likeButton) {
             this.header = header;
+            this.headerTitle = headerTitle;
             this.back = back;
             this.configCluster = configCluster;
             this.romanToggle = romanToggle;

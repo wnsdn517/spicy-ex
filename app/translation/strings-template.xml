@@ -111,6 +111,7 @@
     <string name="settings_label_lyrics_track_info_position">Track info position</string>
     <string name="settings_option_top">Top</string>
     <string name="settings_option_bottom">Bottom</string>
+    <string name="settings_label_lyrics_track_info_background">Track info background</string>
     <string name="settings_label_lyrics_track_info_text_size">Track info text size</string>
     <string name="settings_label_lyrics_track_info_text_size_custom">Custom size</string>
     <string name="settings_label_lyrics_track_info_text_overflow">Track info overflow</string>
@@ -202,6 +203,8 @@
     <string name="settings_option_gradient_wash">Gradient wash</string>
     <string name="settings_option_spotlight">Spotlight</string>
     <string name="settings_option_gradient">Gradient</string>
+    <string name="settings_option_solid">Solid</string>
+    <string name="settings_option_header">Header</string>
     <string name="settings_option_static_texture">Static texture</string>
     <string name="settings_option_animated_texture">Animated texture</string>
     <string name="settings_option_furigana_only">Furigana only</string>
