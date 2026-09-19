@@ -232,3 +232,8 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+# Local scratch: device captures, decompiled apks, network traces
+/.artifacts/
+/dev/
+*.har
