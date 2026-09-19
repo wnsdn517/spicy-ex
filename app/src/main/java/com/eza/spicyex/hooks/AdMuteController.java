@@ -29,6 +29,12 @@ final class AdMuteController {
     private final NativeSpicyLyricsHook host;
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
+    // check() runs on every PlayerState Spotify builds (see start()), which is many times a
+    // second during playback. SpotifyPlusConfig.from() allocates a fresh wrapper per call, so
+    // building one there meant garbage on that hot path for every single state update - and for
+    // most people the answer is an immediate "disabled, nothing to do". Held once instead; it
+    // wraps SharedPreferences, so reads through it stay live and toggling still applies at once.
+    private final com.eza.spicyex.SpotifyPlusConfig config;
     private boolean ducking;
     private int savedVolume = -1;
     private boolean started;
@@ -36,6 +42,7 @@ final class AdMuteController {
     AdMuteController(NativeSpicyLyricsHook host, Context context) {
         this.host = host;
         this.context = context;
+        this.config = com.eza.spicyex.SpotifyPlusConfig.from(context);
     }
 
     void start() {
@@ -51,8 +58,7 @@ final class AdMuteController {
 
     private void check() {
         try {
-            boolean enabled = Boolean.TRUE.equals(com.eza.spicyex.SpotifyPlusConfig.from(context)
-                    .get(com.eza.spicyex.Settings.AUTO_MUTE_ADS));
+            boolean enabled = Boolean.TRUE.equals(config.get(com.eza.spicyex.Settings.AUTO_MUTE_ADS));
             if (!enabled) {
                 if (ducking) restore(); // toggled off mid-ad - give the volume back immediately
                 return;

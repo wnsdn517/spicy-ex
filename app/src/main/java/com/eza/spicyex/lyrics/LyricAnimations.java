@@ -36,12 +36,14 @@ public final class LyricAnimations {
         return lerp(-(1f / 60f), 0f, (t - 0.9f) / 0.1f);
     }
 
+    /** Lift style: smooth vertical-only arc, 0 -> -0.04em -> 0. */
     public static float liftYOffsetSpline(float t) {
         float progress = clamp01(t);
         float wave = (float) Math.sin(Math.PI * progress);
         return -0.04f * wave * wave;
     }
 
+    /** Apple lift: quarter-sine rise to -0.04em, holding at the top while sung. */
     public static float appleLiftYOffsetSpline(float t) {
         return -0.04f * (float) Math.sin(clamp01(t) * (Math.PI / 2d));
     }
@@ -82,6 +84,7 @@ public final class LyricAnimations {
         return (float) (1d / (1d + Math.max(0f, distance) * 0.9d));
     }
 
+    /** Apple letter-glow falloffs: wider wash, tighter active anchor. */
     public static float appleLetterGlowFalloff(float distance) {
         return (float) (1d / (1d + Math.max(0f, distance) * 0.5d));
     }

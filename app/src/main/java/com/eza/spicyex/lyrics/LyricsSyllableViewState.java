@@ -9,11 +9,18 @@ import java.util.WeakHashMap;
 /** Registers renderer-owned mounted views for one syllable/word segment. */
 public final class LyricsSyllableViewState {
     private static final Map<SyllableSegment, SyllableRenderState> STATES = new WeakHashMap<>();
+
+    /** Apple lift motion active: bouncier spring constants for words and letters. */
     private static boolean appleMotion;
 
     private LyricsSyllableViewState() {
     }
 
+    /**
+     * Switches the motion constants. Resets live springs so in-flight words adopt the new
+     * physics immediately instead of finishing on stale constants. Cheap no-op when unchanged;
+     * safe to call per frame (covers first mount, unlike config-change-only sync).
+     */
     public static void setAppleMotion(boolean enabled) {
         if (appleMotion == enabled) return;
         appleMotion = enabled;
@@ -31,16 +38,16 @@ public final class LyricsSyllableViewState {
         }
     }
 
-    public static void setWordView(SyllableSegment segment, View view) {
-        if (segment != null) state(segment).view = view;
-    }
-
     public static SpicyAnimatedTextView wordTextView(SyllableSegment segment) {
         return segment == null ? null : state(segment).textView;
     }
 
     public static SpicyAnimatedTextView romanizedTextView(SyllableSegment segment) {
         return segment == null ? null : state(segment).romanizedTextView;
+    }
+
+    public static void setWordView(SyllableSegment segment, View view) {
+        if (segment != null) state(segment).view = view;
     }
 
     public static void configureWordMotion(SyllableSegment segment, View motionView,

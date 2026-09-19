@@ -24,6 +24,7 @@ import com.google.android.flexbox.FlexboxLayout;
  */
 public class GlowFlexbox extends FlexboxLayout {
     private boolean glowLayerEnabled = true;
+    // Apple active-line drop shadow intensity (0 = off, the shared-path default).
     private float lineShadowAlpha;
     // Blur filters cached by quantized sigma; sigma animates every frame and BlurMaskFilter is
     // immutable, so allocating one per word per frame would churn. Shared with the selfGlow path
@@ -146,6 +147,7 @@ public class GlowFlexbox extends FlexboxLayout {
         invalidate();
     }
 
+    /** Apple line-shadow intensity for the word container (0 = off). */
     public void setLineShadowIntensity(float intensity) {
         float clamped = Math.max(0f, Math.min(1f, intensity));
         if (clamped == lineShadowAlpha) return;
@@ -159,11 +161,27 @@ public class GlowFlexbox extends FlexboxLayout {
 
     @Override
     protected void dispatchDraw(Canvas canvas) {
-        if (lineShadowAlpha > 0.02f) drawShadowLayer(canvas, this);
         drawGlowLayer(canvas, this);
+        if (lineShadowAlpha > 0.02f) drawShadowLayer(canvas, this);
         super.dispatchDraw(canvas);
     }
 
+    private void drawGlowLayer(Canvas canvas, ViewGroup parent) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+            int save = canvas.save();
+            canvas.translate(child.getLeft(), child.getTop());
+            canvas.concat(child.getMatrix());
+            if (child instanceof SpicyAnimatedTextView) {
+                drawWordGlow(canvas, (SpicyAnimatedTextView) child, 0f, 0f);
+            } else if (child instanceof ViewGroup) {
+                drawGlowLayer(canvas, (ViewGroup) child);
+            }
+            canvas.restoreToCount(save);
+        }
+    }
+
+    /** Apple shadow pass: blurred dark glyph copies beneath the word container's children. */
     private void drawShadowLayer(Canvas canvas, ViewGroup parent) {
         for (int i = 0; i < parent.getChildCount(); i++) {
             View child = parent.getChildAt(i);
@@ -202,23 +220,7 @@ public class GlowFlexbox extends FlexboxLayout {
         paint.setShader(savedShader);
     }
 
-    private void drawGlowLayer(Canvas canvas, ViewGroup parent) {
-        for (int i = 0; i < parent.getChildCount(); i++) {
-            View child = parent.getChildAt(i);
-            int save = canvas.save();
-            canvas.translate(child.getLeft(), child.getTop());
-            canvas.concat(child.getMatrix());
-            if (child instanceof SpicyAnimatedTextView) {
-                drawWordGlow(canvas, (SpicyAnimatedTextView) child, 0f, 0f);
-            } else if (child instanceof ViewGroup) {
-                drawGlowLayer(canvas, (ViewGroup) child);
-            }
-            canvas.restoreToCount(save);
-        }
-    }
-
-    private void drawWordGlow(Canvas canvas, SpicyAnimatedTextView tv, float x, float y) {
-        float g = Math.max(0f, Math.min(1f, tv.getGlow()));
+    private void drawWordGlow(Canvas canvas, SpicyAnimatedTextView tv, float x, float y) {        float g = Math.max(0f, Math.min(1f, tv.getGlow()));
         if (!shouldDrawGlow(glowLayerEnabled, g)) return;
         Layout layout = tv.getLayout();
         if (layout == null) return;
@@ -226,18 +228,19 @@ public class GlowFlexbox extends FlexboxLayout {
         int savedColor = paint.getColor();
         Shader savedShader = paint.getShader();
         MaskFilter savedMask = paint.getMaskFilter();
-        int alpha = Math.round(255f * 0.62f * g);
+        int alpha = Math.round(255f * 0.35f * g);
         int glowColor = Color.argb(alpha, 255, 255, 255);
         // CSS-equivalent of desktop's `text-shadow: 0 0 (4+2g)px rgba(255,255,255,.35g)`: a blurred
         // copy of the glyphs only — no sharp underlay. CSS blur radius r means Gaussian sigma r/2,
         // and desktop's r is 4-6px against a ~48px reference font, so sigma scales with text size.
-        float sigma = (3.5f + 3.5f * g) * paint.getTextSize() / 48f;
+        float sigma = (2f + g) * paint.getTextSize() / 48f;
         paint.setShader(null);
         paint.setColor(glowColor);
         paint.setMaskFilter(blurFilter(sigma));
         int save = canvas.save();
         canvas.translate(x + tv.getTotalPaddingLeft(), y + tv.getTotalPaddingTop());
         try {
+            FuriganaText.FuriganaSpan.onBeginDraw();
             layout.draw(canvas);
         } catch (Throwable ignored) {
         }
