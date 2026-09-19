@@ -20,7 +20,7 @@ import com.eza.spicyex.xposed.XpHooks;
 import com.eza.spicyex.xposed.XpLog;
 import com.eza.spicyex.xposed.XpPackage;
 import com.eza.spicyex.xposed.XpReflect;
-import org.luckypray.dexkit.DexKitBridge;
+import com.eza.spicyex.xposed.SpotifySymbolResolver;
 import org.luckypray.dexkit.query.FindClass;
 import org.luckypray.dexkit.query.FindMethod;
 import org.luckypray.dexkit.query.matchers.ClassMatcher;
@@ -42,19 +42,18 @@ final class PlaybackBridge {
     }
 
     private volatile boolean isPlaying;
-    private volatile long currentActions = -1;
     private volatile long mediaPositionMs = -1;
     private volatile long mediaPositionUpdatedAtElapsedMs = 0;
     private volatile long seekOverrideUntilElapsedMs = 0;
     private volatile WeakReference<MediaSession> currentMediaSession = new WeakReference<>(null);
     private Method playerWrapperGetStateMethod;
 
-    void install(XpPackage lpparm, DexKitBridge bridge) {
-        hookPlayerStateBridge(lpparm, bridge);
+    void install(XpPackage lpparm, SpotifySymbolResolver symbols) {
+        hookPlayerStateBridge(lpparm, symbols);
         installMediaSessionHook();
     }
 
-    private void hookPlayerStateBridge(XpPackage lpparm, DexKitBridge bridge) {
+    private void hookPlayerStateBridge(XpPackage lpparm, SpotifySymbolResolver symbols) {
         NativeSpicyLyricsHook.dbgEnter("hookPlayerStateBridge");
         try {
             XpHooks.findAfter(
@@ -72,7 +71,8 @@ final class PlaybackBridge {
                             try {
                                 listener.run();
                             } catch (Throwable t) {
-                                XpLog.log(NativeSpicyLyricsHook.TAG + " state update listener failed: " + t);
+                                XpLog.log(NativeSpicyLyricsHook.TAG
+                                        + " state update listener failed: " + t);
                             }
                         }
                     });
@@ -82,25 +82,28 @@ final class PlaybackBridge {
         }
 
         try {
-            var stateWrapperClasses = bridge.findClass(FindClass.create().matcher(
-                    ClassMatcher.create()
-                            .modifiers(Modifier.PUBLIC | Modifier.FINAL)
-                            .interfaceCount(1)
-                            .fields(FieldsMatcher.create()
-                                    .add(FieldMatcher.create().modifiers(Modifier.PUBLIC | Modifier.FINAL))
-                                    .add(FieldMatcher.create()
-                                            .modifiers(Modifier.PUBLIC | Modifier.FINAL).type(String.class))
-                                    .add(FieldMatcher.create()
-                                            .modifiers(Modifier.PUBLIC | Modifier.FINAL).type(ArrayList.class))
-                                    .add(FieldMatcher.create().modifiers(Modifier.PUBLIC).type(Object.class))
-                                    .add(FieldMatcher.create().modifiers(Modifier.PUBLIC).type(Bundle.class))
-                            )));
+            playerWrapperGetStateMethod = symbols.cache.method("playback.wrapper.getState", () -> {
+                var bridge = symbols.dexKit();
+                var stateWrapperClasses = bridge.findClass(FindClass.create().matcher(
+                        ClassMatcher.create()
+                                .modifiers(Modifier.PUBLIC | Modifier.FINAL)
+                                .interfaceCount(1)
+                                .fields(FieldsMatcher.create()
+                                        .add(FieldMatcher.create().modifiers(Modifier.PUBLIC | Modifier.FINAL))
+                                        .add(FieldMatcher.create()
+                                                .modifiers(Modifier.PUBLIC | Modifier.FINAL).type(String.class))
+                                        .add(FieldMatcher.create()
+                                                .modifiers(Modifier.PUBLIC | Modifier.FINAL).type(ArrayList.class))
+                                        .add(FieldMatcher.create().modifiers(Modifier.PUBLIC).type(Object.class))
+                                        .add(FieldMatcher.create().modifiers(Modifier.PUBLIC).type(Bundle.class))
+                                )));
 
-            playerWrapperGetStateMethod = bridge.findMethod(FindMethod.create()
-                            .searchInClass(stateWrapperClasses)
-                            .matcher(MethodMatcher.create().name("getState")))
-                    .get(0)
-                    .getMethodInstance(lpparm.classLoader());
+                return bridge.findMethod(FindMethod.create()
+                                .searchInClass(stateWrapperClasses)
+                                .matcher(MethodMatcher.create().name("getState")))
+                        .get(0)
+                        .getMethodInstance(lpparm.classLoader());
+            });
             XpHooks.hookAfter(playerWrapperGetStateMethod, "playback:PlayerWrapper#getState", param -> {
                 References.playerStateWrapperStrong = param.thisObject;
                 References.playerStateWrapper = new WeakReference<>(param.thisObject);
@@ -113,13 +116,19 @@ final class PlaybackBridge {
 
     private void installMediaSessionHook() {
         try {
+            XpHooks.findAfter(MediaSession.class, "setMetadata", "artwork:MediaSession#setMetadata",
+                    param -> com.eza.spicyex.lyrics.SpotifyArtworkCache.capture(
+                            (android.media.MediaMetadata) param.args[0]), android.media.MediaMetadata.class);
+        } catch (Throwable t) {
+            XpLog.log(NativeSpicyLyricsHook.TAG + " artwork metadata hook unavailable: " + t.getClass().getSimpleName());
+        }
+        try {
             XpHooks.findAfter(MediaSession.class, "setPlaybackState",
                     "playback:MediaSession#setPlaybackState", param -> {
                         currentMediaSession = new WeakReference<>((MediaSession) param.thisObject);
                         PlaybackState playbackState = (PlaybackState) param.args[0];
                         if (playbackState == null) return;
                         isPlaying = playbackState.getState() == PlaybackState.STATE_PLAYING;
-                        currentActions = playbackState.getActions();
                         long position = playbackState.getPosition();
                         if (position >= 0) {
                             mediaPositionMs = position;
@@ -134,10 +143,8 @@ final class PlaybackBridge {
 
     boolean seekSpotifyTo(long positionMs) {
         try {
-            MediaSession session = currentMediaSession == null ? null : currentMediaSession.get();
-            if (session == null) return false;
-            MediaController controller = session.getController();
-            if (controller == null || controller.getTransportControls() == null) return false;
+            MediaController controller = transportController();
+            if (controller == null) return false;
             controller.getTransportControls().seekTo(positionMs);
             forcePosition(positionMs);
             return true;
@@ -147,131 +154,135 @@ final class PlaybackBridge {
         }
     }
 
-    boolean togglePlayback() {
+    /** Toggles play/pause through Spotify's own MediaSession transport. Null-safe: false when
+     * no session is captured yet (same failure posture as seek). */
+    boolean togglePlayPause() {
         try {
-            MediaSession session = currentMediaSession == null ? null : currentMediaSession.get();
-            if (session == null) return false;
-            MediaController controller = session.getController();
-            if (controller == null || controller.getTransportControls() == null) return false;
-            if (isPlaying) controller.getTransportControls().pause();
+            MediaController controller = transportController();
+            if (controller == null) return false;
+            if (isPlayerActuallyPlaying()) controller.getTransportControls().pause();
             else controller.getTransportControls().play();
             return true;
         } catch (Throwable t) {
-            XpLog.log(NativeSpicyLyricsHook.TAG + " toggle playback failed: " + t);
+            XpLog.log(NativeSpicyLyricsHook.TAG + " media toggle failed: " + t);
             return false;
         }
     }
 
+    /** Skips to the next/previous track through the same transport. False when unavailable. */
     boolean skipToNextTrack() {
+        return sendTransportControl("next", PlaybackState.ACTION_SKIP_TO_NEXT, tc -> tc.skipToNext());
+    }
+
+    boolean skipToPreviousTrack() {
+        return sendTransportControl("previous", PlaybackState.ACTION_SKIP_TO_PREVIOUS,
+                tc -> tc.skipToPrevious());
+    }
+
+    boolean toggleSpotifySaved(String mode, SpotifyTrack expected,
+                               java.util.function.Supplier<SpotifyTrack> currentTrack) {
+        return SpotifyCollectionAction.dispatch(mode, expected, currentTrack, this::collectionSession);
+    }
+
+    private SpotifyCollectionAction.Session collectionSession() {
+        MediaController controller = transportController();
+        if (controller == null) return null;
+        return new SpotifyCollectionAction.Session() {
+            @Override public String packageName() {
+                return controller.getPackageName();
+            }
+
+            @Override public String trackUri() {
+                android.media.MediaMetadata metadata = controller.getMetadata();
+                return metadata == null ? null
+                        : metadata.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_ID);
+            }
+
+            @Override public java.util.List<SpotifyCollectionAction.AdvertisedAction> advertisedActions() {
+                PlaybackState state = controller.getPlaybackState();
+                java.util.List<SpotifyCollectionAction.AdvertisedAction> actions = new ArrayList<>();
+                if (state != null && state.getCustomActions() != null) {
+                    for (PlaybackState.CustomAction action : state.getCustomActions()) {
+                        if (action == null || action.getAction() == null) continue;
+                        CharSequence label = action.getName();
+                        actions.add(new SpotifyCollectionAction.AdvertisedAction(
+                                action.getAction(), label == null ? null : label.toString()));
+                    }
+                }
+                return actions;
+            }
+
+            @Override public boolean dispatch(String id) {
+                MediaSession session = currentMediaSession.get();
+                if (session == null || !session.getSessionToken().equals(controller.getSessionToken())) return false;
+                PlaybackState state = controller.getPlaybackState();
+                if (state == null || state.getCustomActions() == null) return false;
+                for (PlaybackState.CustomAction action : state.getCustomActions()) {
+                    if (action != null && id.equals(action.getAction())) {
+                        controller.getTransportControls().sendCustomAction(id, action.getExtras());
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
+    }
+
+    private interface TransportControlCall {
+        void send(MediaController.TransportControls controls);
+    }
+
+    private boolean sendTransportControl(String name, long requiredAction, TransportControlCall call) {
         try {
-            MediaSession session = currentMediaSession == null ? null : currentMediaSession.get();
-            if (session == null) return false;
-            MediaController controller = session.getController();
-            if (controller == null || controller.getTransportControls() == null) return false;
-            controller.getTransportControls().skipToNext();
+            MediaController controller = transportController();
+            if (controller == null) return false;
+            PlaybackState state = controller.getPlaybackState();
+            if (state == null || (state.getActions() & requiredAction) == 0) return false;
+            call.send(controller.getTransportControls());
             return true;
         } catch (Throwable t) {
-            XpLog.log(NativeSpicyLyricsHook.TAG + " skip to next failed: " + t);
+            XpLog.log(NativeSpicyLyricsHook.TAG + " media " + name + " failed: " + t);
             return false;
         }
     }
 
-    boolean toggleSpotifySaved() {
-        try {
-            MediaSession session = currentMediaSession == null ? null : currentMediaSession.get();
-            if (session == null) return false;
-            MediaController controller = session.getController();
-            if (controller == null || controller.getTransportControls() == null) return false;
-            PlaybackState state = controller.getPlaybackState();
-            if (state == null || state.getCustomActions() == null) return false;
-            for (PlaybackState.CustomAction action : state.getCustomActions()) {
-                CharSequence label = action.getName();
-                if (label == null || !label.toString().toLowerCase(java.util.Locale.ROOT).contains("collection")) continue;
-                controller.getTransportControls().sendCustomAction(action.getAction(), action.getExtras());
-                return true;
-            }
-            return false;
-        } catch (Throwable t) {
-            XpLog.log(NativeSpicyLyricsHook.TAG + " toggle saved failed: " + t);
-            return false;
-        }
+    private MediaController transportController() {
+        MediaSession session = currentMediaSession == null ? null : currentMediaSession.get();
+        if (session == null) return null;
+        MediaController controller = session.getController();
+        if (controller == null || controller.getTransportControls() == null) return null;
+        return controller;
     }
 
     long readBestMeasuredProgressMs(SpotifyTrack track, boolean playing) {
-        return getCurrentPositionMs(track, playing);
-    }
-
-    /** Live position of the track Spotify is actually playing right now, in ms.
-     *  Source priority: seek-forced value (1800ms after a seek) -> live MediaController query
-     *  (fresh every call, extrapolated with update time + speed) -> PlayerState reflection ->
-     *  track snapshot (extrapolated only while playing) -> cached MediaSession value. */
-    long getCurrentPositionMs(SpotifyTrack track, boolean playing) {
         long now = SystemClock.elapsedRealtime();
         long media = mediaPositionMs;
         if (media >= 0 && now < seekOverrideUntilElapsedMs) {
-            return extrapolate(media, mediaPositionUpdatedAtElapsedMs, playing, 1f, now);
+            if (playing && mediaPositionUpdatedAtElapsedMs > 0) {
+                return Math.max(0, media + (now - mediaPositionUpdatedAtElapsedMs));
+            }
+            return Math.max(0, media);
         }
-
-        long live = readLiveControllerPositionMs(playing);
-        if (live >= 0) return live;
 
         long playerStateProgress = readPlayerStateProgressMs(playing);
         if (playerStateProgress >= 0) return playerStateProgress;
 
-        long fromTrack = readTrackPositionMs(track, playing);
-        if (fromTrack >= 0) return fromTrack;
+        if (track != null && track.position >= 0) {
+            long wallNow = System.currentTimeMillis();
+            if (!playing && track.lastUpdated > 0) {
+                long advancedBy = Math.max(0, wallNow - track.lastUpdated);
+                return Math.max(0, track.position - advancedBy);
+            }
+            return Math.max(0, track.position);
+        }
 
         if (media >= 0) {
-            return extrapolate(media, mediaPositionUpdatedAtElapsedMs, playing, 1f, now);
+            if (playing && mediaPositionUpdatedAtElapsedMs > 0) {
+                return Math.max(0, media + (now - mediaPositionUpdatedAtElapsedMs));
+            }
+            return Math.max(0, media);
         }
         return -1;
-    }
-
-    private long readLiveControllerPositionMs(boolean playing) {
-        try {
-            MediaSession session = currentMediaSession == null ? null : currentMediaSession.get();
-            if (session == null) return -1;
-            MediaController controller = session.getController();
-            if (controller == null) return -1;
-            PlaybackState state = controller.getPlaybackState();
-            if (state == null) return -1;
-            long position = state.getPosition();
-            if (position < 0) return -1;
-            boolean effectivelyPlaying = state.getState() == PlaybackState.STATE_PLAYING && playing;
-            return extrapolate(position, state.getLastPositionUpdateTime(),
-                    effectivelyPlaying, state.getPlaybackSpeed(), SystemClock.elapsedRealtime());
-        } catch (Throwable ignored) {
-            return -1;
-        }
-    }
-
-    private static long extrapolate(long baseMs, long baseAtElapsedMs, boolean playing,
-            float speed, long nowElapsedMs) {
-        if (baseMs < 0) return -1;
-        if (!playing || baseAtElapsedMs <= 0) return Math.max(0, baseMs);
-        float rate = speed > 0 ? speed : 1f;
-        return Math.max(0, baseMs + (long) ((nowElapsedMs - baseAtElapsedMs) * rate));
-    }
-
-    private static long readTrackPositionMs(SpotifyTrack track, boolean playing) {
-        if (track == null || track.position < 0) return -1;
-        if (!playing || track.lastUpdated <= 0) return Math.max(0, track.position);
-        return Math.max(0, track.position + Math.max(0, System.currentTimeMillis() - track.lastUpdated));
-    }
-
-    /** True while readBestMeasuredProgressMs() is still returning the optimistic forced value from
-     *  a recent seek instead of genuine backend-reported state - a caller trying to verify a seek
-     *  actually took effect must wait this out first, or it will only ever read its own write. */
-    boolean isSeekOverrideActive() {
-        return SystemClock.elapsedRealtime() < seekOverrideUntilElapsedMs;
-    }
-
-    boolean canSeek() {
-        return currentActions < 0 || (currentActions & PlaybackState.ACTION_SEEK_TO) != 0;
-    }
-
-    boolean canSkipToNext() {
-        return currentActions < 0 || (currentActions & PlaybackState.ACTION_SKIP_TO_NEXT) != 0;
     }
 
     boolean isPlayerActuallyPlaying() {
