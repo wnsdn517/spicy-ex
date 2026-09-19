@@ -22,7 +22,10 @@ import static com.eza.spicyex.lyrics.LyricUtils.safe;
  */
 public final class FuriganaText {
     static final float RUBY_SIZE_RATIO = 0.46f;
-    static final float RUBY_GAP_RATIO = 0.12f;
+    // Vertical gap between the ruby reading and the kanji it annotates, as a fraction of the base
+    // text size. Was 0.12 - the reading sat noticeably high above the kanji; halved to bring it
+    // down closer while still clearing the base glyphs' ascent.
+    static final float RUBY_GAP_RATIO = 0.06f;
 
     private FuriganaText() {
     }
@@ -193,7 +196,7 @@ public final class FuriganaText {
             this.reading = reading == null ? "" : reading;
         }
 
-        /** Global draw-cycle counter; each SpicyAnimatedTextView.onDraw increments it once. */
+        /** Each glow or sharp layout pass starts a separate draw cycle. */
         private static final ThreadLocal<Long> DRAW_CYCLE = new ThreadLocal<Long>() {
             @Override
             protected Long initialValue() {
@@ -201,7 +204,7 @@ public final class FuriganaText {
             }
         };
 
-        /** Call at the start of a view's onDraw so every span's reading is eligible again. */
+        /** Call before drawing a layout so each reading is drawn once in that pass. */
         static void onBeginDraw() {
             DRAW_CYCLE.set(DRAW_CYCLE.get() + 1L);
         }

@@ -6,6 +6,7 @@ import java.util.function.LongSupplier;
 final class LyricsFollowState {
     private int activeIndex = -2;
     private long holdUntilMs;
+    private long lastManualScrollMs;
     private boolean touching;
     private boolean manuallySuspended;
     private final LongSupplier clock;
@@ -37,9 +38,16 @@ final class LyricsFollowState {
         holdUntilMs = untilMs;
     }
 
+    void markManualScroll() {
+        lastManualScrollMs = clock.getAsLong();
+    }
+
     void setTouching(boolean touching) {
         this.touching = touching;
-        if (touching) manuallySuspended = true;
+        if (touching) {
+            manuallySuspended = true;
+            markManualScroll();
+        }
     }
 
     void clearHold() {
@@ -51,7 +59,8 @@ final class LyricsFollowState {
         return manuallySuspended || clock.getAsLong() < holdUntilMs;
     }
 
-    boolean canAutoResumeNow() {
-        return !touching && manuallySuspended && clock.getAsLong() >= holdUntilMs;
+    boolean canAutoResumeNow(long cooldownMs) {
+        return !touching && manuallySuspended
+                && clock.getAsLong() - lastManualScrollMs >= cooldownMs;
     }
 }

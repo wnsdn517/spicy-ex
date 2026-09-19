@@ -170,6 +170,7 @@ public final class LyricsRepository {
             case SPICY: return "Spicy";
             case SPOTIFY: return "Spotify";
             case LRCLIB: return "LRCLIB";
+            case NETEASE: return "NetEase";
             default: return "Auto";
         }
     }
@@ -248,6 +249,20 @@ public final class LyricsRepository {
                     callback.onError("LRCLIB source unavailable: " + safe(error));
                 }
             }, "strict LRCLIB");
+            return;
+        }
+        if ("NetEase".equals(source)) {
+            fetchNetease(context, track, generation, new ResultCallback() {
+                @Override public void onSuccess(LyricsDocument document) {
+                    document.selectedSource = "NetEase";
+                    document.selectionMode = "strict";
+                    document.selectionOverride = "NetEase";
+                    callback.onSuccess(document);
+                }
+                @Override public void onError(String error) {
+                    callback.onError("NetEase source unavailable: " + safe(error));
+                }
+            });
             return;
         }
         callback.onError("Unknown lyrics source");
@@ -736,23 +751,6 @@ public final class LyricsRepository {
 
     private void fetchLrclib(Context context, SpotifyTrack track, int generation, ResultCallback callback,
                              String reason, LyricsProviderChain chain, boolean tokenPresent) {
-        String trackId = trackIdFromUri(track == null ? "" : track.uri);
-        String cachedRaw = trackId.isEmpty() ? null : LyricsResponseCache.getLrclib(context, trackId);
-        if (cachedRaw != null) {
-            try {
-                LyricsDocument doc = parser.parseLrclibLyrics(context, track, cachedRaw);
-                doc.generation = generation;
-                if (!doc.lines.isEmpty()) {
-                    XpLog.log(TAG + " LRCLIB cache hit id=" + trackId + " lines=" + doc.lines.size());
-                    chain.acceptLrclib(doc);
-                    LyricsFetchDiagnosticsState.record("lrclib_cache", chain.candidatesSeen(), doc, tokenPresent, false);
-                    callback.onSuccess(doc);
-                    return;
-                }
-            } catch (Throwable t) {
-                XpLog.log(TAG + " LRCLIB cache parse failed, refetching: " + t);
-            }
-        }
         String url = "https://lrclib.net/api/search?track_name="
                 + Uri.encode(safe(track.title))
                 + "&artist_name=" + Uri.encode(safe(track.artist))
@@ -775,14 +773,12 @@ public final class LyricsRepository {
                         reportLrclibError(chain, callback, reason + "; LRCLIB HTTP " + response.code());
                         return;
                     }
-                    String rawBody = response.body().string();
-                    LyricsDocument doc = parser.parseLrclibLyrics(context, track, rawBody);
+                    LyricsDocument doc = parser.parseLrclibLyrics(context, track, response.body().string());
                     doc.generation = generation;
                     if (doc.lines.isEmpty()) {
                         reportLrclibError(chain, callback, reason + "; LRCLIB empty");
                         return;
                     }
-                    if (!trackId.isEmpty()) LyricsResponseCache.putLrclib(context, trackId, rawBody);
                     chain.acceptLrclib(doc);
                     LyricsFetchDiagnosticsState.record("lrclib", chain.candidatesSeen(), doc, tokenPresent, false);
                     callback.onSuccess(doc);
@@ -792,6 +788,125 @@ public final class LyricsRepository {
                 }
             }
         });
+    }
+
+    /**
+     * NetEase Cloud Music, added as an extra opt-in source (Lyricify-style: more candidate
+     * catalogs means fewer tracks with no synced lyrics at all). Uses NetEase's legacy
+     * {@code /api/search/get} and {@code /api/song/lyric} routes, which still answer with plain
+     * JSON — unlike their newer {@code /weapi/...} routes, these don't require request encryption,
+     * so no auth/signing is needed. Best-effort only: on any failure this simply reports an error
+     * and the caller (manual "strict" pick, or Source-order ranking) moves on.
+     */
+    private void fetchNetease(Context context, SpotifyTrack track, int generation, ResultCallback callback) {
+        String query = (safe(track == null ? null : track.title) + " "
+                + safe(track == null ? null : track.artist)).trim();
+        String url = "https://music.163.com/api/search/get?s=" + Uri.encode(query)
+                + "&type=1&offset=0&limit=8";
+        Request request = new Request.Builder()
+                .url(url)
+                .get()
+                .header("User-Agent", "Mozilla/5.0")
+                .header("Referer", "https://music.163.com/")
+                .build();
+        http.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                callback.onError("NetEase search failed: " + safe(e.getMessage()));
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                try (Response ignored = response) {
+                    if (!response.isSuccessful() || response.body() == null) {
+                        callback.onError("NetEase search HTTP " + response.code());
+                        return;
+                    }
+                    String songId = bestNeteaseSongId(response.body().string(), track);
+                    if (songId == null) {
+                        callback.onError("NetEase empty");
+                        return;
+                    }
+                    fetchNeteaseLyricById(context, track, generation, songId, callback);
+                } catch (Throwable t) {
+                    callback.onError("NetEase search parse failed: " + safe(t.getMessage()));
+                }
+            }
+        });
+    }
+
+    private void fetchNeteaseLyricById(Context context, SpotifyTrack track, int generation,
+                                       String songId, ResultCallback callback) {
+        String url = "https://music.163.com/api/song/lyric?id=" + Uri.encode(songId) + "&lv=1&kv=1&tv=1";
+        Request request = new Request.Builder()
+                .url(url)
+                .get()
+                .header("User-Agent", "Mozilla/5.0")
+                .header("Referer", "https://music.163.com/")
+                .build();
+        http.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                callback.onError("NetEase lyric failed: " + safe(e.getMessage()));
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                try (Response ignored = response) {
+                    if (!response.isSuccessful() || response.body() == null) {
+                        callback.onError("NetEase lyric HTTP " + response.code());
+                        return;
+                    }
+                    LyricsDocument doc = parser.parseNeteaseLyrics(context, track, response.body().string());
+                    doc.generation = generation;
+                    if (doc.lines.isEmpty()) {
+                        callback.onError("NetEase empty");
+                        return;
+                    }
+                    callback.onSuccess(doc);
+                } catch (Throwable t) {
+                    callback.onError("NetEase parse failed: " + safe(t.getMessage()));
+                }
+            }
+        });
+    }
+
+    /** Picks the search result closest in duration to the Spotify track, preferring an artist-name match. */
+    private static String bestNeteaseSongId(String body, SpotifyTrack track) {
+        JsonElement root = JsonParser.parseString(body);
+        if (!root.isJsonObject()) return null;
+        JsonObject result = Json.optObject(root.getAsJsonObject(), "result");
+        JsonArray songs = result == null ? null : Json.optArray(result, "songs");
+        if (songs == null || songs.size() == 0) return null;
+        long targetDurationMs = track == null ? 0 : Math.max(0, track.duration);
+        String targetArtist = safe(track == null ? null : track.artist).toLowerCase(java.util.Locale.US);
+        JsonObject best = null;
+        long bestDiff = Long.MAX_VALUE;
+        for (JsonElement element : songs) {
+            if (!element.isJsonObject()) continue;
+            JsonObject song = element.getAsJsonObject();
+            long durationMs = (long) Json.optDouble(song, 0d, "duration");
+            long diff = Math.abs(durationMs - targetDurationMs);
+            if (!targetArtist.isEmpty() && !neteaseArtistMatches(song, targetArtist)) diff += 60_000L;
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                best = song;
+            }
+        }
+        if (best == null) return null;
+        long id = (long) Json.optDouble(best, 0d, "id");
+        return id > 0 ? String.valueOf(id) : null;
+    }
+
+    private static boolean neteaseArtistMatches(JsonObject song, String targetArtistLower) {
+        JsonArray artists = Json.optArray(song, "artists");
+        if (artists == null) return false;
+        for (JsonElement element : artists) {
+            if (!element.isJsonObject()) continue;
+            String name = Json.optString(element.getAsJsonObject(), "name").toLowerCase(java.util.Locale.US);
+            if (!name.isEmpty() && (name.contains(targetArtistLower) || targetArtistLower.contains(name))) return true;
+        }
+        return false;
     }
 
     private static void reportLrclibError(LyricsProviderChain chain, ResultCallback callback, String error) {
@@ -844,10 +959,6 @@ public final class LyricsRepository {
         if (source.contains("cache")) return "cache";
         if (source.contains("lrclib")) return "lrclib";
         if (source.contains("native")) return "native";
-        // LyricsParser tags Apple-Music/Spicy-API static-lyrics results as fetchSource
-        // "apple_music" - without this check they fell through to the "spicy" fallback below and
-        // were misreported as coming from Spicy instead of Apple Music.
-        if (source.contains("apple_music")) return "apple_music";
         if (source.contains("spicy")) return "spicy";
         return fallback;
     }
@@ -906,6 +1017,7 @@ public final class LyricsRepository {
     public interface Parser {
         LyricsDocument parseSpicyLyrics(Context context, SpotifyTrack track, String raw, boolean fromCache);
         LyricsDocument parseLrclibLyrics(Context context, SpotifyTrack track, String body);
+        LyricsDocument parseNeteaseLyrics(Context context, SpotifyTrack track, String body);
     }
 
     public interface NativeLyricsProvider {

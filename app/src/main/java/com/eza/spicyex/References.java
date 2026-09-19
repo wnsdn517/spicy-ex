@@ -9,19 +9,14 @@ import android.os.Bundle;
 import android.util.Log;
 import android.util.Pair;
 import com.eza.spicyex.xposed.XpLog;
+import com.eza.spicyex.xposed.SpotifySymbolResolver;
 import com.eza.spicyex.xposed.XpReflect;
 import org.luckypray.dexkit.DexKitBridge;
-import org.luckypray.dexkit.query.FindClass;
 import org.luckypray.dexkit.query.FindField;
-import org.luckypray.dexkit.query.FindMethod;
-import org.luckypray.dexkit.query.matchers.ClassMatcher;
 import org.luckypray.dexkit.query.matchers.FieldMatcher;
-import org.luckypray.dexkit.query.matchers.MethodMatcher;
-import org.luckypray.dexkit.result.ClassDataList;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -51,8 +46,8 @@ public class References {
     public static Resources modResources = null;
 
     private static final Pattern DIGITS = Pattern.compile("\\d+");
-    private static Method hasTrackMethod;
-    private static Method getContextTrack;
+    private static volatile Method hasTrackMethod;
+    private static volatile Method getContextTrack;
 
     public static Activity currentActivity() {
         return currentActivity.get();
@@ -67,7 +62,7 @@ public class References {
         if (current == activity) currentActivity.clear();
     }
 
-    public static SpotifyTrack getTrackTitle(ClassLoader classLoader, DexKitBridge bridge) {
+    public static SpotifyTrack getTrackTitle(ClassLoader classLoader, SpotifySymbolResolver symbols) {
         Object strongState = playerStateStrong;
         Object weakState = playerState == null ? null : playerState.get();
         if(strongState == null && weakState == null) {
@@ -80,20 +75,21 @@ public class References {
         try {
             Object wrapper = XpReflect.callMethod(state, "track");
 
-            var className = wrapper.getClass().getName();
-            if(hasTrackMethod == null) {
-                var clazz = bridge.findClass(FindClass.create().matcher(ClassMatcher.create().className(className)));
-                hasTrackMethod = bridge.findMethod(FindMethod.create().searchInClass(clazz).matcher(MethodMatcher.create().modifiers(Modifier.PUBLIC | Modifier.FINAL).returnType(boolean.class).paramCount(0))).get(0).getMethodInstance(classLoader);
+            Method hasTrackAccessor = hasTrackMethod;
+            if(hasTrackAccessor == null || hasTrackAccessor.getDeclaringClass() != wrapper.getClass()) {
+                hasTrackAccessor = symbols.trackMethod(wrapper.getClass(), boolean.class);
+                hasTrackMethod = hasTrackAccessor;
             }
 
-            boolean hasTrack = (Boolean) XpReflect.callMethod(wrapper, hasTrackMethod.getName());
+            boolean hasTrack = (Boolean) XpReflect.callMethod(wrapper, hasTrackAccessor.getName());
             if(hasTrack) {
-                if(getContextTrack == null) {
-                    var clazz = bridge.findClass(FindClass.create().matcher(ClassMatcher.create().className(className)));
-                    getContextTrack = bridge.findMethod(FindMethod.create().searchInClass(clazz).matcher(MethodMatcher.create().modifiers(Modifier.PUBLIC | Modifier.FINAL).paramCount(0).returnType(Object.class))).get(0).getMethodInstance(classLoader);
+                Method contextTrackAccessor = getContextTrack;
+                if(contextTrackAccessor == null || contextTrackAccessor.getDeclaringClass() != wrapper.getClass()) {
+                    contextTrackAccessor = symbols.trackMethod(wrapper.getClass(), Object.class);
+                    getContextTrack = contextTrackAccessor;
                 }
 
-                Object ct = XpReflect.callMethod(wrapper, getContextTrack.getName());
+                Object ct = XpReflect.callMethod(wrapper, contextTrackAccessor.getName());
                 Class<?> contextClass = XpReflect.findClass("com.spotify.player.model.ContextTrack", classLoader);
                 if(contextClass.isInstance(ct)) {
                     Object track = contextClass.cast(ct);
@@ -103,11 +99,18 @@ public class References {
                     @SuppressWarnings("unchecked")
                     Map<String, String> md = (Map<String, String>) XpReflect.callMethod(track, "metadata");
 
-                    String title = md.get("title");
-                    String artist = md.get("artist_name");
-                    String album = md.get("album_title");
+                    String title = firstNonBlankMeta(md,
+                            "title", "ad_title", "context_title", "name", "track_title");
+                    String artist = firstNonBlankMeta(md,
+                            "artist_name", "ad_advertiser_name", "artist_name:0", "artist", "subtitle");
+                    String album = firstNonBlankMeta(md,
+                            "album_title", "ad_advertiser_name", "album", "context_title");
+
                     String color = md.get("extracted_color");
-                    String imageId = md.get("image_large_url");
+
+                    String imageId = firstNonBlankMeta(md,
+                            "image_large_url", "image_url", "ad_image_url", "image_small_url",
+                            "coverart_image_url", "image_preview_url");
                     long duration = 0;
                     try {
                         String durationValue = md.get("duration_ms");
@@ -154,6 +157,18 @@ public class References {
             Log.e("SpotifyPlus", "Error getting track information", e);
             return null;
         }
+    }
+
+    private static String firstNonBlankMeta(Map<String, String> md, String... keys) {
+        if (md == null || keys == null) return null;
+        for (String key : keys) {
+            try {
+                String value = md.get(key);
+                if (value != null && !value.trim().isEmpty()) return value;
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
     }
 
     private static long previousMs;

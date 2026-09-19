@@ -19,7 +19,6 @@ public final class LyricsFrameRenderer {
     private final float scaledDensity;
     private int lastActiveIndex = Integer.MIN_VALUE;
     private boolean lastUserScrollHeld;
-    private LyricsScrollController scrollController;
 
     public LyricsFrameRenderer(Context context, FrameStyleBatcher styleBatcher) {
         this.styleBatcher = styleBatcher;
@@ -40,10 +39,6 @@ public final class LyricsFrameRenderer {
                 LyricsFrameRenderer.this.styleBatcher.applyTranslationYIfChanged(view, translationY);
             }
         };
-    }
-
-    public void setScrollController(LyricsScrollController scrollController) {
-        this.scrollController = scrollController;
     }
 
     /** Unsynced lyrics: every mounted row drawn fully bright, no blur/scale/wash. */
@@ -92,7 +87,10 @@ public final class LyricsFrameRenderer {
             applyStatic(document, mountedIndices, mountedRowsHost);
             return;
         }
-        AnimTracer.beginFrame();
+        // Sync the lift-motion constants here (not only on config change): springs are created
+        // lazily at mount, so a config-path-only sync misses first mount with Apple already on.
+        // No-op when unchanged; the only caller of the animated path is this fullscreen renderer.
+        LyricsSyllableViewState.setAppleMotion(config != null && config.appleLift);
         int boundedVisibleStart = Math.max(0, visibleStart - SCROLL_RENDER_MARGIN_ROWS);
         int boundedVisibleEnd = visibleEnd >= Integer.MAX_VALUE - SCROLL_RENDER_MARGIN_ROWS
                 ? Integer.MAX_VALUE
@@ -102,72 +100,39 @@ public final class LyricsFrameRenderer {
         for (int i : mountedIndices) {
             if (i < 0 || i >= document.appliedLines.size()) continue;
             AppliedLine line = document.appliedLines.get(i);
-            boolean blurUnsettled = config.lineBlurEnabled && !LyricsLineViewState.isSettled(line);
-            if (userScrollHeld && !scrollHoldChanged && !blurUnsettled && i != activeIndex
-                    && (i < boundedVisibleStart || i > boundedVisibleEnd)) continue;
             if (!LyricsLineViewState.isMounted(line, mountedRowsHost)) continue;
-
+            boolean isOutsideVisibleHoldWindow = userScrollHeld && i != activeIndex
+                    && (i < boundedVisibleStart || i > boundedVisibleEnd);
             LyricsLineAnimationState lineState = LyricsLineAnimationState.forLine(
-                    line, positionMs, config.spotlight, config.lineGradientEnabled, config.appleDimPassed);
+                    line, positionMs, config.spotlight, config.lineGradientEnabled,
+                    config.appleDimPassed);
             int targetClass = lineState.active ? 1 : lineState.sung ? 2 : 0;
-            boolean blurNeedsRefresh = config.lineBlurEnabled && (activeChanged || scrollHoldChanged);
-            boolean meltHeld = userScrollHeld && config.appleTouchRelease;
-            float edgeFade = 0f;
-            float bottomFade = 0f;
-            View edgeRow = LyricsLineViewState.rowView(line);
-            if (scrollController != null && edgeRow != null) {
-                if (config.appleTopMelt) edgeFade = scrollController.rowEdgeProximity01(edgeRow, 0.5f);
-                if (config.appleBottomMelt && !meltHeld) {
-                    bottomFade = scrollController.rowBottomEdgeProximity01(edgeRow, 0.5f);
-                }
-            }
-            if (!lineState.active && !blurNeedsRefresh && edgeFade <= 0.01f && bottomFade <= 0.01f
+            // Refresh blur on hold transitions so rows go sharp while held and restore on
+            // release; steady hold needs no refresh (values already settled). While held,
+            // active-line advances must not restore blur either: resume happens only on
+            // snap-back (hold release), which arrives as scrollHoldChanged.
+            boolean blurNeedsRefresh = blurNeedsRefresh(
+                    config.lineBlurEnabled, activeChanged, scrollHoldChanged, userScrollHeld);
+            if (!lineState.active && !blurNeedsRefresh
                     && !LyricsLineViewState.needsFrame(line, targetClass)) {
+                // Still drive the blur spring toward its target even when the row
+                // is otherwise idle (opacity/opacity settled, no animation needed).
+                // Without this, an overdamped blur spring could remain non-zero
+                // indefinitely because stepLineBlur is never called.
+                float blurTarget = mobileLineBlurPx(line, i, activeIndex, lineState.active, userScrollHeld, config);
+                LyricsLineViewState.stepLineBlur(line, blurTarget, deltaSeconds);
                 continue;
             }
             float opacity = LyricsAnimationApplier.stepLineOpacity(line, lineState.active, lineState.sung,
                     deltaSeconds, config.appleDimPassed);
-            // Mirrors the bottom-melt multiply below: without this, a line's brightness depended
-            // on whether it happened to fall inside TOP_BLUR_CANDIDATE_WINDOW (the only other
-            // place edgeFade was consulted, further down) - rows just past that window's edge had
-            // no fade applied at all while their neighbor one row closer did, reading as an
-            // inconsistent brightness jump between adjacent unsung lines near the top edge.
-            if (edgeFade > 0f) opacity *= 1f - 0.7f * edgeFade * edgeFade;
-            if (bottomFade > 0f) opacity *= 1f - 0.7f * bottomFade * bottomFade;
             float blurTarget = mobileLineBlurPx(line, i, activeIndex, lineState.active, userScrollHeld, config);
-            // applyTopMeltMaskWindow (below, after the batched flush) is the sole owner of blur for
-            // rows in this window: it applies a masked blur+fade RenderEffect directly. This used to
-            // also compute its own "top melt" bump into blurTarget and hand it to the batcher, which
-            // set a second, unmasked RenderEffect on the same row - whichever write landed last for
-            // a given frame won, so the row's look could pop between the correct masked fade and a
-            // plain hard-edged blur as caches on the two independent paths fell in and out of step.
-            boolean topMeltOwnsBlur = config.appleTopMelt && scrollController != null && edgeRow != null
-                    && i < activeIndex && activeIndex - i <= TOP_BLUR_CANDIDATE_WINDOW;
-            if (scrollController != null && edgeRow != null) {
-                if (config.appleBottomMelt && !meltHeld) {
-                    float bottomMelt = Math.max(scrollController.rowBottomEdgeProximity01(edgeRow, 0f),
-                            scrollController.rowBottomEdgeProximity01(edgeRow, 1f));
-                    if (bottomMelt > 0f) {
-                        blurTarget = Math.max(blurTarget,
-                                BOTTOM_MELT_BLUR_MAX_PX * (float) Math.pow(bottomMelt, 0.8));
-                    }
-                }
+            float blur = LyricsLineViewState.stepLineBlur(line, blurTarget, deltaSeconds);
+            // Always drain blur for rows outside the visible hold window, but skip
+            // expensive rendering since they're not visible during the scroll hold.
+            if (isOutsideVisibleHoldWindow) {
+                continue;
             }
-            float blur = blurTarget;
-            if (config.appleStyle && !topMeltOwnsBlur) {
-                // Skipped (not just discarded) for topMelt-owned rows: applyTopMeltMaskWindow
-                // below steps this same row's blurSpring with its own, melt-aware target. Calling
-                // stepBlur here too would advance the identical spring object a second time this
-                // frame toward a different (non-melt) target, corrupting the state the melt pass
-                // is about to read - not just wasted work, actively wrong physics.
-                if (lineState.active) {
-                    LyricsLineViewState.snapBlur(line);
-                    blur = 0f;
-                } else {
-                    blur = LyricsLineViewState.stepBlur(line, blurTarget, deltaSeconds);
-                }
-            }
-            LyricsLineViewState.applyRowFrame(line, styleBatcher, opacity, topMeltOwnsBlur ? -1f : blur);
+            LyricsLineViewState.applyRowFrame(line, styleBatcher, opacity, blur);
             if (config.appleStyle) {
                 float lineShadowTarget = lineState.active && !line.bgLine ? 1f : 0f;
                 float lineShadow = LyricsLineViewState.stepLineShadow(line, lineShadowTarget, deltaSeconds);
@@ -191,8 +156,8 @@ public final class LyricsFrameRenderer {
                 if (lineState.active) {
                     LyricsAnimationApplier.animateInterludeDots(line, positionMs, deltaSeconds, spToPx(44), styleSink);
                 } else {
-                    LyricsAnimationApplier.resetInterludeDots(line, styleSink, lineState.sung, deltaSeconds,
-                            config.appleStyle);
+                    LyricsAnimationApplier.resetInterludeDots(line, styleSink, lineState.sung,
+                            config != null && config.appleStyle);
                 }
             } else {
                 applySecondaryGradient(line, positionMs, lineGlow, config);
@@ -212,13 +177,13 @@ public final class LyricsFrameRenderer {
                                     line,
                                     positionMs,
                                     deltaSeconds,
-                                    spToPx(LyricsLineViewState.effectiveBaseTextSp(line, config.appleCompactText)),
+                                    spToPx(LyricsLineViewState.effectiveBaseTextSp(line)),
                                     styleSink,
                                     config.spotlight,
                                     config.glowBlurEnabled,
                                     wordBounceEnabled(config, line),
                                     !config.appleStyle,
-                                    liftBounce(config),
+                                    liftMotion(config),
                                     individualWordBounce(config),
                                     config.appleLift,
                                     config.appleDimPassed);
@@ -239,13 +204,13 @@ public final class LyricsFrameRenderer {
                             line,
                             positionMs,
                             deltaSeconds,
-                            spToPx(LyricsLineViewState.effectiveBaseTextSp(line, config.appleCompactText)),
+                            spToPx(LyricsLineViewState.effectiveBaseTextSp(line)),
                             styleSink,
                             config.spotlight,
                             config.glowBlurEnabled,
                             wordBounceEnabled(config, line),
                             !config.appleStyle,
-                            liftBounce(config),
+                            liftMotion(config),
                             individualWordBounce(config),
                             config.appleLift,
                             config.appleDimPassed);
@@ -266,36 +231,6 @@ public final class LyricsFrameRenderer {
         lastActiveIndex = activeIndex;
         lastUserScrollHeld = userScrollHeld;
         styleBatcher.flush();
-        applyTopMeltMaskWindow(document, mountedIndices, mountedRowsHost, config, activeIndex, deltaSeconds);
-    }
-
-    private void applyTopMeltMaskWindow(LyricsDocument document, Set<Integer> mountedIndices,
-                                        ViewGroup mountedRowsHost, LyricsRenderConfig config,
-                                        int activeIndex, float deltaSeconds) {
-        if (!config.appleTopMelt || scrollController == null || activeIndex < 0) return;
-        int from = Math.max(0, activeIndex - TOP_BLUR_CANDIDATE_WINDOW - 4);
-        int to = Math.min(document.appliedLines.size(), activeIndex);
-        for (int i = from; i < to; i++) {
-            if (!mountedIndices.contains(i)) continue;
-            if (activeIndex - i > TOP_BLUR_CANDIDATE_WINDOW) continue;
-            AppliedLine line = document.appliedLines.get(i);
-            if (!LyricsLineViewState.isMounted(line, mountedRowsHost)) continue;
-            View row = LyricsLineViewState.rowView(line);
-            if (row == null) continue;
-            float t0 = scrollController.rowEdgeProximity01(row, 0f);
-            float t1 = scrollController.rowEdgeProximity01(row, 1f);
-            if (Math.max(t0, t1) <= 0.01f) continue;
-            // Target computed straight from current scroll geometry - itself continuous, but with
-            // nothing else easing it, a jank frame (or the row simply entering this window at a
-            // nonzero t0/t1) meant the blur radius snapped straight to that geometric value in one
-            // step instead of ramping in, reported live as the blur "instantly slapping on" rather
-            // than gradually catching. Routing it through the same blurSpring the row's other blur
-            // consumer used to use restores real per-frame easing here.
-            float sigmaTarget = Math.max(mobileLineBlurPx(line, i, activeIndex, false, false, config),
-                    TOP_MELT_BLUR_MAX_PX * (float) Math.pow(Math.max(t0, t1), 2.2));
-            float sigma = LyricsLineViewState.stepBlur(line, sigmaTarget, deltaSeconds);
-            LyricsLineViewState.applyTopMeltMask(line, t0, t1, sigma * config.blurQuality);
-        }
     }
 
     private boolean hasRealTimedWords(AppliedLine line) {
@@ -303,23 +238,42 @@ public final class LyricsFrameRenderer {
     }
 
     private boolean wordBounceEnabled(LyricsRenderConfig config, AppliedLine line) {
+        // Apple lift carries its own motion: it must not depend on the shared Word bounce gate.
+        if (config != null && config.appleStyle && config.appleLift) return true;
         return config != null && config.wordBounceEnabled
                 && (config.wordBounceScope.equals("All synced rows") || hasRealTimedWords(line));
     }
 
+    /** Lift curve source: shared Lift bounce style, or Apple lift owning motion in Apple style. */
+    private boolean liftMotion(LyricsRenderConfig config) {
+        return liftBounce(config) || (config != null && config.appleLift);
+    }
+
     private boolean liftBounce(LyricsRenderConfig config) {
-        return config != null && config.wordBounceStyle.endsWith(" lift");
+        return config != null && !"Apple lift".equals(config.wordBounceStyle)
+                && config.wordBounceStyle.endsWith(" lift");
     }
 
     private boolean individualWordBounce(LyricsRenderConfig config) {
         return config != null && (config.wordBounceStyle.startsWith("Word ")
-                || config.wordBounceStyle.startsWith("Apple "));
+                || config.appleLift);
     }
 
     private boolean lineLevelBounceEnabled(LyricsRenderConfig config, AppliedLine line) {
-        if (config == null || !config.wordBounceEnabled
-                || !"All synced rows".equals(config.wordBounceScope)) return false;
-        return config.appleStyle ? line != null && !line.bgLine : true;
+        return config != null && config.wordBounceEnabled
+                && "All synced rows".equals(config.wordBounceScope);
+    }
+
+    /**
+     * Blur refresh gate (pure, unit-tested): active-line advances refresh blur only when
+     * the user is not holding the scroll; a hold release (snap-back) always refreshes so
+     * blur restores exactly when follow resumes.
+     */
+    static boolean blurNeedsRefresh(boolean lineBlurEnabled, boolean activeChanged,
+            boolean scrollHoldChanged, boolean userScrollHeld) {
+        if (!lineBlurEnabled) return false;
+        if (scrollHoldChanged) return true;
+        return activeChanged && !userScrollHeld;
     }
 
     static WordGradientRoute wordGradientRoute(String fillMode) {
@@ -436,12 +390,12 @@ public final class LyricsFrameRenderer {
         float quality = config.blurQuality;
         if (quality <= 0f) return 0f;
         if (active < 0) return 0f;
-        if (lineActive) return 0f;
+        // Apple only: an extended-window active row (index past the active one) never blurs.
+        if (config.appleStyle && lineActive) return 0f;
         int distance = Math.abs(index - active);
         if (distance == 0) return 0f;
         String lineText = safe(line.text);
-        if (config.appleStrongBlur) {
-            if (index < active && active - index <= TOP_BLUR_CANDIDATE_WINDOW) return 0f;
+        if (config.lineBlurHeavy) {
             boolean emphasized = lineText.codePointCount(0, lineText.length()) <= 12 || line.dotLine;
             float max = emphasized ? 5.0f : 8.0f;
             float curved = (float) Math.pow(Math.min(1f, distance / 4f), 0.75);
@@ -454,10 +408,6 @@ public final class LyricsFrameRenderer {
         if (distance == 2) weighted *= 0.55f;
         return weighted * quality;
     }
-
-    private static final int TOP_BLUR_CANDIDATE_WINDOW = 10;
-    private static final float TOP_MELT_BLUR_MAX_PX = 10f;
-    private static final float BOTTOM_MELT_BLUR_MAX_PX = 10f;
 
     private float progress01(long positionMs, long startMs, long endMs) {
         if (endMs <= startMs) return positionMs >= endMs ? 1f : 0f;
