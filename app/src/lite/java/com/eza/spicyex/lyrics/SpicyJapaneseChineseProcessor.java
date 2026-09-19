@@ -146,6 +146,7 @@ public final class SpicyJapaneseChineseProcessor {
         return new ArrayList<>();
     }
 
-    public static void warmUp() {
+    /** Lite ships no dictionaries; nothing to release. */
+    public static void trimMemory() {
     }
 }
