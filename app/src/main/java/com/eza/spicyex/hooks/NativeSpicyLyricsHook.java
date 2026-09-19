@@ -36,6 +36,9 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
     private final NowPlayingInjector nowPlayingInjector = new NowPlayingInjector(this);
     private final LyricsActivityTakeoverHook activityTakeoverHook =
             new LyricsActivityTakeoverHook(this, nowPlayingInjector);
+    private volatile float audioReactiveLevel;
+    private final AudioReactiveController audioReactiveController =
+            new AudioReactiveController(level -> audioReactiveLevel = level);
     private final PlaybackBridge playbackBridge = new PlaybackBridge();
     private final LyricsFetchCoordinator lyricsFetchCoordinator =
             new LyricsFetchCoordinator(
@@ -45,9 +48,6 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
             );
     private final LyricsSessionManager lyricsSessionManager;
     private SpicyLyricBridgeCoordinator bridgeCoordinator;
-    private volatile float audioReactiveLevel;
-    private final AudioReactiveController audioReactiveController =
-            new AudioReactiveController(level -> audioReactiveLevel = level);
 
     public NativeSpicyLyricsHook(Context context) {
         Context app = context.getApplicationContext();
@@ -71,11 +71,11 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
         dbg("hook", "native Spicy renderer hook enabled version=" + BuildStamp.FULL);
         new NativeLyricsCaptureHook(
                 lpparm.classLoader(),
-                bridge,
+                symbols,
                 lyricsFetchCoordinator.nativeLyricsSource(),
                 this::getCurrentTrackSafely
         ).hook();
-        playbackBridge.install(lpparm, bridge);
+        playbackBridge.install(lpparm, symbols);
         activityTakeoverHook.hook();
         String processName = Application.getProcessName();
         XpLog.log(TAG + " bridge init package=" + lpparm.packageName()
@@ -87,16 +87,15 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
             // Transition B515 paid records before any AI lane can dispatch. This only opens local
             // storage; it performs no provider request and leaves the source XML untouched.
             AIPaidArtifactCache.prepare(applicationContext);
-            // kuromoji's dictionary load (first Tokenizer construction) takes multiple seconds;
-            // done here in the background it's ready well before the first Japanese lyrics line
-            // needs it, instead of stalling the fullscreen screen's own render pass on first use.
-            new Thread(com.eza.spicyex.lyrics.SpicyJapaneseChineseProcessor::warmUp,
-                    "spicy-kuromoji-warmup").start();
             lyricsSessionManager.start();
             bridgeCoordinator = new SpicyLyricBridgeCoordinator(
                     lyricsSessionManager, applicationContext);
             bridgeCoordinator.start();
+            // Ad ducking runs process-wide, not per screen: it applies to local playback
+            // everywhere, not only while the fullscreen lyrics happen to be open.
             new AdMuteController(this, applicationContext).start();
+            // Installs only the AudioTrack#play hook, which is cheap. The Visualizer it can
+            // trigger stays off until the lyrics screen asks for it - see setListeningEnabled.
             audioReactiveController.start();
             Diagnostics.event("bootstrap", "hook_ready",
                     Diagnostics.context("result", "main_process"));
@@ -140,7 +139,7 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
         dbgEnter("getCurrentTrackSafely");
         try {
             if (References.playerState == null || References.playerState.get() == null) return null;
-            return References.getTrackTitle(lpparm.classLoader(), bridge);
+            return References.getTrackTitle(lpparm.classLoader(), symbols);
         } catch (Throwable t) {
             XpLog.log(TAG + " track read failed: " + t);
             return null;
@@ -151,51 +150,32 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
         return playbackBridge.seekSpotifyTo(positionMs);
     }
 
-    public boolean toggleSavedTrack() {
-        return playbackBridge.toggleSpotifySaved();
+    @Override
+    public boolean togglePlayPause() {
+        return playbackBridge.togglePlayPause();
     }
 
+    @Override
     public boolean skipToNextTrack() {
         return playbackBridge.skipToNextTrack();
     }
 
-    public boolean togglePlayback() {
-        return playbackBridge.togglePlayback();
+    @Override
+    public boolean skipToPreviousTrack() {
+        return playbackBridge.skipToPreviousTrack();
     }
 
-    public boolean isSeekOverrideActive() {
-        return playbackBridge.isSeekOverrideActive();
-    }
-
-    public boolean canSeek() {
-        return playbackBridge.canSeek();
-    }
-
-    public boolean canSkipToNext() {
-        return playbackBridge.canSkipToNext();
+    @Override
+    public boolean toggleSpotifySaved(String mode, com.eza.spicyex.SpotifyTrack expected) {
+        return playbackBridge.toggleSpotifySaved(mode, expected, this::getCurrentTrackSafely);
     }
 
     public long readBestMeasuredProgressMs(SpotifyTrack track, boolean playing) {
         return playbackBridge.readBestMeasuredProgressMs(track, playing);
     }
 
-    public long getCurrentPositionMs(SpotifyTrack track, boolean playing) {
-        return playbackBridge.getCurrentPositionMs(track, playing);
-    }
-
     public boolean isPlayerActuallyPlaying() {
         return playbackBridge.isPlayerActuallyPlaying();
-    }
-
-    /** Smoothed 0..1 real audio level from AudioReactiveController; 0 whenever no session is
-     *  attached yet (nothing playing, or the Visualizer attach failed). */
-    public float currentAudioLevel() {
-        return audioReactiveLevel;
-    }
-
-    @Override
-    public void setAudioReactiveListening(boolean enabled) {
-        audioReactiveController.setListeningEnabled(enabled);
     }
 
     @Override
@@ -224,6 +204,18 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
     @Override
     public void restoreLyricsLayer(com.eza.spicyex.lyrics.session.LayerKind layer) {
         lyricsSessionManager.restoreLayer(layer);
+    }
+
+    /** Smoothed 0..1 real audio level from AudioReactiveController; 0 whenever no session is
+     *  attached (feature off, nothing playing, or the device refused the Visualizer). */
+    @Override
+    public float currentAudioLevel() {
+        return audioReactiveLevel;
+    }
+
+    @Override
+    public void setAudioReactiveListening(boolean enabled) {
+        audioReactiveController.setListeningEnabled(enabled);
     }
 
     @Override
