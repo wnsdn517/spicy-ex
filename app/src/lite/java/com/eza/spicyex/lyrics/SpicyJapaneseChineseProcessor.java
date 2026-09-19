@@ -146,6 +146,11 @@ public final class SpicyJapaneseChineseProcessor {
         return new ArrayList<>();
     }
 
-    public static void warmUp() {
+    /** Lite ships no dictionaries; nothing to release. */
+    /** No-op: lite bundles no dictionary to map. */
+    public static void attachContext(android.content.Context context) {
+    }
+
+    public static void trimMemory() {
     }
 }
