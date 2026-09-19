@@ -25,15 +25,8 @@ public final class LyricsLineViewState {
     }
 
     public static int effectiveBaseTextSp(AppliedLine line) {
-        return effectiveBaseTextSp(line, false);
-    }
-
-    public static int effectiveBaseTextSp(AppliedLine line, boolean appleCompactText) {
         if (line == null) return 0;
-        if (state(line).baseTextSp > 0) return state(line).baseTextSp;
-        return appleCompactText
-                ? LyricVisuals.appleLyricTextSizeSp(line.text)
-                : LyricVisuals.lyricTextSizeSp(line.text);
+        return state(line).baseTextSp > 0 ? state(line).baseTextSp : LyricVisuals.lyricTextSizeSp(line.text);
     }
 
     public static void clearMainView(AppliedLine line) {
@@ -76,16 +69,8 @@ public final class LyricsLineViewState {
         if (line != null) state(line).romanView = view;
     }
 
-    public static SpicyAnimatedTextView romanView(AppliedLine line) {
-        return line == null ? null : state(line).romanView;
-    }
-
     public static void setTranslationView(AppliedLine line, SpicyAnimatedTextView view) {
         if (line != null) state(line).translationView = view;
-    }
-
-    public static SpicyAnimatedTextView translationView(AppliedLine line) {
-        return line == null ? null : state(line).translationView;
     }
 
     public static void beginDotViews(AppliedLine line) {
@@ -150,12 +135,7 @@ public final class LyricsLineViewState {
     public static void applyRowFrame(AppliedLine line, FrameStyleBatcher styleBatcher, float opacity, float blurPx) {
         if (line == null || styleBatcher == null || state(line).rowView == null) return;
         styleBatcher.applyAlphaIfChanged(state(line).rowView, opacity);
-        // A negative blurPx means the caller has handed this row's RenderEffect off to a different
-        // owner for this frame (see LyricsFrameRenderer's top-melt window) - skip touching it here.
-        // Both paths ultimately call View.setRenderEffect on the same row; letting both write in
-        // the same frame is a last-write-wins race between a plain blur and a masked+faded one,
-        // which read as the row's blur popping in and out during scroll.
-        if (blurPx >= 0f) styleBatcher.queueBlurIfChanged(state(line).rowView, blurPx, 0.25f);
+        styleBatcher.queueBlurIfChanged(state(line).rowView, blurPx, 0.25f);
     }
 
     public static void applyLineShadow(AppliedLine line, float intensity) {
@@ -195,6 +175,7 @@ public final class LyricsLineViewState {
         applyLineLevelGradient(line, gradient, glow, brightness, Float.NaN);
     }
 
+    /** Apple lift widens the karaoke band (NaN = shared default, a no-op for other styles). */
     public static void applyLineLevelGradient(AppliedLine line, float gradient, float glow, float brightness,
                                               float bandWidth) {
         if (line == null) return;
@@ -272,61 +253,6 @@ public final class LyricsLineViewState {
         return clamp(state(line).lineGlowSpring.step(frameDelta(deltaSeconds)), 0f, 1f);
     }
 
-    public static float stepBlur(AppliedLine line, float targetBlurPx, float deltaSeconds) {
-        if (line == null) return targetBlurPx;
-        if (state(line).blurSpring == null) {
-            // 1.4Hz critically-damped settles in ~0.6-0.7s - reported live as blur reading
-            // "weak" on some lines (the target can change again, e.g. during a fast scroll,
-            // before the spring ever gets close to it) and as slow to clear after releasing a
-            // manual scroll hold. 3.6Hz settles in roughly 0.2-0.25s instead, still critically
-            // damped (no overshoot - blur overshooting its target would look like a glitch, not
-            // a bounce), just proportionally faster to actually reach it.
-            state(line).blurSpring = new Spring(targetBlurPx, 3.6f, 1.0f);
-        }
-        state(line).blurSpring.setGoal(targetBlurPx);
-        return Math.max(0f, state(line).blurSpring.step(frameDelta(deltaSeconds)));
-    }
-
-    public static void snapBlur(AppliedLine line) {
-        if (line == null) return;
-        if (state(line).blurSpring != null) state(line).blurSpring.snap(0f);
-    }
-
-    public static void applyTopMeltMask(AppliedLine line, float t0, float t1, float blurPx) {
-        if (line == null || android.os.Build.VERSION.SDK_INT < 31) return;
-        AppliedLineRenderState st = state(line);
-        View row = st.rowView;
-        if (row == null) return;
-        int height = row.getHeight();
-        float ct0 = clamp(t0, 0f, 1f);
-        float ct1 = clamp(t1, 0f, 1f);
-        if (height <= 0 || Math.max(ct0, ct1) <= 0.01f) return;
-        if (height == st.lastTopMeltHeight
-                && Math.abs(ct0 - st.lastTopMeltT0) <= 0.004f
-                && Math.abs(ct1 - st.lastTopMeltT1) <= 0.004f
-                && Math.abs(blurPx - st.lastTopMeltBlurPx) <= 0.15f) {
-            return;
-        }
-        st.lastTopMeltHeight = height;
-        st.lastTopMeltT0 = ct0;
-        st.lastTopMeltT1 = ct1;
-        st.lastTopMeltBlurPx = blurPx;
-        if (row.getLayerType() != View.LAYER_TYPE_HARDWARE) row.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        android.graphics.RenderEffect content = blurPx < 0.4f
-                ? android.graphics.RenderEffect.createOffsetEffect(0f, 0f)
-                : android.graphics.RenderEffect.createBlurEffect(
-                        blurPx, blurPx, android.graphics.Shader.TileMode.CLAMP);
-        android.graphics.Shader maskShader = new android.graphics.LinearGradient(
-                0f, 0f, 0f, height,
-                android.graphics.Color.argb(Math.round(255f * (1f - ct0)), 0, 0, 0),
-                android.graphics.Color.argb(Math.round(255f * (1f - ct1)), 0, 0, 0),
-                android.graphics.Shader.TileMode.CLAMP);
-        row.setRenderEffect(android.graphics.RenderEffect.createBlendModeEffect(
-                content, android.graphics.RenderEffect.createShaderEffect(maskShader),
-                android.graphics.BlendMode.DST_IN));
-        AnimTracer.noteRenderEffectWrite(row, "topMelt", "t0=" + ct0 + " t1=" + ct1 + " blur=" + blurPx);
-    }
-
     public static float stepLineShadow(AppliedLine line, float targetIntensity, float deltaSeconds) {
         if (line == null) return targetIntensity;
         if (state(line).lineShadowSpring == null) {
@@ -376,7 +302,7 @@ public final class LyricsLineViewState {
         AppliedLineRenderState state = state(line);
         if (!springAtRest(state.opacitySpring) || !springAtRest(state.lineScaleSpring)
                 || !springAtRest(state.lineGlowSpring) || !springAtRest(state.dotMainScaleSpring)
-                || !springAtRest(state.dotMainOpacitySpring) || !springAtRest(state.blurSpring)
+                || !springAtRest(state.dotMainOpacitySpring)
                 || !springAtRest(state.lineShadowSpring)) return false;
         if (line.words != null) {
             for (SyllableSegment segment : line.words) {
@@ -409,32 +335,14 @@ public final class LyricsLineViewState {
             boolean showRomanization,
             boolean translatedChanged,
             String translated,
-            boolean showTranslation,
-            LyricsSecondaryRowUpdater.TranslationAppender translationAppender,
-            LyricsSecondaryRowUpdater.RomanAppender romanAppender
+            boolean showTranslation
     ) {
         if (line == null || state(line).rowView == null) return false;
-        boolean needsNewRoman = romanChanged && showRomanization && !isBlank(roman) && state(line).romanView == null;
-        boolean needsNewTranslation = translatedChanged && showTranslation && !isBlank(translated)
-                && state(line).translationView == null;
-        if (needsNewRoman) {
-            // Same reasoning as the translation branch below: grow the row in place via its own
-            // LayoutTransition when possible (lines with no per-word timing, the common case),
-            // instead of tearing it down and popping it back in at full size. Lines whose
-            // romanization must restructure the row's word views (per-word/timed/furigana) aren't
-            // eligible - see appendRomanView - and fall back to the previous full-rebuild behavior.
-            if (romanAppender == null || !romanAppender.append(line)) {
-                clear(line, mountedRowsHost, invalidation);
-            }
-            return true;
-        }
-        if (needsNewTranslation) {
-            // A translation arriving for a line already on screen (the common async-AI-layer
-            // case) grows the row in place - via its own LayoutTransition - instead of tearing
-            // the whole row down and popping it back in at full size.
-            if (translationAppender == null || !translationAppender.append(line)) {
-                clear(line, mountedRowsHost, invalidation);
-            }
+        boolean needsNewViews =
+                (romanChanged && showRomanization && !isBlank(roman) && state(line).romanView == null)
+                        || (translatedChanged && showTranslation && !isBlank(translated) && state(line).translationView == null);
+        if (needsNewViews) {
+            clear(line, mountedRowsHost, invalidation);
             return true;
         }
         if (romanChanged && state(line).romanView != null) state(line).romanView.setText(roman);

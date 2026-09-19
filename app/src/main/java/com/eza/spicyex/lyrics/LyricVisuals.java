@@ -97,6 +97,7 @@ public final class LyricVisuals {
         return 28;
     }
 
+    /** Apple compact curve: same steps as the shared curve, shifted down ~4-5sp. */
     public static int appleLyricTextSizeSp(String text) {
         String safeText = safe(text);
         int length = safeText.codePointCount(0, safeText.length());
@@ -111,9 +112,13 @@ public final class LyricVisuals {
     }
 
     public static boolean shouldUseLetterAnimator(SyllableSegment seg) {
-        return shouldUseLetterAnimator(seg, true);
+        return shouldUseLetterAnimator(seg, false);
     }
 
+    /**
+     * Apple variant: the lift wave drives per-letter motion, so the timing gate drops to 80ms
+     * and the length cap widens to 28 code points. Shared path unchanged.
+     */
     public static boolean shouldUseLetterAnimator(SyllableSegment seg, boolean appleStyle) {
         if (seg == null || isBlank(seg.text)) return false;
         String text = safe(seg.text);
