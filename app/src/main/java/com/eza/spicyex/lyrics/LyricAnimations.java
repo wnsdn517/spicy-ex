@@ -30,18 +30,30 @@ public final class LyricAnimations {
         return lerp(1.025f, 1f, smoothStep((t - 0.7f) / 0.3f));
     }
 
+    /** Word-granularity version of {@link #letterScaleSpline}'s amplitude (0.95 -> 1.18 -> 1.0),
+     *  for words that qualify for the strong pop but can't run the per-letter animator - e.g. a
+     *  furigana-annotated Japanese word, whose ruby span needs a single contiguous text layout
+     *  rather than one view per code point. Keeps grow intensity comparable to English's
+     *  per-letter pop instead of falling back to the much weaker {@link #scaleSpline}. */
+    public static float wordScaleSplineStrong(float t) {
+        if (t <= 0.7f) return lerp(0.95f, 1.18f, smoothStep(t / 0.7f));
+        return lerp(1.18f, 1f, smoothStep((t - 0.7f) / 0.3f));
+    }
+
     /** Zoom style Y range retained from the original Spicy curve. */
     public static float yOffsetSpline(float t) {
         if (t <= 0.9f) return lerp(0.01f, -(1f / 60f), t / 0.9f);
         return lerp(-(1f / 60f), 0f, (t - 0.9f) / 0.1f);
     }
 
+    /** Lift style: smooth vertical-only arc, 0 -> -0.04em -> 0. */
     public static float liftYOffsetSpline(float t) {
         float progress = clamp01(t);
         float wave = (float) Math.sin(Math.PI * progress);
         return -0.04f * wave * wave;
     }
 
+    /** Apple lift: quarter-sine rise to -0.04em, holding at the top while sung. */
     public static float appleLiftYOffsetSpline(float t) {
         return -0.04f * (float) Math.sin(clamp01(t) * (Math.PI / 2d));
     }
@@ -82,6 +94,7 @@ public final class LyricAnimations {
         return (float) (1d / (1d + Math.max(0f, distance) * 0.9d));
     }
 
+    /** Apple letter-glow falloffs: wider wash, tighter active anchor. */
     public static float appleLetterGlowFalloff(float distance) {
         return (float) (1d / (1d + Math.max(0f, distance) * 0.5d));
     }

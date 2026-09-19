@@ -15,33 +15,35 @@ import com.eza.spicyex.lyrics.CacheClearKind;
  * activity instead of the rerouted Spotify fullscreen activity).
  */
 interface LyricsHost {
+    /** Gates the AudioReactiveController Visualizer to when it can actually be seen (see its own
+     *  javadoc for why that matters). */
+    void setAudioReactiveListening(boolean enabled);
+
+    /** Smoothed 0..1 real audio level; 0 whenever no session is attached. */
+    float currentAudioLevel();
+
     SpotifyTrack getCurrentTrackSafely();
 
     boolean isPlayerActuallyPlaying();
-
-    float currentAudioLevel();
-
-    /** Gates the AudioReactiveController Visualizer to when it can actually be seen (see its own
-     *  javadoc) - true while this shell is mounted, false once it tears down. */
-    void setAudioReactiveListening(boolean enabled);
-
-    boolean togglePlayback();
 
     long readBestMeasuredProgressMs(SpotifyTrack track, boolean playing);
 
     boolean seekSpotifyTo(long positionMs);
 
-    boolean toggleSavedTrack();
+    /** Whether a seek would currently be honored (ACTION_SEEK_TO advertised right now) - lets
+     *  callers hide/disable seek affordances proactively instead of finding out after a silent
+     *  rejection. See PlaybackBridge#canSeek. */
+    boolean canSeek();
+
+    /** Play/pause toggle and track skips via the captured MediaSession transport.
+     * False when no session is captured (callers degrade to no-op visuals). */
+    boolean togglePlayPause();
 
     boolean skipToNextTrack();
 
-    /** True while readBestMeasuredProgressMs() is still returning a recent seek's forced value
-     *  instead of genuine backend-reported state - see PlaybackBridge.isSeekOverrideActive(). */
-    boolean isSeekOverrideActive();
+    boolean skipToPreviousTrack();
 
-    boolean canSeek();
-
-    boolean canSkipToNext();
+    boolean toggleSpotifySaved(String mode, SpotifyTrack expected);
 
     void markExplicitLyricsExit(Activity activity);
 

@@ -8,15 +8,15 @@ import android.widget.ScrollView;
 /** View-coordinate helpers for the fullscreen lyric scroll surface. */
 public final class LyricsScrollController {
     public static final long ALL_LINES = packRange(0, Integer.MAX_VALUE);
-    private static final float DEFAULT_ANCHOR_FRACTION = 0.5f;
-    private static final float RAISED_ANCHOR_FRACTION = 0.28f;
-    private static final float TOP_BLUR_ZONE_FRACTION = 0.32f;
-    private static final float BOTTOM_BLUR_ZONE_FRACTION = 0.18f;
+    public static final float CENTER_ANCHOR_FRACTION = 0.5f;
+    /** Apple slide rest anchor (active line sits high); mirrored below the center for Bottom. */
+    public static final float RAISED_ANCHOR_FRACTION = 0.28f;
+    public static final float LOWERED_ANCHOR_FRACTION = 1f - RAISED_ANCHOR_FRACTION;
+    private float anchorFraction = CENTER_ANCHOR_FRACTION;
     private final ScrollView scrollView;
     private final LinearLayout contentColumn;
     private final View topStaticSpacer;
     private final Rect workRect = new Rect();
-    private float anchorFraction = DEFAULT_ANCHOR_FRACTION;
 
     public LyricsScrollController(ScrollView scrollView, LinearLayout contentColumn, View topStaticSpacer) {
         this.scrollView = scrollView;
@@ -24,52 +24,60 @@ public final class LyricsScrollController {
         this.topStaticSpacer = topStaticSpacer;
     }
 
-    public void setRaisedAnchor(boolean raised) {
-        anchorFraction = raised ? RAISED_ANCHOR_FRACTION : DEFAULT_ANCHOR_FRACTION;
+    public void applyCenterPadding(int safeTopPx, int bottomPaddingPx, int fallbackViewportHeightPx, int rowHalfPx) {
+        applyCenterPadding(safeTopPx, bottomPaddingPx, fallbackViewportHeightPx, rowHalfPx, 0);
     }
 
-    public void applyCenterPadding(int safeTopPx, int bottomPaddingPx, int fallbackViewportHeightPx, int rowHalfPx) {
+    /** @param sidePaddingPx horizontal inset for the lyric text itself - kept here rather than on
+     *  an outer container so the container's own background/blur surface can still reach the
+     *  true screen edges while the text keeps a safe reading margin. */
+    public void applyCenterPadding(int safeTopPx, int bottomPaddingPx, int fallbackViewportHeightPx,
+            int rowHalfPx, int sidePaddingPx) {
         if (scrollView == null) return;
         int viewport = scrollView.getHeight();
         if (viewport <= 0) viewport = fallbackViewportHeightPx;
-        int topAnchor = Math.max(0, Math.round(viewport * anchorFraction) - rowHalfPx);
-        int bottomAnchor = Math.max(0, Math.round(viewport * (1f - anchorFraction)) - rowHalfPx);
-        scrollView.setPadding(0, Math.max(safeTopPx, topAnchor), 0, Math.max(bottomPaddingPx, bottomAnchor));
+        int topAnchor;
+        int bottomAnchor;
+        if (anchorFraction == CENTER_ANCHOR_FRACTION) {
+            int center = Math.max(0, viewport / 2 - rowHalfPx);
+            topAnchor = center;
+            bottomAnchor = center;
+        } else {
+            topAnchor = Math.max(0, Math.round(viewport * anchorFraction) - rowHalfPx);
+            bottomAnchor = Math.max(0, Math.round(viewport * (1f - anchorFraction)) - rowHalfPx);
+        }
+        // Horizontal padding is removed from the scroll container itself and moved to individual
+        // rows (see LyricsRowViewFactory) so the rows can reach the true screen edges for unclipped
+        // blur/glow effects while the text keeps its margin.
+        scrollView.setPadding(0, Math.max(safeTopPx, topAnchor),
+                0, Math.max(bottomPaddingPx, bottomAnchor));
+    }
+
+    /** Where the active line rests vertically, as a fraction of the viewport height (0 = top edge,
+     *  0.5 = legacy center, 1 = bottom edge). See {@link Settings#LYRICS_FOCUS_POSITION}. */
+    public void setAnchorFraction(float fraction) {
+        anchorFraction = fraction;
+    }
+
+    private int anchorCenterY(int scrollY, int viewportHeight, int paddingTop) {
+        if (anchorFraction == CENTER_ANCHOR_FRACTION) return contentCenterY(scrollY, viewportHeight, paddingTop);
+        return scrollY + Math.round(Math.max(1, viewportHeight) * anchorFraction) - Math.max(0, paddingTop);
     }
 
     public int viewportAnchor(int[] rowHeightPrefix, int lineCount) {
         if (scrollView == null || topStaticSpacer == null || lineCount <= 0) return 0;
-        int center = contentAnchorY(scrollView.getScrollY(), scrollView.getHeight(), scrollView.getPaddingTop(), anchorFraction);
+        int center = anchorCenterY(scrollView.getScrollY(), scrollView.getHeight(), scrollView.getPaddingTop());
         int offset = Math.max(0, center - topStaticSpacer.getHeight());
         return LyricsRowVirtualizer.findLineIndexForOffset(rowHeightPrefix, offset, lineCount);
     }
 
-    /**
-     * {@code bufferLines} pads the strictly-visible range on both ends. The caller uses this to
-     * restrict which lines get their per-frame style stepped while the user is mid-drag (a real
-     * performance win - most of the document is off-screen during a hold). But with zero buffer, a
-     * line sitting just outside the exact viewport gets NO per-frame updates at all while
-     * off-screen, so the moment the drag brings it into view it renders its instantaneous "correct
-     * for right now" state directly - active (bright) one frame, already-sung (dim) the next -
-     * instead of having been smoothly interpolating the whole time it was just out of sight. That
-     * hard snap is what read as flicker during manual scroll (confirmed live: a single-frame
-     * bright flash immediately followed by a snap to dim, not a fade). A few lines of buffer keeps
-     * near-edge lines animating continuously, so by the time they're actually visible they're
-     * already at (or smoothly approaching) the right state.
-     */
     public long visibleLineRange(int[] rowHeightPrefix, int lineCount) {
-        return visibleLineRange(rowHeightPrefix, lineCount, 0);
-    }
-
-    public long visibleLineRange(int[] rowHeightPrefix, int lineCount, int bufferLines) {
         if (scrollView == null || topStaticSpacer == null || lineCount <= 0) return ALL_LINES;
         int contentTop = scrollView.getScrollY() - scrollView.getPaddingTop() - topStaticSpacer.getHeight();
         int contentBottom = scrollView.getScrollY() + scrollView.getHeight()
                 - scrollView.getPaddingTop() - topStaticSpacer.getHeight();
         int start = LyricsRowVirtualizer.findLineIndexForOffset(rowHeightPrefix, Math.max(0, contentTop), lineCount);
         int end = LyricsRowVirtualizer.findLineIndexForOffset(rowHeightPrefix, Math.max(0, contentBottom), lineCount);
-        start = Math.max(0, start - Math.max(0, bufferLines));
-        end = Math.min(lineCount - 1, Math.max(start, end) + Math.max(0, bufferLines));
         return packRange(start, Math.max(start, end));
     }
 
@@ -85,8 +93,8 @@ public final class LyricsScrollController {
         return ((long) start << 32) | (end & 0xffffffffL);
     }
 
-    static int contentAnchorY(int scrollY, int viewportHeight, int paddingTop, float anchorFraction) {
-        return scrollY + Math.round(Math.max(1, viewportHeight) * anchorFraction) - Math.max(0, paddingTop);
+    static int contentCenterY(int scrollY, int viewportHeight, int paddingTop) {
+        return scrollY + Math.max(1, viewportHeight) / 2 - Math.max(0, paddingTop);
     }
 
     public static boolean shouldScrollInstantly(boolean requested, int previousActiveIndex) {
@@ -102,6 +110,9 @@ public final class LyricsScrollController {
         if (scrollView == null || contentColumn == null || row == null) return 0;
         workRect.set(0, 0, row.getWidth(), row.getHeight());
         contentColumn.offsetDescendantRectToMyCoords(row, workRect);
+        if (anchorFraction == CENTER_ANCHOR_FRACTION) {
+            return scrollView.getPaddingTop() + workRect.top - (scrollView.getHeight() / 2) + (row.getHeight() / 2);
+        }
         return scrollView.getPaddingTop() + workRect.top
                 - Math.round(scrollView.getHeight() * anchorFraction) + (row.getHeight() / 2);
     }
@@ -110,39 +121,9 @@ public final class LyricsScrollController {
         if (scrollView == null || contentColumn == null || row == null) return false;
         workRect.set(0, 0, row.getWidth(), row.getHeight());
         contentColumn.offsetDescendantRectToMyCoords(row, workRect);
-        int top = contentAnchorY(scrollView.getScrollY(), scrollView.getHeight(), scrollView.getPaddingTop(), 0f);
-        int bottom = contentAnchorY(scrollView.getScrollY(), scrollView.getHeight(), scrollView.getPaddingTop(), 1f);
+        int top = scrollView.getScrollY() + scrollView.getPaddingTop();
+        int bottom = scrollView.getScrollY() + scrollView.getHeight() - scrollView.getPaddingBottom();
         return Math.min(workRect.bottom, bottom) - Math.max(workRect.top, top) >= Math.max(1, minVisiblePx);
-    }
-
-    public float rowTopProximity01(View row) {
-        return rowEdgeProximity01(row, 0f);
-    }
-
-    public float rowEdgeProximity01(View row, float edgeFraction) {
-        if (scrollView == null || contentColumn == null || row == null) return 0f;
-        if (row.getWidth() <= 0 || row.getHeight() <= 0 || scrollView.getHeight() <= 0) return 0f;
-        workRect.set(0, 0, row.getWidth(), row.getHeight());
-        contentColumn.offsetDescendantRectToMyCoords(row, workRect);
-        int viewportTop = contentAnchorY(scrollView.getScrollY(), scrollView.getHeight(), scrollView.getPaddingTop(), 0f);
-        int sampleY = Math.round(workRect.top + edgeFraction * (workRect.bottom - workRect.top));
-        int offset = sampleY - viewportTop;
-        int zonePx = Math.round(Math.max(1, scrollView.getHeight()) * TOP_BLUR_ZONE_FRACTION);
-        if (offset >= zonePx) return 0f;
-        return 1f - Math.max(0f, Math.min(1f, offset / (float) zonePx));
-    }
-
-    public float rowBottomEdgeProximity01(View row, float edgeFraction) {
-        if (scrollView == null || contentColumn == null || row == null) return 0f;
-        if (row.getWidth() <= 0 || row.getHeight() <= 0 || scrollView.getHeight() <= 0) return 0f;
-        workRect.set(0, 0, row.getWidth(), row.getHeight());
-        contentColumn.offsetDescendantRectToMyCoords(row, workRect);
-        int viewportBottom = contentAnchorY(scrollView.getScrollY(), scrollView.getHeight(), scrollView.getPaddingTop(), 1f);
-        int sampleY = Math.round(workRect.top + edgeFraction * (workRect.bottom - workRect.top));
-        int offset = viewportBottom - sampleY;
-        int zonePx = Math.round(Math.max(1, scrollView.getHeight()) * BOTTOM_BLUR_ZONE_FRACTION);
-        if (offset >= zonePx) return 0f;
-        return 1f - Math.max(0f, Math.min(1f, offset / (float) zonePx));
     }
 
     public int rowCenterInContent(View row) {
