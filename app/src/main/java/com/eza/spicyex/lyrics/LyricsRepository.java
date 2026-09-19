@@ -736,23 +736,6 @@ public final class LyricsRepository {
 
     private void fetchLrclib(Context context, SpotifyTrack track, int generation, ResultCallback callback,
                              String reason, LyricsProviderChain chain, boolean tokenPresent) {
-        String trackId = trackIdFromUri(track == null ? "" : track.uri);
-        String cachedRaw = trackId.isEmpty() ? null : LyricsResponseCache.getLrclib(context, trackId);
-        if (cachedRaw != null) {
-            try {
-                LyricsDocument doc = parser.parseLrclibLyrics(context, track, cachedRaw);
-                doc.generation = generation;
-                if (!doc.lines.isEmpty()) {
-                    XpLog.log(TAG + " LRCLIB cache hit id=" + trackId + " lines=" + doc.lines.size());
-                    chain.acceptLrclib(doc);
-                    LyricsFetchDiagnosticsState.record("lrclib_cache", chain.candidatesSeen(), doc, tokenPresent, false);
-                    callback.onSuccess(doc);
-                    return;
-                }
-            } catch (Throwable t) {
-                XpLog.log(TAG + " LRCLIB cache parse failed, refetching: " + t);
-            }
-        }
         String url = "https://lrclib.net/api/search?track_name="
                 + Uri.encode(safe(track.title))
                 + "&artist_name=" + Uri.encode(safe(track.artist))
@@ -775,14 +758,12 @@ public final class LyricsRepository {
                         reportLrclibError(chain, callback, reason + "; LRCLIB HTTP " + response.code());
                         return;
                     }
-                    String rawBody = response.body().string();
-                    LyricsDocument doc = parser.parseLrclibLyrics(context, track, rawBody);
+                    LyricsDocument doc = parser.parseLrclibLyrics(context, track, response.body().string());
                     doc.generation = generation;
                     if (doc.lines.isEmpty()) {
                         reportLrclibError(chain, callback, reason + "; LRCLIB empty");
                         return;
                     }
-                    if (!trackId.isEmpty()) LyricsResponseCache.putLrclib(context, trackId, rawBody);
                     chain.acceptLrclib(doc);
                     LyricsFetchDiagnosticsState.record("lrclib", chain.candidatesSeen(), doc, tokenPresent, false);
                     callback.onSuccess(doc);
@@ -844,10 +825,6 @@ public final class LyricsRepository {
         if (source.contains("cache")) return "cache";
         if (source.contains("lrclib")) return "lrclib";
         if (source.contains("native")) return "native";
-        // LyricsParser tags Apple-Music/Spicy-API static-lyrics results as fetchSource
-        // "apple_music" - without this check they fell through to the "spicy" fallback below and
-        // were misreported as coming from Spicy instead of Apple Music.
-        if (source.contains("apple_music")) return "apple_music";
         if (source.contains("spicy")) return "spicy";
         return fallback;
     }

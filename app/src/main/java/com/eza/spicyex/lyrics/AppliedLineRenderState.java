@@ -11,8 +11,6 @@ public final class AppliedLineRenderState {
     public Spring opacitySpring;
     public Spring lineScaleSpring;
     public Spring lineGlowSpring;
-    public Spring blurSpring;
-    public Spring lineShadowSpring;
     public View rowView;
     public SpicyAnimatedTextView mainView;
     public SpicyAnimatedTextView romanView;
@@ -20,12 +18,9 @@ public final class AppliedLineRenderState {
     public List<SpicyAnimatedTextView> dotViews;
     public Spring dotMainScaleSpring;
     public Spring dotMainOpacitySpring;
+    public Spring lineShadowSpring;
     public int lastTargetClass = Integer.MIN_VALUE;
     public boolean needsRender = true;
-    public float lastTopMeltT0 = Float.NaN;
-    public float lastTopMeltT1 = Float.NaN;
-    public float lastTopMeltBlurPx = Float.NaN;
-    public int lastTopMeltHeight = Integer.MIN_VALUE;
 
     public void clearMounts() {
         rowView = null;
@@ -36,16 +31,11 @@ public final class AppliedLineRenderState {
         opacitySpring = null;
         lineScaleSpring = null;
         lineGlowSpring = null;
-        blurSpring = null;
-        lineShadowSpring = null;
         dotMainScaleSpring = null;
         dotMainOpacitySpring = null;
+        lineShadowSpring = null;
         measuredHeightPx = 0;
         lastTargetClass = Integer.MIN_VALUE;
         needsRender = true;
-        lastTopMeltT0 = Float.NaN;
-        lastTopMeltT1 = Float.NaN;
-        lastTopMeltBlurPx = Float.NaN;
-        lastTopMeltHeight = Integer.MIN_VALUE;
     }
 }
