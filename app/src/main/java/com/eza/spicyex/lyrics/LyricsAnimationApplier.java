@@ -17,6 +17,8 @@ public final class LyricsAnimationApplier {
                                         boolean appleDimPassed) {
         if (line == null) return 1f;
         if (line.dotLine && !active) return LyricsLineViewState.stepOpacity(line, 0f, deltaSeconds);
+        // Desktop's ~0.5 sung opacity is too low against mobile album-art washes; keep past lines
+        // readable while upcoming lines stay clearly recessed.
         float target = active ? 1.0f : (sung
                 ? (appleDimPassed ? 0.60f : 0.82f)
                 : (appleDimPassed ? 0.38f : 0.42f));
@@ -365,28 +367,29 @@ public final class LyricsAnimationApplier {
         }
     }
 
-    public static void resetInterludeDots(AppliedLine line, StyleSink sink, boolean sung, float deltaSeconds) {
-        resetInterludeDots(line, sink, sung, deltaSeconds, false);
-    }
-
-    public static void resetInterludeDots(AppliedLine line, StyleSink sink, boolean sung, float deltaSeconds,
-                                          boolean appleStyle) {
+    public static void resetInterludeDots(AppliedLine line, StyleSink sink) {
         if (line == null || sink == null) return;
-        // Both targets used to be applied as instant literals (0.75f/0.45f) whenever the
-        // (appleStyle && sung) case didn't apply, with no spring involved at all - a real,
-        // always-reproducible hard snap every time this ran in that branch, confirmed live via
-        // AnimTracer's "suspicious jump" log (dot views logged jumping straight from 1.0 to
-        // exactly 0.45, no fractional easing steps at all). Route both through the spring
-        // unconditionally so the rest state is approached smoothly like everything else here.
-        float restScale = LyricsLineViewState.stepDotMainScale(
-                line, appleStyle && sung ? 0f : 0.75f, deltaSeconds);
-        float restOpacity = LyricsLineViewState.stepDotMainOpacity(
-                line, appleStyle && sung ? 0f : 0.45f, deltaSeconds);
         for (SpicyAnimatedTextView dot : LyricsLineViewState.dotViews(line)) {
             if (dot == null) continue;
-            sink.applyScale(dot, restScale, restScale);
+            sink.applyScale(dot, 0.75f, 0.75f);
             sink.applyTranslationY(dot, 0f);
-            sink.applyAlpha(dot, restOpacity);
+            sink.applyAlpha(dot, 0.45f);
+            dot.setGradientPosition(LyricAnimations.GRADIENT_UNSUNG, 0f);
+        }
+    }
+
+    /** Apple variant: sung dots rest hidden instead of dimmed (instant, like the shared path). */
+    public static void resetInterludeDots(AppliedLine line, StyleSink sink, boolean sung,
+                                          boolean appleStyle) {
+        if (!appleStyle || line == null || sink == null) {
+            resetInterludeDots(line, sink);
+            return;
+        }
+        for (SpicyAnimatedTextView dot : LyricsLineViewState.dotViews(line)) {
+            if (dot == null) continue;
+            sink.applyScale(dot, sung ? 0f : 0.75f, sung ? 0f : 0.75f);
+            sink.applyTranslationY(dot, 0f);
+            sink.applyAlpha(dot, sung ? 0f : 0.45f);
             dot.setGradientPosition(LyricAnimations.GRADIENT_UNSUNG, 0f);
         }
     }

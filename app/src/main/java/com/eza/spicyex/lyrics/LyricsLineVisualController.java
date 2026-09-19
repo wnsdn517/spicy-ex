@@ -7,14 +7,9 @@ import java.util.List;
 /** Applies low-frequency row visual resets and invalidates style-cache entries for row remounts. */
 public final class LyricsLineVisualController {
     private final FrameStyleBatcher styleBatcher;
-    private int bgLineTextColor = Color.rgb(170, 170, 170);
 
     public LyricsLineVisualController(FrameStyleBatcher styleBatcher) {
         this.styleBatcher = styleBatcher;
-    }
-
-    public void setBgLineTextColor(int color) {
-        bgLineTextColor = color;
     }
 
     public void invalidate(AppliedLine line) {
@@ -31,7 +26,7 @@ public final class LyricsLineVisualController {
         AppliedLine line = lines.get(index);
         if (line == null) return;
         int base = LyricsLineViewState.effectiveBaseTextSp(line);
-        int color = line.bgLine ? bgLineTextColor : Color.WHITE;
+        int color = line.bgLine ? Color.rgb(170, 170, 170) : Color.WHITE;
         LyricsLineViewState.styleMain(line, styleBatcher, base, color);
         if (line.words == null) return;
         for (SyllableSegment seg : line.words) {
