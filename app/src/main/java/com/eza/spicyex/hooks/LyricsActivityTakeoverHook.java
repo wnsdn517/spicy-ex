@@ -238,6 +238,7 @@ final class LyricsActivityTakeoverHook {
             }
             retry.postNext();
             nowPlayingInjector.schedule(activity);
+            injectLandscapeFallbackButton(activity);
         } catch (Throwable t) {
             XpLog.log(NativeSpicyLyricsHook.TAG + " schedule extra lyrics injection failed: " + t);
         }
@@ -530,6 +531,63 @@ final class LyricsActivityTakeoverHook {
         return button;
     }
 
+
+    private static final String TAG_LANDSCAPE_LYRICS_BUTTON = "spicy_landscape_lyrics_entry";
+
+    /** Fallback landscape entry: when both the mini-player and accessory-row injections fail
+     *  (e.g. Spotify uses a different layout in landscape), add a small floating button
+     *  anchored to the right edge near the bottom. */
+    private boolean injectLandscapeFallbackButton(Activity activity) {
+        try {
+            if (activity == null || activity.isFinishing()
+                    || isLyricsFullscreenActivity(activity)
+                    || !isNativeSpicyEnabled(activity)) return true;
+            FrameLayout content = activity.findViewById(android.R.id.content);
+            if (content == null) return false;
+            if (content.findViewWithTag(TAG_LANDSCAPE_LYRICS_BUTTON) != null) return true;
+
+            android.content.res.Configuration config = activity.getResources().getConfiguration();
+            if (config.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE) return false;
+
+            // Only inject if the other two methods both failed
+            if (content.findViewWithTag(TAG_MINI_PLAYER_LYRICS_BUTTON) != null) return true;
+            if (content.findViewWithTag(TAG_EXTRA_LYRICS_BUTTON) != null) return true;
+
+            int side = dp(40);
+            View button = createLandscapeFallbackButton(activity);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(side, side);
+            lp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.END;
+            lp.setMargins(0, 0, dp(16), dp(160));
+            content.addView(button, lp);
+            XpLog.log(NativeSpicyLyricsHook.TAG
+                    + " inserted landscape fallback lyrics button in " + activity.getClass().getName());
+            return true;
+        } catch (Throwable t) {
+            XpLog.log(NativeSpicyLyricsHook.TAG + " inject landscape fallback button failed: " + t);
+            return true;
+        }
+    }
+
+    private View createLandscapeFallbackButton(Activity activity) {
+        ImageButton button = new ImageButton(activity);
+        button.setTag(TAG_LANDSCAPE_LYRICS_BUTTON);
+        button.setContentDescription("Open Spicy lyrics");
+        NativeIconButtons.setModuleIcon(button, activity, R.drawable.ic_spicy_lyrics_page);
+        button.setColorFilter(Color.rgb(232, 232, 238));
+        button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        bg.setColor(Color.argb(160, 30, 30, 35));
+        bg.setStroke(dp(1), Color.argb(60, 255, 255, 255));
+        button.setBackground(bg);
+        button.setPadding(dp(8), dp(8), dp(8), dp(8));
+        button.setClickable(true);
+        button.setFocusable(true);
+        button.setElevation(dp(6));
+        button.setOnClickListener(v -> launchNativeLyricsFullscreen(activity));
+        return button;
+    }
+
     private View findViewByResourceEntryName(View root, String entryName) {
         if (root == null || isBlank(entryName)) return null;
         ArrayDeque<View> queue = new ArrayDeque<>();
@@ -697,6 +755,10 @@ final class LyricsActivityTakeoverHook {
                 removeNativeSpicyRoot(activity);
                 return;
             }
+            // Captured before the flag flips below: true here means a lyrics session was already
+            // active going into this call, i.e. this mount is a reattach after an orientation-
+            // driven activity recreate, not the screen's first open this session.
+            boolean rotationContinuation = nativeLyricsSessionActive;
             nativeLyricsSessionActive = true; // our screen owns this lyrics session (survives rotation)
             ensureSystemBackCallback(activity);
 
@@ -715,15 +777,24 @@ final class LyricsActivityTakeoverHook {
 
             NativeSpicyShellView root = new NativeSpicyShellView(host, activity);
             root.setTag(TAG_NATIVE_SPICY_ROOT);
-            root.setAlpha(0f);
-            root.setTranslationY(NativeLyricsUtils.dp(24));
+            // Rotation reattach: panel was already visible a moment ago, show it instantly
+            // without fading in. Fresh open: start invisible and fade up to announce arrival.
+            if (rotationContinuation) {
+                root.setAlpha(1f);
+                root.setTranslationY(0f);
+            } else {
+                root.setAlpha(0f);
+                root.setTranslationY(NativeLyricsUtils.dp(24));
+            }
             content.addView(root, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
             ));
             markLyricsActivityKeepWindow(activity);
             root.start();
-            root.animate().alpha(1f).translationY(0f).setDuration(260).start();
+            if (!rotationContinuation) {
+                root.animate().alpha(1f).translationY(0f).setDuration(260).start();
+            }
             XpLog.log(NativeSpicyLyricsHook.TAG + " mounted native Spicy renderer shell");
             Diagnostics.event("renderer", "mount_state",
                     Diagnostics.context("surface", "fullscreen", "mounted", "true"));

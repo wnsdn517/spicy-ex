@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- exported=true: the only caller is our own code running inside Spotify's process,
+             which the OS attributes to Spotify's real UID (Xposed injection changes whose
+             bytecode runs, not which process/UID it runs as) - a different UID than this app's,
+             so exported=false would refuse every real call. Runs in its own ":player" process so
+             the WebView doesn't share Spotify's own. -->
+        <service
+                android:name="com.eza.spicyex.player.WebPlayerService"
+                android:exported="true"
+                android:foregroundServiceType="mediaPlayback"
+                android:process=":player"/>
+        <activity
+                android:name="com.eza.spicyex.player.WebLoginActivity"
+                android:exported="true"
+                android:process=":player"
+                android:launchMode="singleTask"
+                android:excludeFromRecents="true"
+                android:label="Spotify sign in"/>
+    </application>
+
+</manifest>

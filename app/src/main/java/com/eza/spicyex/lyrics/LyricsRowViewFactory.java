@@ -60,11 +60,16 @@ public final class LyricsRowViewFactory {
             if (line.oppositeAligned) leadingPadding = dp(18);
             else trailingPadding = dp(18);
         }
+        if (options != null && options.horizontalOffsetPx > 0) {
+            leadingPadding += options.horizontalOffsetPx;
+            trailingPadding += options.horizontalOffsetPx;
+        }
         row.setPaddingRelative(leadingPadding, topClearancePx(dp(10), multiplier, 0f, false),
                 trailingPadding, Math.round(dp(13) * multiplier));
         row.setClickable(false);
         row.setClipChildren(false);
         row.setClipToPadding(false);
+        row.setClipToOutline(false);
 
         if (line.dotLine) {
             LinearLayout dots = new LinearLayout(activity);
@@ -113,8 +118,15 @@ public final class LyricsRowViewFactory {
                 : LyricVisuals.lyricTextSizeSp(line.text, adaptiveTextSize);
         LyricsLineViewState.setBaseTextSp(line, Math.max(1, Math.round(textCurve * sizeMultiplier)));
         float baseTextPx = sp(LyricsLineViewState.baseTextSp(line));
-        row.setPaddingRelative(leadingPadding, topClearancePx(dp(10), multiplier, baseTextPx, showJapaneseFurigana),
-                trailingPadding, Math.round(dp(13) * multiplier));
+        // Scaled with the actual text size rather than a fixed dp value, so shrinking the font
+        // (LYRICS_TEXT_SIZE/custom) proportionally tightens the gap between lines instead of
+        // leaving disproportionately large whitespace around now-smaller text - floored so a very
+        // small custom size never crushes lines together illegibly.
+        int adaptiveTopPadding = Math.max(dp(6), Math.round(baseTextPx * 0.36f));
+        int adaptiveBottomPadding = Math.max(dp(8), Math.round(baseTextPx * 0.46f));
+        row.setPaddingRelative(leadingPadding,
+                topClearancePx(adaptiveTopPadding, multiplier, baseTextPx, showJapaneseFurigana),
+                trailingPadding, Math.round(adaptiveBottomPadding * multiplier));
         String weight = options == null ? "Medium" : options.lyricWeight;
         String font = options == null ? "spotify" : options.lyricsFont;
         LyricsLineViewState.clearMainView(line);
@@ -631,19 +643,25 @@ public final class LyricsRowViewFactory {
                                Options options, boolean wrapLongLines, float contentWidthPx) {
         int color = line.bgLine ? Color.rgb(170, 170, 170) : Color.WHITE;
         boolean appleStyle = options != null && options.appleStyle;
-        boolean appleCjkWrap = options != null && options.appleCjkWrap;
-        boolean longWrappingWord = false;
-        if (appleCjkWrap && wrapLongLines && seg != null && !isBlank(seg.text)) {
-            android.graphics.Paint measurePaint = new android.graphics.Paint();
-            measurePaint.setTextSize(sp(LyricsLineViewState.baseTextSp(line)));
-            measurePaint.setTypeface(textFactory.resolveTypeface(true));
-            longWrappingWord = measurePaint.measureText(seg.text) + dp(8) > contentWidthPx;
-        }
-        if (!showJapaneseFurigana && !longWrappingWord && LyricVisuals.shouldUseLetterAnimator(seg, appleStyle)) {
-            LinearLayout letters = new LinearLayout(activity);
-            letters.setOrientation(LinearLayout.HORIZONTAL);
+        boolean cjkWrapText = wrapLongLines && isCjkWrapText(seg == null ? "" : seg.text);
+        if (!showJapaneseFurigana && LyricVisuals.shouldUseLetterAnimator(seg, appleStyle)) {
+            ViewGroup letters;
+            if (cjkWrapText) {
+                GlowFlexbox flex = new GlowFlexbox(activity);
+                flex.setFlexDirection(FlexDirection.ROW);
+                flex.setFlexWrap(FlexWrap.WRAP);
+                flex.setAlignItems(AlignItems.STRETCH);
+                letters = flex;
+            } else {
+                LinearLayout linear = new LinearLayout(activity);
+                linear.setOrientation(LinearLayout.HORIZONTAL);
+                letters = linear;
+            }
             letters.setClipToPadding(false);
-            letters.setGravity(Gravity.CENTER_VERTICAL);
+            letters.setClipChildren(false);
+            if (letters instanceof LinearLayout) {
+                ((LinearLayout) letters).setGravity(Gravity.CENTER_VERTICAL);
+            }
             LyricsSyllableViewState.clearLetters(seg);
             List<String> letterTexts = LyricVisuals.splitCodePoints(seg.text);
             float step = 1f / Math.max(1, letterTexts.size());
@@ -657,7 +675,12 @@ public final class LyricsRowViewFactory {
                 letterView.setIncludeFontPadding(true);
                 letterView.setMaxLines(1);
                 letterView.setGradientPosition(LyricAnimations.GRADIENT_UNSUNG, 0f);
-                letters.addView(letterView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                ViewGroup.LayoutParams letterLp = letters instanceof FlexboxLayout
+                        ? new FlexboxLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT)
+                        : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                letters.addView(letterView, letterLp);
                 AnimatedLetterState letter = new AnimatedLetterState();
                 letter.start = relativeStart;
                 letter.duration = step;
@@ -680,14 +703,28 @@ public final class LyricsRowViewFactory {
         if (showJapaneseFurigana) {
             word.setPadding(0, FuriganaText.rubyGapReservationPx(sp(LyricsLineViewState.baseTextSp(line))), 0, 0);
         }
-        word.setMaxLines(appleCjkWrap && wrapLongLines ? 4 : 1);
-        if (appleCjkWrap && wrapLongLines) {
-            word.setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY);
+        if (cjkWrapText) {
+            // A timed provider may hand us a whole unspaced CJK phrase as one segment. Keep the
+            // timing atom intact, but let the glyphs wrap inside its bounded view instead of
+            // drawing one long line beyond the screen.
+            word.setMaxWidth(Math.max(1, Math.round(contentWidthPx)));
+            word.setMaxLines(Integer.MAX_VALUE);
+            applyAdaptiveWrapping(word, true, true);
+        } else {
+            word.setMaxLines(1);
+        }
+        if (showJapaneseFurigana) {
             word.setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
         }
         LyricsSyllableViewState.clearLetters(seg);
         LyricsSyllableViewState.setTextView(seg, word);
         return word;
+    }
+
+    private static boolean isCjkWrapText(String text) {
+        return SpicyTextDetection.hasCjkIdeograph(text)
+                || SpicyTextDetection.hasKana(text)
+                || SpicyTextDetection.itemKoreanTest(text);
     }
 
     private View stackRomanizedWord(AppliedLine line, SyllableSegment seg, View wordView, String romanizedWordText) {
@@ -714,13 +751,24 @@ public final class LyricsRowViewFactory {
                                     String weight, String font, boolean wrapLongLines,
                                     boolean adaptiveSectioningEnabled) {
         int color = line.bgLine ? Color.rgb(170, 170, 170) : Color.WHITE;
+
+        // Extract mini lyric from parentheses
+        String[] textParts = extractMainAndMiniText(line.text);
+        String mainTextStr = textParts[0];
+        String miniTextStr = textParts[1];
+
+        // Create horizontal container for main + mini lyrics
+        LinearLayout textContainer = new LinearLayout(activity);
+        textContainer.setOrientation(LinearLayout.HORIZONTAL);
+        textContainer.setGravity(line.oppositeAligned ? Gravity.END : Gravity.START);
+
         SpicyAnimatedTextView main = new SpicyAnimatedTextView(activity);
-        CharSequence mainText = showJapaneseFurigana ? FuriganaText.build(line) : line.text;
-        applyTextDirection(main, line.text);
+        CharSequence mainText = showJapaneseFurigana ? FuriganaText.build(line) : mainTextStr;
+        applyTextDirection(main, mainTextStr);
         main.setTextSize(LyricsLineViewState.baseTextSp(line));
         main.setTextColor(color);
         textFactory.applyLyricTypeface(main, mainText, weight, font);
-        main.setSelfGlow(true); // line-level row: no GlowFlexbox parent, draw its own halo
+        main.setSelfGlow(true);
         main.setIncludeFontPadding(true);
         if (showJapaneseFurigana) {
             main.setPadding(0, FuriganaText.rubyGapReservationPx(sp(LyricsLineViewState.baseTextSp(line))), 0, 0);
@@ -733,10 +781,68 @@ public final class LyricsRowViewFactory {
         main.setVerticalGradient(lineLevelFillTopDown);
         main.setContentGradient(lineLevelFillSentence);
         main.setGradientPosition(LyricAnimations.GRADIENT_UNSUNG, 0f);
-        row.addView(main, new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams mainLp;
+        if (wrapLongLines && !isBlank(miniTextStr)) {
+            // The parenthetical mini lyric shares this horizontal row. MATCH_PARENT here would
+            // measure the main text at the full width and then append the mini text beyond it.
+            mainLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        } else {
+            mainLp = new LinearLayout.LayoutParams(
+                    wrapLongLines ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        textContainer.addView(main, mainLp);
+        LyricsLineViewState.setMainView(line, main);
+
+        // Add mini lyric if present
+        if (!isBlank(miniTextStr)) {
+            SpicyAnimatedTextView mini = new SpicyAnimatedTextView(activity);
+            mini.setText(miniTextStr);
+            applyTextDirection(mini, miniTextStr);
+            float miniTextSize = LyricsLineViewState.baseTextSp(line) * 0.65f; // 65% of main size
+            mini.setTextSize(miniTextSize);
+            mini.setTextColor(Color.argb(180, 255, 255, 255)); // Slightly transparent white
+            textFactory.applyLyricTypeface(mini, miniTextStr, weight, font);
+            mini.setSelfGlow(true);
+            mini.setIncludeFontPadding(true);
+            mini.setGravity(line.oppositeAligned ? Gravity.END : Gravity.START);
+            mini.setMaxLines(1);
+            mini.setVerticalGradient(lineLevelFillTopDown);
+
+            // Add spacing and mini lyric
+            LinearLayout.LayoutParams miniLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            miniLp.leftMargin = dp(4);
+            textContainer.addView(mini, miniLp);
+
+            // Store for animation
+            LyricsLineViewState.setMiniView(line, mini);
+        }
+
+        row.addView(textContainer, new LinearLayout.LayoutParams(
                 wrapLongLines ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
-        LyricsLineViewState.setMainView(line, main);
+    }
+
+    private String[] extractMainAndMiniText(String text) {
+        if (isBlank(text)) {
+            return new String[]{"", ""};
+        }
+
+        // Extract content between parentheses
+        int startIdx = text.indexOf('(');
+        int endIdx = text.lastIndexOf(')');
+
+        if (startIdx >= 0 && endIdx > startIdx) {
+            // Found parentheses
+            String miniText = text.substring(startIdx + 1, endIdx).trim();
+            // Main text: remove parentheses but keep the content
+            String mainText = text.substring(0, startIdx) + text.substring(endIdx + 1);
+            return new String[]{mainText.trim(), miniText};
+        }
+
+        // No parentheses found
+        return new String[]{text, ""};
     }
 
     @SuppressLint("WrongConstant") // API-23 Layout constants alias the newer LineBreaker IntDef values.
@@ -873,6 +979,9 @@ public final class LyricsRowViewFactory {
         public String documentText = "";
         public boolean appleStyle;
         public boolean appleCompactText;
-        public boolean appleCjkWrap;
+        /** Explicit horizontal offset for the lyric text, moved from the scroll container 
+         *  (see LyricsScrollController) so the row view can remain full-screen width for 
+         *  unclipped blur/glow effects while the text keeps its margin. */
+        public int horizontalOffsetPx;
     }
 }

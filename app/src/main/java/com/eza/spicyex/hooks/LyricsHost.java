@@ -15,6 +15,13 @@ import com.eza.spicyex.lyrics.CacheClearKind;
  * activity instead of the rerouted Spotify fullscreen activity).
  */
 interface LyricsHost {
+    /** Gates the AudioReactiveController Visualizer to when it can actually be seen (see its own
+     *  javadoc for why that matters). */
+    void setAudioReactiveListening(boolean enabled);
+
+    /** Smoothed 0..1 real audio level; 0 whenever no session is attached. */
+    float currentAudioLevel();
+
     SpotifyTrack getCurrentTrackSafely();
 
     boolean isPlayerActuallyPlaying();
@@ -22,6 +29,11 @@ interface LyricsHost {
     long readBestMeasuredProgressMs(SpotifyTrack track, boolean playing);
 
     boolean seekSpotifyTo(long positionMs);
+
+    /** Whether a seek would currently be honored (ACTION_SEEK_TO advertised right now) - lets
+     *  callers hide/disable seek affordances proactively instead of finding out after a silent
+     *  rejection. See PlaybackBridge#canSeek. */
+    boolean canSeek();
 
     /** Play/pause toggle and track skips via the captured MediaSession transport.
      * False when no session is captured (callers degrade to no-op visuals). */

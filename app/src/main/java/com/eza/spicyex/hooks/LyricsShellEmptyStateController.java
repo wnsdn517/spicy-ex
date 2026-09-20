@@ -3,12 +3,16 @@ package com.eza.spicyex.hooks;
 import static com.eza.spicyex.hooks.NativeLyricsUtils.dp;
 import static com.eza.spicyex.hooks.NativeLyricsUtils.safe;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AccelerateDecelerateInterpolator;
 import android.widget.LinearLayout;
+import android.widget.ImageView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -16,6 +20,7 @@ import com.eza.spicyex.Settings;
 import com.eza.spicyex.SpotifyPlusConfig;
 import com.eza.spicyex.lyrics.LyricsSkeletonView;
 import com.eza.spicyex.lyrics.LyricsTextFactory;
+import com.eza.spicyex.ui.ActionIconDrawable;
 
 /** Builds transient loading and error rows for the fullscreen lyric surface. */
 final class LyricsShellEmptyStateController {
@@ -36,17 +41,107 @@ final class LyricsShellEmptyStateController {
     }
 
     void showLoading(ScrollView lyricsScroll, LinearLayout lyricsColumn, String message) {
+        showLoading(lyricsScroll, lyricsColumn, message, 0);
+    }
+
+    /** Ad placeholder: a compact ad badge, with mute status shown only when auto-mute is enabled. */
+    void showAdPlaceholder(ScrollView lyricsScroll, LinearLayout lyricsColumn, String message) {
+        stateToken++;
+        lyricsColumn.removeAllViews();
+
+        LinearLayout card = new LinearLayout(activity);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER);
+        GradientDrawable cardBg = new GradientDrawable();
+        cardBg.setColor(0x1AFFFFFF);
+        cardBg.setCornerRadius(dp(20));
+        cardBg.setStroke(dp(1), 0x22FFFFFF);
+        card.setBackground(cardBg);
+        card.setPadding(dp(24), dp(28), dp(24), dp(24));
+
+        TextView badge = textFactory.createText(activity, "AD", 16, Color.WHITE,
+                textFactory.resolveTypeface(true));
+        badge.setGravity(Gravity.CENTER);
+        badge.setLetterSpacing(0.12f);
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setColor(0xCC8B5CF6);
+        badgeBg.setCornerRadius(dp(12));
+        badge.setBackground(badgeBg);
+        card.addView(badge, new LinearLayout.LayoutParams(dp(64), dp(38)));
+
+        TextView label = textFactory.createText(
+                activity,
+                message,
+                18,
+                Color.WHITE,
+                textFactory.resolveTypeface(false));
+        label.setGravity(Gravity.CENTER);
+        label.setPadding(0, dp(16), 0, 0);
+        card.addView(label);
+
+        boolean muted = Boolean.TRUE.equals(config.get(Settings.AUTO_MUTE_ADS));
+        LinearLayout statusRow = new LinearLayout(activity);
+        statusRow.setGravity(Gravity.CENTER);
+        if (muted) {
+            ImageView muteIcon = new ImageView(activity);
+            muteIcon.setImageDrawable(new ActionIconDrawable(
+                    ActionIconDrawable.Kind.VOLUME_OFF, Color.rgb(190, 180, 255),
+                    activity.getResources().getDisplayMetrics().density));
+            statusRow.addView(muteIcon, new LinearLayout.LayoutParams(dp(18), dp(18)));
+        }
+        TextView hint = textFactory.createText(
+                activity,
+                muted ? "Ad audio muted · Lyrics return after the ad"
+                        : "Lyrics return after the ad",
+                13,
+                Color.rgb(178, 178, 188),
+                textFactory.resolveTypeface(false));
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(muted ? dp(6) : 0, dp(10), 0, 0);
+        statusRow.addView(hint);
+        card.addView(statusRow);
+
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        cardLp.topMargin = dp(80);
+        cardLp.leftMargin = dp(32);
+        cardLp.rightMargin = dp(32);
+        lyricsColumn.addView(card, cardLp);
+
+        // Subtle badge pulse keeps the ad state alive without making the whole placeholder jump.
+        ValueAnimator pulse = ValueAnimator.ofFloat(0.88f, 1f);
+        pulse.setDuration(1200);
+        pulse.setRepeatCount(ValueAnimator.INFINITE);
+        pulse.setRepeatMode(ValueAnimator.REVERSE);
+        pulse.setInterpolator(new AccelerateDecelerateInterpolator());
+        pulse.addUpdateListener(a -> {
+            float v = (float) a.getAnimatedValue();
+            badge.setAlpha(v);
+            badge.setScaleX(v);
+            badge.setScaleY(v);
+        });
+        pulse.start();
+        card.setTag(pulse);
+
+        lyricsScroll.post(() -> lyricsScroll.scrollTo(0, 0));
+    }
+
+    void showLoading(ScrollView lyricsScroll, LinearLayout lyricsColumn, String message, int horizontalInsetPx) {
         stateToken++;
         lyricsColumn.removeAllViews();
         if (config.get(Settings.SHOW_SKELETON)) {
             LyricsSkeletonView skeleton = new LyricsSkeletonView(activity);
+            int horizontalPad = horizontalInsetPx > 0 ? horizontalInsetPx : dp(18);
+            skeleton.setHorizontalPaddingPx(horizontalPad);
             LinearLayout.LayoutParams skeletonLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT);
-            skeletonLp.topMargin = loadingTopMargin(
-                    lyricsScroll.getHeight(), lyricsScroll.getPaddingTop());
             lyricsColumn.addView(skeleton, skeletonLp);
-            alignLoadingStart(lyricsScroll, lyricsColumn, skeleton);
+            // Height may be 0 if called before layout; defer margin calculation to
+            // the first layout pass via a posted runnable (never immediate) so the
+            // offset is always correct.
+            alignLoadingStart(lyricsScroll, lyricsColumn, skeleton, horizontalPad);
             return;
         }
         TextView loading = textFactory.createText(
@@ -56,16 +151,28 @@ final class LyricsShellEmptyStateController {
                 Color.rgb(179, 179, 179),
                 textFactory.resolveTypeface(true));
         loading.setGravity(Gravity.CENTER);
-        loading.setPadding(dp(16), dp(100), dp(16), dp(16));
+        int pad = horizontalInsetPx > 0 ? horizontalInsetPx : dp(16);
+        loading.setPadding(pad, dp(100), pad, dp(16));
         lyricsColumn.addView(loading, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
+        // Defer scroll reset to the layout pass so lyricsScroll.getHeight() is valid.
+        lyricsScroll.post(() -> lyricsScroll.scrollTo(0, 0));
     }
 
     private void alignLoadingStart(
             ScrollView lyricsScroll,
             LinearLayout lyricsColumn,
             View loadingView
+    ) {
+        alignLoadingStart(lyricsScroll, lyricsColumn, loadingView, 0);
+    }
+
+    private void alignLoadingStart(
+            ScrollView lyricsScroll,
+            LinearLayout lyricsColumn,
+            View loadingView,
+            int horizontalMarginPx
     ) {
         Runnable align = () -> {
             if (loadingView.getParent() != lyricsColumn) return;
@@ -76,13 +183,15 @@ final class LyricsShellEmptyStateController {
                     lyricsScroll.getHeight(), lyricsScroll.getPaddingTop());
             if (params.topMargin != topMargin) {
                 params.topMargin = topMargin;
-                loadingView.setLayoutParams(params);
             }
-            // A song change can leave the prior document's scroll offset in place. Reset both now
-            // and after layout, when ScrollView has recalculated the shorter loading content range.
+            int hMargin = horizontalMarginPx > 0 ? horizontalMarginPx : dp(12);
+            if (params.leftMargin != hMargin) params.leftMargin = hMargin;
+            if (params.rightMargin != hMargin) params.rightMargin = hMargin;
+            loadingView.setLayoutParams(params);
             lyricsScroll.scrollTo(0, 0);
         };
-        align.run();
+        // Height may be 0 on first call (pre-layout). Post instead of running immediately
+        // so lyricsScroll.getHeight() always returns a valid value after layout.
         lyricsScroll.post(align);
     }
 

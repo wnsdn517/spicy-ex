@@ -20,6 +20,13 @@ public interface AmbientBackgroundLayer {
         updateImage(art);
     }
 
+    /**
+     * 0..1 live audio level for this instant; see {@code AudioReactiveController}. Safe to call
+     * from any thread. Default is a no-op so a layer that does not react need not implement it.
+     */
+    default void setAudioLevel(float level0to1) {
+    }
+
     /** Stops frames and releases texture references. The layer can be reused. */
     void release();
 
