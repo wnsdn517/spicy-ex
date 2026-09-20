@@ -20,7 +20,7 @@ public final class LyricsAnimationApplier {
         // Desktop's ~0.5 sung opacity is too low against mobile album-art washes; keep past lines
         // readable while upcoming lines stay clearly recessed.
         float target = active ? 1.0f : (sung
-                ? (appleDimPassed ? 0.60f : 0.82f)
+                ? (appleDimPassed ? 0.72f : 0.82f)
                 : (appleDimPassed ? 0.38f : 0.42f));
         if (line.bgLine && !active) target *= 0.90f;
         return LyricsLineViewState.stepOpacity(line, target, deltaSeconds);
