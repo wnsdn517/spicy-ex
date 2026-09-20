@@ -2785,7 +2785,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         }
         clearScrollSubpixel();
         float frequency = returning
-                ? RETURN_SPRING_FREQUENCY_HZ * cascadeSpeedMultiplier()
+                ? RETURN_SPRING_FREQUENCY_HZ * cascadeSpeedMultiplier() * springStrengthMultiplier()
                 : scrollSpringFrequency(target - start);
         float damping = returning ? RETURN_SPRING_DAMPING : scrollSpringDamping();
         scrollSpring = new com.eza.spicyex.lyrics.Spring(start, frequency, damping);
@@ -2809,7 +2809,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         float reach = Math.min(1f, Math.abs(distancePx) / span);
         float hz = SCROLL_SPRING_NEAR_FREQUENCY_HZ
                 + (SCROLL_SPRING_FREQUENCY_HZ - SCROLL_SPRING_NEAR_FREQUENCY_HZ) * reach;
-        return hz * cascadeSpeedMultiplier();
+        return hz * cascadeSpeedMultiplier() * springStrengthMultiplier();
     }
 
     /** With the Apple slide on, the scroll spring is the same family of motion as the row cascade
@@ -2822,6 +2822,11 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private float cascadeSpeedMultiplier() {
         float speedPct = config != null ? (float) config.get(Settings.APPLE_CASCADE_SPEED) : 100f;
         return Math.max(0.5f, Math.min(2f, speedPct / 100f));
+    }
+
+    private float springStrengthMultiplier() {
+        float strengthPct = config != null ? (float) config.get(Settings.APPLE_SPRING_STRENGTH) : 100f;
+        return Math.max(0.5f, Math.min(2f, strengthPct / 100f));
     }
 
     /** How much of a far jump the scroll spring actually animates, in px. */
@@ -2937,7 +2942,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // a stop and then twitched back, which reads as a mechanical bounce rather than weight
         // settling; dropping the frequency lengthens the travel so the motion is legible, and
         // raising the damping trades the visible rebound for a single clean arrival.
-        float baseFrequency = (apple ? (landscape ? 1.55f : 1.62f) : ROW_CASCADE_FREQUENCY_HZ) * speedMul;
+        float baseFrequency = (apple ? (landscape ? 1.55f : 1.62f) : ROW_CASCADE_FREQUENCY_HZ)
+                * speedMul * springStrengthMultiplier();
         float baseDamping = apple ? (landscape ? 0.94f : 0.95f) : ROW_CASCADE_DAMPING;
         for (int i : rowMountController.mountedIndices()) {
             if (i < 0 || i >= document.appliedLines.size()) continue;

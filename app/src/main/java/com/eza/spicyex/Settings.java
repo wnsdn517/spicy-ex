@@ -520,6 +520,10 @@ public final class Settings {
             "apple_cascade_speed", LYRICS_SCREEN, "Slide speed", 100, 50, 200, 5
     );
 
+    public static final IntegerSetting APPLE_SPRING_STRENGTH = intSetting(
+            "apple_spring_strength", LYRICS_SCREEN, "Spring strength", 100, 50, 200, 5
+    );
+
     // One selector owns both the bounce gate and its scope. Editable from the layout editor's
     // Lyrics text element (hidden there too while Animation style is Apple Music, same as the
     // settings-panel gate - Apple motion owns that style).
@@ -1065,7 +1069,8 @@ public final class Settings {
                 || setting == TRACK_INFO_ART_SIZE || setting == TRACK_INFO_TEXT_SIZE
                 || setting == BACKGROUND_STYLE || setting == BEAT_REACTIVE_BACKGROUND
                 || setting == ANIMATION_STYLE || setting == LINE_SLIDE_ANIMATION
-                || setting == APPLE_CASCADE_SPEED || setting == LOAD_LIFT_ANIMATION
+                || setting == APPLE_CASCADE_SPEED || setting == APPLE_SPRING_STRENGTH
+                || setting == LOAD_LIFT_ANIMATION
                 || setting == ENABLE_LINE_BLUR || setting == LYRICS_BLUR_INTENSITY
                 || setting == ENABLE_GLOW_BLUR || setting == WORD_BOUNCE
                 || setting == WORD_BOUNCE_STYLE || setting == LINE_SYNC_FILL
