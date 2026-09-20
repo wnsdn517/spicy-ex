@@ -54,6 +54,7 @@ public final class PanelStyle {
         // No Apple-mark glyph in Lucide (brand icons are out); the effects wand reads as motion.
         SECTION_ICONS.put("apple_music", Kind.WAND_SPARKLES);
         SECTION_ICONS.put("ai", Kind.SPARKLES);
+        SECTION_ICONS.put("connect", Kind.GLOBE);
         SECTION_ICONS.put("debug", Kind.ACTIVITY);
     }
 

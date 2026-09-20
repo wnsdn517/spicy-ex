@@ -73,7 +73,9 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     private final java.util.function.BooleanSupplier isHalfSize;
     private final Runnable onToggleSize;
     private final Runnable onClose;
+    private final Runnable onOpenLayoutEditor;
     private final java.util.function.Consumer<CacheClearKind> onClearCache;
+    private final Runnable onResyncTiming;
 
     private LinearLayout sectionsContainer;
     private TextView panelTitle;
@@ -106,7 +108,9 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     public SettingsPanel(Context context, SettingsStore store,
                          java.util.function.BooleanSupplier isHalfSize,
                          Runnable onToggleSize, Runnable onClose,
-                         java.util.function.Consumer<CacheClearKind> onClearCache) {
+                         Runnable onOpenLayoutEditor,
+                         java.util.function.Consumer<CacheClearKind> onClearCache,
+                         Runnable onResyncTiming) {
         this.context = context;
         this.style = new PanelStyle(context);
         this.store = store;
@@ -117,7 +121,9 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         this.isHalfSize = isHalfSize;
         this.onToggleSize = onToggleSize;
         this.onClose = onClose;
+        this.onOpenLayoutEditor = onOpenLayoutEditor;
         this.onClearCache = onClearCache;
+        this.onResyncTiming = onResyncTiming;
         writer.ensureBackgroundStyleMigrated(store.get(Settings.ENABLE_BACKGROUND));
         this.uiStrings = UiLanguage.strings(context, store.get(Settings.UI_LANGUAGE));
     }
@@ -231,6 +237,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
                 .translationAvailable(FeatureAvailability.translationAvailable())
                 .transliterationAvailable(FeatureAvailability.transliterationAvailable())
                 .appleFontAvailable(FeatureAvailability.appleFontAvailable())
+                .connectAvailable(FeatureAvailability.connectAvailable())
                 .animatedBackgroundAvailable(FeatureAvailability.animatedBackgroundAvailable())
                 .spicySourceEnabled(com.eza.spicyex.lyrics.session.LyricsSourcePreferences.sourceEnabled(
                         context, com.eza.spicyex.lyrics.session.LyricsSourcePreferences.Source.SPICY))
@@ -266,6 +273,22 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         LinearLayout card = style.newCard();
         card.setTag(PanelTags.card(section));
         for (Settings.Setting<?> setting : items) renderSetting(card, setting);
+        if (section == Settings.LYRICS_SCREEN) {
+            // Tap/drag-to-configure surface for the settings this section's rows above already
+            // cover in list form (track info position, artwork corner radius) - an alternative
+            // entry point, not a replacement, so the ordinary rows stay for anyone who prefers
+            // them.
+            rows.actionRow(card, Kind.ALIGN_VERTICAL_DISTRIBUTE_CENTER,
+                    uiStrings.get("settings_layout_editor", "Layout editor…"),
+                    v -> {
+                        // Close this dialog first (same animated exit the panel's own close
+                        // button/back-press use), then hand off to the shell: the layout editor
+                        // is an overlay on the real lyrics screen itself (same view hierarchy,
+                        // same process - see LyricsLayoutEditController), not a separate window.
+                        if (onClose != null) onClose.run();
+                        if (onOpenLayoutEditor != null) onOpenLayoutEditor.run();
+                    });
+        }
         if (section == Settings.AI && aiAvailable()) {
             // Dynamic AI rows churn with setup state; they live in their own tagged block so
             // keyed rebinding refreshes them as a unit without touching ordinary rows.
@@ -273,6 +296,16 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
             dynamic.setOrientation(LinearLayout.VERTICAL);
             dynamic.setTag(PanelTags.AI_DYNAMIC);
             aiRows().render(dynamic);
+            card.addView(dynamic, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        if (section == Settings.CONNECT) {
+            // Same tagged-block treatment as the AI rows above: appears/disappears with the
+            // enable toggle, which the ordinary per-key row sync in rebindCard() never touches.
+            LinearLayout dynamic = new LinearLayout(context);
+            dynamic.setOrientation(LinearLayout.VERTICAL);
+            dynamic.setTag(PanelTags.CONNECT_DYNAMIC);
+            if (Boolean.TRUE.equals(store.get(Settings.CONNECT_ENABLED))) renderConnectLogin(dynamic);
             card.addView(dynamic, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
@@ -358,6 +391,10 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         }
         if (setting == Settings.SPICY_MANUAL_TOKEN) {
             spicyTokenRow(content);
+            return;
+        }
+        if (setting == Settings.LYRICS_FONT_CUSTOM_PATH) {
+            lyricsFontPathRow(content);
             return;
         }
         // Renderer dispatch follows the UI schema; composite rows above stay hand-built.
@@ -467,9 +504,12 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
             if (key != null) currentKeys.add(key);
         }
         RowSyncPlan plan = RowSyncPlan.of(visibleKeys, currentKeys);
-        // The AI dynamic block re-renders as a unit; detach it so positions count rows only.
-        View dynamic = findChildByTag(card, PanelTags.AI_DYNAMIC);
-        if (dynamic != null) card.removeView(dynamic);
+        // The AI/Connect dynamic blocks re-render as a unit; detach them so positions count
+        // ordinary rows only.
+        View aiDynamic = findChildByTag(card, PanelTags.AI_DYNAMIC);
+        if (aiDynamic != null) card.removeView(aiDynamic);
+        View connectDynamic = findChildByTag(card, PanelTags.CONNECT_DYNAMIC);
+        if (connectDynamic != null) card.removeView(connectDynamic);
         for (String dead : plan.removals) {
             View stale = findRowIn(card, dead);
             if (stale != null) card.removeView(stale);
@@ -492,6 +532,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
             }
         }
         refreshAiDynamicBlock(card, target);
+        refreshConnectDynamicBlock(card, target);
     }
 
     /** AI dynamic rows re-render as one tagged block; ordinary AI settings rows patch by key. */
@@ -513,6 +554,29 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
                     LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
         aiRows().render(block);
+    }
+
+    /** Connect's login/test-track rows appear only while CONNECT_ENABLED is on; same tagged-block
+     *  treatment as {@link #refreshAiDynamicBlock} since toggling it is a cross-row visibility
+     *  change the ordinary per-key row sync above never touches. */
+    private void refreshConnectDynamicBlock(LinearLayout card, Settings.Section target) {
+        View dynamic = findChildByTag(card, PanelTags.CONNECT_DYNAMIC);
+        if (target != Settings.CONNECT) {
+            if (dynamic != null) card.removeView(dynamic);
+            return;
+        }
+        LinearLayout block;
+        if (dynamic instanceof LinearLayout) {
+            block = (LinearLayout) dynamic;
+            block.removeAllViews();
+        } else {
+            block = new LinearLayout(context);
+            block.setOrientation(LinearLayout.VERTICAL);
+            block.setTag(PanelTags.CONNECT_DYNAMIC);
+            card.addView(block, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        if (Boolean.TRUE.equals(store.get(Settings.CONNECT_ENABLED))) renderConnectLogin(block);
     }
 
     private View findRowIn(LinearLayout card, String key) {
@@ -539,6 +603,10 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
             com.eza.spicyex.lyrics.session.LyricsSourcePreferences.setRankingMode(context,
                     com.eza.spicyex.lyrics.session.LyricsSourcePreferences.RankingMode.parse(
                             String.valueOf(store.get(setting))));
+        }
+        if (setting == Settings.CONNECT_ENABLED) {
+            com.eza.spicyex.hooks.SpotifyConnectHook.onSettingsChanged(context,
+                    Boolean.TRUE.equals(store.get(Settings.CONNECT_ENABLED)));
         }
         if (setting == Settings.UI_LANGUAGE) {
             rebuildSections();
@@ -633,12 +701,76 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
                 actions.toArray(new AiSettingsRows.IconAction[0]));
     }
 
+    private void lyricsFontPathRow(LinearLayout content) {
+        String path = store.get(Settings.LYRICS_FONT_CUSTOM_PATH);
+        String display = path == null || path.isEmpty()
+                ? uiStrings.get("settings_lyrics_font_path_absent", "Not set") : path;
+        List<AiSettingsRows.IconAction> actions = new ArrayList<>();
+        actions.add(new AiSettingsRows.IconAction(Kind.EDIT,
+                uiStrings.get("settings_lyrics_font_path_edit", "Edit font path"),
+                v -> dialogs.promptLyricsFontPath()));
+        rows.aiFieldRow(content, uiStrings.setting(Settings.LYRICS_FONT_CUSTOM_PATH),
+                display, false, Settings.LYRICS_FONT_CUSTOM_PATH.key,
+                v -> dialogs.promptLyricsFontPath(),
+                actions.toArray(new AiSettingsRows.IconAction[0]));
+        String coverage = fontCoverageSummaryForPanel(path);
+        if (!coverage.isEmpty()) {
+            TextView cov = style.text(coverage, 12, PanelStyle.COL_SUMMARY, false);
+            cov.setPadding(style.dp(52), 0, style.dp(16), style.dp(12));
+            content.addView(cov, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+    }
+
+    private String fontCoverageSummaryForPanel(String path) {
+        if (path == null || path.isEmpty()) return "";
+        android.graphics.Typeface typeface = null;
+        java.io.File file = new java.io.File(path);
+        if (file.isFile()) {
+            try {
+                typeface = android.graphics.Typeface.createFromFile(file);
+            } catch (Throwable ignored) {
+            }
+        }
+        if (typeface == null) typeface = android.graphics.Typeface.create(path, android.graphics.Typeface.NORMAL);
+        java.util.List<String> missing = com.eza.spicyex.lyrics.LyricsFontValidator.missingScripts(typeface);
+        return missing.isEmpty()
+                ? uiStrings.get("settings_lyrics_font_check_all_covered", "Covers every supported language")
+                : uiStrings.get("settings_lyrics_font_check_missing", "Falls back for") + ": "
+                        + String.join(", ", missing);
+    }
+
+    // --- Connect card ---
+
+    private void renderConnectLogin(LinearLayout card) {
+        // A WebView process restart cannot safely claim a persisted browser cookie is
+        // authenticated. Start conservative and make the recovery action explicit; the login
+        // activity closes as soon as Spotify confirms an existing session.
+        rows.actionRow(card, Kind.GLOBE,
+                uiStrings.get("settings_connect_login", "Login required · Sign in to Spotify"),
+                v -> com.eza.spicyex.hooks.SpotifyConnectHook.openLogin(context));
+        // Exercises the web player backend directly without needing another device on the
+        // network to trigger playback.
+        rows.actionRow(card, Kind.GLOBE,
+                uiStrings.get("settings_connect_test_track", "Play a test track"),
+                v -> com.eza.spicyex.hooks.SpotifyConnectHook.playTestTrack(context));
+    }
+
     // --- Diagnostics card ---
 
     private void renderActions(LinearLayout content) {
         rows.actionRow(content, Kind.BUG,
                 DiagnosticReportingDialog.reportProblemLabel(context, store),
                 v -> DiagnosticReportingDialog.show(context, store));
+        rows.actionRow(content, null,
+                uiStrings.get("settings_action_resync_timing", "Reset lyrics sync"),
+                v -> {
+                    writer.put(Settings.SYNC_OFFSET_MS, 0);
+                    if (onResyncTiming != null) onResyncTiming.run();
+                    android.widget.Toast.makeText(context,
+                            uiStrings.get("settings_resync_timing_done", "Lyrics sync reset"),
+                            android.widget.Toast.LENGTH_SHORT).show();
+                });
         clearAction(content, "settings_action_clear_translation_cache",
                 "Clear translation cache", CacheClearKind.TRANSLATION);
         clearAction(content, "settings_action_clear_reading_cache",
@@ -649,6 +781,14 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
                 "Clear lyrics response cache", CacheClearKind.LYRICS_RESPONSE);
         rows.actionRow(content, Kind.EXTERNAL_LINK,
                 uiStrings.get("settings_action_open_github", "Open GitHub"), v -> openGithub());
+        rows.actionRow(content, null,
+                uiStrings.get("settings_action_reset_all", "Reset all settings to defaults"), v -> {
+            resetAllSettings(context);
+            android.widget.Toast.makeText(context,
+                    uiStrings.get("settings_reset_done", "All settings reset to defaults"),
+                    android.widget.Toast.LENGTH_SHORT).show();
+            onClose.run();
+        });
     }
 
     private void clearAction(LinearLayout content, String key, String fallback, CacheClearKind kind) {
@@ -769,9 +909,9 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     }
 
     /**
-     * Why a row is greyed out. Only three rows are ever unavailable, and all three are build
-     * gaps: transliteration, translation, and the Apple font are compiled into Full and absent
-     * from Lite. Device-level limits (the API-33 animated background) are reported per option
+     * Why a row is greyed out. Every unavailable row is a build gap: transliteration,
+     * translation, the Apple font, and Spotify Connect are compiled into Full and absent from
+     * Lite. Device-level limits (the API-33 animated background) are reported per option
      * through {@link PanelPolicy#optionUnavailableReason}, not here.
      */
     @Override public String unavailableSummary(Settings.Setting<?> setting) {
@@ -847,5 +987,11 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     @Override public void onSourcesCommitted() {
         onSettingChanged(Settings.LYRICS_SOURCE_MODE);
         rebuildSection(Settings.LYRICS_SOURCES);
+    }
+
+    static void resetAllSettings(Context context) {
+        android.content.SharedPreferences prefs = context.getSharedPreferences(
+                "spicyex_prefs", android.content.Context.MODE_PRIVATE);
+        prefs.edit().clear().apply();
     }
 }
