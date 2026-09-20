@@ -34,8 +34,16 @@ public final class DisplayLayoutGroup {
                     ? reading : SpicyJapaneseChineseProcessor.analyzeJapaneseLine(source, null);
             if (analyzed != null && analyzed.readingContext != null
                     && analyzed.readingContext.tokens != null && !analyzed.readingContext.tokens.isEmpty()) {
-                return japanese(source, analyzed.readingContext.tokens);
+                // Morphology is authoritative where it reaches, but it routinely leaves stretches
+                // uncovered (an unknown word, a name, a stylised spelling). Those gaps used to have
+                // no grouping at all, so the wrapper could break anywhere inside them.
+                return fillJapaneseGaps(source, japanese(source, analyzed.readingContext.tokens));
             }
+            // No morphological analysis for this line - script runs are a far better guess than
+            // whitespace tokenisation, which on a space-less Japanese line yields one group
+            // covering everything and forces the planner to give up and wrap greedily.
+            List<DisplayLayoutGroup> runs = JapaneseScriptRunGrouping.forText(source);
+            if (!runs.isEmpty()) return runs;
         }
         if (isChinese(language, source)) {
             List<DisplayLayoutGroup> icu = icuChineseGroups(source);
@@ -87,6 +95,30 @@ public final class DisplayLayoutGroup {
             cursor = end;
         }
         return groups.isEmpty() ? whitespaceGroups(text) : groups;
+    }
+
+    /** Groups the stretches of {@code text} no analyzer token claimed, using the same script-run
+     *  heuristics as the no-analysis path, and returns the merged list in document order. */
+    private static List<DisplayLayoutGroup> fillJapaneseGaps(String text, List<DisplayLayoutGroup> tokens) {
+        if (tokens.isEmpty()) return tokens;
+        ArrayList<DisplayLayoutGroup> merged = new ArrayList<>();
+        int cursor = 0;
+        for (DisplayLayoutGroup token : tokens) {
+            if (token.start > cursor) addGapGroups(merged, text, cursor, token.start);
+            merged.add(token);
+            cursor = Math.max(cursor, token.end);
+        }
+        if (cursor < text.length()) addGapGroups(merged, text, cursor, text.length());
+        return merged;
+    }
+
+    private static void addGapGroups(List<DisplayLayoutGroup> out, String text, int start, int end) {
+        String slice = text.substring(start, end);
+        if (slice.trim().isEmpty()) return;
+        for (DisplayLayoutGroup group : JapaneseScriptRunGrouping.forText(slice)) {
+            out.add(new DisplayLayoutGroup(start + group.start, start + group.end,
+                    group.kind, group.keepTogether, group.confidence));
+        }
     }
 
     private static boolean isJapaneseAttachToken(JapaneseReadingPolicyModels.ReadingTokenEvidence token) {
