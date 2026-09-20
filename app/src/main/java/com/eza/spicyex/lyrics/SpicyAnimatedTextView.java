@@ -68,9 +68,32 @@ public class SpicyAnimatedTextView extends TextView {
         else invalidate();
     }
 
-    private float gradientBand() {
-        return Float.isNaN(gradientBandWidth) ? LyricAnimations.GRADIENT_BAND : gradientBandWidth;
+    /**
+     * Width of the soft sung/unsung transition edge, as a percentage of {@code extentPx}.
+     *
+     * <p>This used to be a flat 40% of whatever the shader spanned. A percentage means the edge is
+     * as long as the thing it is drawn across, so the longer the word - or, in block fill mode, the
+     * longer the whole line - the more smeared the karaoke edge became, until on a long word it
+     * read as a slow wash rather than a moving edge. The edge is a fixed physical thing: keep it a
+     * constant multiple of the text size and express THAT as a percentage of the current extent, so
+     * it looks identical on a two-letter word and a twenty-letter one.
+     *
+     * <p>The old 40% stays as the ceiling, so a short word - where a one-em edge would be most of
+     * the word anyway - is unchanged.
+     */
+    private float gradientBand(int extentPx) {
+        if (!Float.isNaN(gradientBandWidth)) return gradientBandWidth;
+        float textSize = getTextSize();
+        if (extentPx <= 0 || textSize <= 0f) return LyricAnimations.GRADIENT_BAND;
+        float percent = GRADIENT_BAND_EM * textSize / extentPx * 100f;
+        return Math.max(GRADIENT_BAND_MIN_PERCENT,
+                Math.min(LyricAnimations.GRADIENT_BAND, percent));
     }
+
+    /** Soft-edge width in em. Roughly one glyph, which is what reads as a moving edge. */
+    private static final float GRADIENT_BAND_EM = 1.15f;
+    /** Floor, so a very long line still has a visibly soft edge rather than a hard cut. */
+    private static final float GRADIENT_BAND_MIN_PERCENT = 4f;
 
     /** Apple line shadow intensity (0 = off). */
     public void setLineShadow(float intensity) {
@@ -189,12 +212,14 @@ public class SpicyAnimatedTextView extends TextView {
         float offset = horizontalContainerSpace
                 ? containerGradientOffsetX
                 : verticalContainerSpace ? containerGradientOffsetY : 0f;
+        // Resolved against the extent this shader actually spans, not the previous one's.
+        float band = gradientBand(shaderExtent);
         if (cachedShader != null && shaderExtent == shaderWidth
                 && Math.abs(gradientPosition - shaderPos) < 0.5f
                 && Math.abs(glow - shaderGlow) < 0.03f
                 && Math.abs(brightnessMultiplier - shaderBrightness) < 0.01f
                 && Math.abs(offset - shaderOffset) < 0.5f
-                && Float.compare(gradientBand(), shaderBand) == 0
+                && Float.compare(band, shaderBand) == 0
                 && verticalGradient == shaderVertical
                 && horizontalRtl == shaderRtl) {
             return cachedShader;
@@ -229,13 +254,13 @@ public class SpicyAnimatedTextView extends TextView {
         } else {
             float p0 = Math.max(0f, Math.min(1f, gradientPosition / 100f));
             float p1 = Math.max(p0 + 0.001f, Math.min(1f,
-                    (gradientPosition + gradientBand()) / 100f));
+                    (gradientPosition + band) / 100f));
             cachedShader = new LinearGradient(x0, y0, x1, y1,
                     new int[]{sungColor, unsungColor}, new float[]{p0, p1}, Shader.TileMode.CLAMP);
         }
         shaderPos = gradientPosition;
         shaderGlow = glow;
-        shaderBand = gradientBand();
+        shaderBand = band;
         shaderBrightness = brightnessMultiplier;
         shaderWidth = shaderExtent;
         shaderOffset = offset;

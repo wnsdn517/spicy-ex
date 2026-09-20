@@ -69,6 +69,14 @@ public final class LyricsLineViewState {
         if (line != null) state(line).romanView = view;
     }
 
+    public static void setMiniView(AppliedLine line, SpicyAnimatedTextView view) {
+        if (line != null) state(line).miniView = view;
+    }
+
+    public static SpicyAnimatedTextView getMiniView(AppliedLine line) {
+        return line == null ? null : state(line).miniView;
+    }
+
     public static void setTranslationView(AppliedLine line, SpicyAnimatedTextView view) {
         if (line != null) state(line).translationView = view;
     }
@@ -95,6 +103,7 @@ public final class LyricsLineViewState {
         if (line == null || styleBatcher == null) return;
         styleBatcher.invalidateRecursive(state(line).rowView);
         styleBatcher.invalidateRecursive(state(line).mainView);
+        styleBatcher.invalidateRecursive(state(line).miniView);
         styleBatcher.invalidateRecursive(state(line).romanView);
         styleBatcher.invalidateRecursive(state(line).translationView);
         if (state(line).dotViews == null) return;
@@ -111,14 +120,40 @@ public final class LyricsLineViewState {
         state(line).mainView.setShadowLayer(0, 0, 0, android.graphics.Color.TRANSPARENT);
     }
 
+    /** Load-reveal fade factor for this row. Owned by the shell's entrance stepper and folded into
+     *  the row's alpha here, so the reveal composes with the renderer's own opacity instead of two
+     *  animators writing the same View property. */
+    public static void setEntranceProgress(AppliedLine line, float progress) {
+        if (line == null) return;
+        float clamped = progress < 0f ? 0f : (progress > 1f ? 1f : progress);
+        AppliedLineRenderState st = state(line);
+        // Landing exactly on 1 always publishes, however small the last step was: that write is
+        // what takes the row back out of the reveal for good.
+        if (clamped >= 1f ? st.entranceProgress >= 1f
+                : Math.abs(st.entranceProgress - clamped) < 0.0005f) return;
+        st.entranceProgress = clamped;
+        // The renderer skips rows it believes are settled; the reveal is the one motion it has no
+        // spring for, so it has to be told the row still needs a frame.
+        st.needsRender = true;
+    }
+
+    public static float entranceProgress(AppliedLine line) {
+        return line == null ? 1f : state(line).entranceProgress;
+    }
+
     public static void applyStaticFrame(AppliedLine line, FrameStyleBatcher styleBatcher) {
         if (line == null || styleBatcher == null || state(line).rowView == null) return;
-        styleBatcher.applyAlphaIfChanged(state(line).rowView, 1f);
+        styleBatcher.applyAlphaIfChanged(state(line).rowView, state(line).entranceProgress);
         styleBatcher.queueBlurIfChanged(state(line).rowView, 0f, 0.25f);
         if (state(line).mainView != null) {
             styleBatcher.applyScaleIfChanged(state(line).mainView, 1f, 1f);
             state(line).mainView.setBrightnessMultiplier(1f);
             state(line).mainView.setGradientPosition(100f, 0f);
+        }
+        if (state(line).miniView != null) {
+            styleBatcher.applyScaleIfChanged(state(line).miniView, 1f, 1f);
+            state(line).miniView.setBrightnessMultiplier(1f);
+            state(line).miniView.setGradientPosition(100f, 0f);
         }
         if (state(line).romanView != null) {
             state(line).romanView.setBrightnessMultiplier(1f);
@@ -134,7 +169,7 @@ public final class LyricsLineViewState {
 
     public static void applyRowFrame(AppliedLine line, FrameStyleBatcher styleBatcher, float opacity, float blurPx) {
         if (line == null || styleBatcher == null || state(line).rowView == null) return;
-        styleBatcher.applyAlphaIfChanged(state(line).rowView, opacity);
+        styleBatcher.applyAlphaIfChanged(state(line).rowView, opacity * state(line).entranceProgress);
         styleBatcher.queueBlurIfChanged(state(line).rowView, blurPx, 0.25f);
     }
 
@@ -238,7 +273,7 @@ public final class LyricsLineViewState {
     public static float stepLineScale(AppliedLine line, float targetScale, float deltaSeconds) {
         if (line == null) return targetScale;
         if (state(line).lineScaleSpring == null) {
-            state(line).lineScaleSpring = new Spring(targetScale, 1.0f, 0.7f);
+            state(line).lineScaleSpring = new Spring(targetScale, 2.2f, 0.85f);
         }
         state(line).lineScaleSpring.setGoal(targetScale);
         return state(line).lineScaleSpring.step(frameDelta(deltaSeconds));
@@ -260,6 +295,19 @@ public final class LyricsLineViewState {
         }
         state(line).lineShadowSpring.setGoal(targetIntensity);
         return clamp(state(line).lineShadowSpring.step(frameDelta(deltaSeconds)), 0f, 1f);
+    }
+
+    public static float stepLineBlur(AppliedLine line, float targetBlurPx, float deltaSeconds) {
+        if (line == null) return targetBlurPx;
+        AppliedLineRenderState st = state(line);
+        if (st.lineBlurSpring == null) {
+            // Underdamped spring (frequency 3.0Hz, damping 0.6) so blur releases
+            // quickly when no longer needed — the previous 1.4Hz/0.95 setup was
+            // heavily overdamped and took many seconds to settle to 0.
+            st.lineBlurSpring = new Spring(targetBlurPx, 3.0f, 0.6f);
+        }
+        st.lineBlurSpring.setGoal(targetBlurPx);
+        return Math.max(0f, st.lineBlurSpring.step(frameDelta(deltaSeconds)));
     }
 
     public static boolean hasDotViews(AppliedLine line) {
@@ -301,7 +349,8 @@ public final class LyricsLineViewState {
         if (line == null) return true;
         AppliedLineRenderState state = state(line);
         if (!springAtRest(state.opacitySpring) || !springAtRest(state.lineScaleSpring)
-                || !springAtRest(state.lineGlowSpring) || !springAtRest(state.dotMainScaleSpring)
+                || !springAtRest(state.lineGlowSpring) || !springAtRest(state.lineBlurSpring)
+                || !springAtRest(state.dotMainScaleSpring)
                 || !springAtRest(state.dotMainOpacitySpring)
                 || !springAtRest(state.lineShadowSpring)) return false;
         if (line.words != null) {

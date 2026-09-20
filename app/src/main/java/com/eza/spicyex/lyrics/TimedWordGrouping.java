@@ -58,7 +58,23 @@ final class TimedWordGrouping {
         String nextGroup = logicalGroup(line, line.words.get(index + 1));
         if (currentGroup != null && nextGroup != null) return currentGroup.equals(nextGroup);
         if (segment.providerPartOfWord != null) return segment.providerPartOfWord;
+        // A line where NO segment anywhere reports a real boundary is raw character-level timing
+        // with zero word-boundary information (no lexical grouping, no provider flag, no space
+        // anywhere in the reconstructed provider text) - e.g. QQ's QRC content for CJK lines,
+        // which naturally has no spaces between characters. Trusting !boundaryAfter there glues
+        // the entire clause into one unwrappable view, same failure this method's class comment
+        // already warns about for providerPartOfWord - so total absence of any boundary in the
+        // line means "no grouping info available", not "this is one giant word".
+        if (!lineHasAnyBoundary(line)) return false;
         return !segment.boundaryAfter;
+    }
+
+    private static boolean lineHasAnyBoundary(AppliedLine line) {
+        if (line.words == null) return false;
+        for (SyllableSegment segment : line.words) {
+            if (segment != null && segment.boundaryAfter) return true;
+        }
+        return false;
     }
 
     /** Finalized reading groups are lexical owners. Provider part flags can mark every Japanese

@@ -104,14 +104,27 @@ public final class LyricsAnimationApplier {
                             && LyricsSyllableViewState.letterCount(motionOwner) > 1;
                     boolean appleLetterDriven = appleLift && liftMotion
                             && LyricsSyllableViewState.letterCount(motionOwner) > 1;
+                    // A segment that qualifies for the strong per-letter pop but isn't getting
+                    // letter treatment here - most commonly a furigana-annotated Japanese word,
+                    // whose ruby span needs one contiguous text layout rather than a view per code
+                    // point - would otherwise fall back to the much weaker default word scale and
+                    // read as a noticeably smaller "grow" than equivalent English letters. Give it
+                    // the letter-amplitude curve at word granularity instead. Scoped to ungrouped
+                    // segments only: a multi-syllable phrase blob is a different visual unit than a
+                    // single letter/word and shouldn't pop at letter amplitude.
+                    boolean strongWordPop = !grouped && !letterUnitMotion
+                            && LyricVisuals.shouldUseLetterAnimator(motionOwner, !directMotion);
+                    float emphasis = grouped ? 0f : emphasisStrength(line, groupStart);
                     // Phrase modes own the group wrapper. Word modes keep it neutral and animate
                     // each timed segment below.
                     float targetScale = (grouped && individualWordMotion) || letterUnitMotion
                             ? 1f : wordMotionScale(
-                            liftMotion, motionActive, positionMs >= groupEndMs, motionProgress);
+                            liftMotion, motionActive, positionMs >= groupEndMs, motionProgress,
+                            strongWordPop, emphasis);
                     float targetY = (grouped && individualWordMotion) || letterUnitMotion || appleLetterDriven
                             ? 0f : wordMotionY(
-                            liftMotion, motionActive, positionMs >= groupEndMs, motionProgress, appleLift);
+                            liftMotion, motionActive, positionMs >= groupEndMs, motionProgress,
+                            appleLift, emphasis);
                     float scale = LyricsSyllableViewState.stepWordScale(
                             motionOwner, targetScale, deltaSeconds, directMotion);
                     float y = LyricsSyllableViewState.stepWordY(
@@ -152,7 +165,7 @@ public final class LyricsAnimationApplier {
                 animateSegmentVisuals(line.words.get(wordIndex), positionMs, deltaSeconds,
                         basePx, sink, spotlight, glowEnabled,
                         wordBounceEnabled, directMotion, liftMotion, individualWordMotion,
-                        appleLift, appleGlow);
+                        appleLift, appleGlow, emphasisStrength(line, wordIndex));
             }
             groupStart = groupEnd + 1;
         }
@@ -185,7 +198,8 @@ public final class LyricsAnimationApplier {
             boolean liftMotion,
             boolean individualWordMotion,
             boolean appleLift,
-            boolean appleGlow
+            boolean appleGlow,
+            float emphasis
     ) {
         if (!LyricsSyllableViewState.isWordAttached(seg)) return;
         float progress = progress01(positionMs, seg.startMs, seg.endMs);
@@ -235,10 +249,22 @@ public final class LyricsAnimationApplier {
                     && progress < letter.start + letter.duration;
             boolean motionSung = sung || (active
                     && progress >= letter.start + letter.duration);
+            // The swell travels with the sweep rather than inflating the whole word at once: each
+            // letter carries the emphasis envelope over its OWN slice of the word's timeline, so a
+            // held note grows letter by letter behind the karaoke edge, which is what reads as
+            // Apple's effect. Scaled by the spatial falloff already used for letter motion so the
+            // growth tapers away from the letter currently being sung instead of ending abruptly.
+            float letterEmphasis = emphasis <= 0f ? 0f
+                    : emphasis * LyricAnimations.letterMotionFalloff(distance);
             float targetLetterScale = letterUnitMotion
-                    ? wordMotionScale(liftMotion, motionActive, motionSung, motionProgress) : 1f;
+                    ? wordMotionScale(liftMotion, motionActive, motionSung, motionProgress,
+                            false, letterEmphasis)
+                    : (letterEmphasis > 0f && active
+                            ? LyricAnimations.emphasisScale(letterTimeScale, letterEmphasis) : 1f);
             float ownLetterY = letterUnitMotion
-                    ? wordMotionY(liftMotion, motionActive, motionSung, motionProgress, appleLift) : 0f;
+                    ? wordMotionY(liftMotion, motionActive, motionSung, motionProgress, appleLift,
+                            letterEmphasis)
+                    : 0f;
             float targetLetterY = ownLetterY;
             if (letterUnitMotion && liftMotion && appleLift) {
                 float wavePos = timeAlpha * letterCount - letterIndex;
@@ -266,34 +292,82 @@ public final class LyricsAnimationApplier {
         }
     }
 
+    /**
+     * How strongly this word should swell while it is held, in [0,1]. Measured against its own
+     * line's average word duration, so the effect adapts to the song: a sustained note in a ballad
+     * swells, and a rap verse - where every word is short - stays flat instead of swelling
+     * everything or nothing on an absolute threshold.
+     *
+     * <p>Needs at least three words to have an average worth comparing against; a two-word line
+     * has no meaningful "rest of the line".
+     */
+    static float emphasisStrength(AppliedLine line, int wordIndex) {
+        if (line == null || line.words == null || line.words.size() < 3) return 0f;
+        if (wordIndex < 0 || wordIndex >= line.words.size()) return 0f;
+        SyllableSegment word = line.words.get(wordIndex);
+        if (word == null || word.startMs < 0 || word.endMs <= word.startMs) return 0f;
+        long totalDuration = 0;
+        int count = 0;
+        for (SyllableSegment w : line.words) {
+            if (w != null && w.endMs > w.startMs) {
+                totalDuration += w.endMs - w.startMs;
+                count++;
+            }
+        }
+        if (count < 2) return 0f;
+        return LyricAnimations.emphasisStrength(
+                word.endMs - word.startMs, totalDuration / count);
+    }
+
     static float wordMotionScale(boolean liftMotion, boolean active, boolean sung, float progress) {
-        if (liftMotion) return 1f;
-        return active ? LyricAnimations.scaleSpline(progress) : (sung ? 1f : 0.95f);
+        return wordMotionScale(liftMotion, active, sung, progress, false, 0f);
+    }
+
+    /** @param strong use {@link LyricAnimations#wordScaleSplineStrong} instead of the default
+     *  {@link LyricAnimations#scaleSpline} while active - see the strongWordPop call site.
+     *  @param emphasis held-note swell strength in [0,1] from {@link LyricAnimations#emphasisStrength};
+     *  0 leaves the ordinary curve untouched. The swell multiplies the base curve rather than
+     *  replacing it, so a held word still pops on arrival the way every other word does and then
+     *  grows into the sustain, instead of switching to a separate, visibly different animation. */
+    static float wordMotionScale(boolean liftMotion, boolean active, boolean sung, float progress,
+                                  boolean strong, float emphasis) {
+        if (liftMotion) {
+            // Apple lift owns vertical motion and leaves scale alone - except for a held note,
+            // which is the one place Apple does grow the word.
+            return active && emphasis > 0f ? LyricAnimations.emphasisScale(progress, emphasis) : 1f;
+        }
+        if (!active) return sung ? 1f : 0.95f;
+        float base = strong ? LyricAnimations.wordScaleSplineStrong(progress)
+                : LyricAnimations.scaleSpline(progress);
+        if (emphasis <= 0f) return base;
+        return base * LyricAnimations.emphasisScale(progress, emphasis);
     }
 
     static float wordMotionY(boolean liftMotion, boolean active, boolean sung, float progress) {
-        return wordMotionY(liftMotion, active, sung, progress, false);
+        return wordMotionY(liftMotion, active, sung, progress, false, 0f);
     }
 
     static float wordMotionY(boolean liftMotion, boolean active, boolean sung, float progress,
-                             boolean appleLift) {
+                              boolean appleLift) {
+        return wordMotionY(liftMotion, active, sung, progress, appleLift, 0f);
+    }
+
+    static float wordMotionY(boolean liftMotion, boolean active, boolean sung, float progress,
+                              boolean appleLift, float emphasis) {
         if (liftMotion) {
             if (appleLift) {
-                if (active) return LyricAnimations.appleLiftYOffsetSpline(progress);
+                if (active) {
+                    return LyricAnimations.appleLiftYOffsetSpline(progress)
+                            + LyricAnimations.emphasisLiftEm(progress, emphasis);
+                }
                 return sung ? LyricAnimations.appleLiftYOffsetSpline(1f) : 0f;
             }
             if (active) return LyricAnimations.liftYOffsetSpline(progress);
             return 0f;
         }
-        return active ? LyricAnimations.yOffsetSpline(progress) : (sung ? 0f : 0.01f);
-    }
-
-    static float groupedWrapperScale(boolean beforeGroup) {
-        return 1f;
-    }
-
-    static float groupedWrapperY(boolean beforeGroup) {
-        return 0f;
+        if (!active) return sung ? 0f : 0.01f;
+        return LyricAnimations.yOffsetSpline(progress)
+                + LyricAnimations.emphasisLiftEm(progress, emphasis);
     }
 
     static float groupedLocalScale(boolean individualWordMotion, boolean liftMotion,
@@ -394,12 +468,17 @@ public final class LyricsAnimationApplier {
         }
     }
 
+    // Reused across dots/frames: values are read immediately by the single caller in
+    // animateInterludeDots() before the next dot (or frame) overwrites them, so one shared
+    // mutable instance avoids allocating per dot per Choreographer frame.
+    private static final DotTargets DOT_TARGETS = new DotTargets();
+
     static DotTargets dotTargets(SyllableSegment seg, long positionMs) {
-        if (seg == null) return new DotTargets(0.75f, 0f, 0f, 0.35f, 0f);
-        if (positionMs < seg.startMs) return new DotTargets(0.75f, 0f, 0f, 0.35f, 0f);
-        if (positionMs >= seg.endMs) return new DotTargets(1f, 0f, 1f, 1f, 1f);
+        if (seg == null) return DOT_TARGETS.set(0.75f, 0f, 0f, 0.35f, 0f);
+        if (positionMs < seg.startMs) return DOT_TARGETS.set(0.75f, 0f, 0f, 0.35f, 0f);
+        if (positionMs >= seg.endMs) return DOT_TARGETS.set(1f, 0f, 1f, 1f, 1f);
         float progress = progress01(positionMs, seg.startMs, seg.endMs);
-        return new DotTargets(
+        return DOT_TARGETS.set(
                 LyricAnimations.dotScaleSpline(progress),
                 LyricAnimations.dotYOffsetSpline(progress),
                 LyricAnimations.dotGlowSpline(progress),
@@ -409,18 +488,19 @@ public final class LyricsAnimationApplier {
     }
 
     static final class DotTargets {
-        final float scale;
-        final float yOffset;
-        final float glow;
-        final float opacity;
-        final float gradientProgress;
+        float scale;
+        float yOffset;
+        float glow;
+        float opacity;
+        float gradientProgress;
 
-        DotTargets(float scale, float yOffset, float glow, float opacity, float gradientProgress) {
+        DotTargets set(float scale, float yOffset, float glow, float opacity, float gradientProgress) {
             this.scale = scale;
             this.yOffset = yOffset;
             this.glow = glow;
             this.opacity = opacity;
             this.gradientProgress = gradientProgress;
+            return this;
         }
     }
 
