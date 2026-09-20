@@ -12,7 +12,7 @@ import java.util.Locale;
 /** Shared source-selection preferences used by fullscreen and now-playing lyrics. */
 public final class LyricsSourcePreferences {
     public enum Source {
-        APPLE_MUSIC("apple"), SPICY("spicy"), SPOTIFY("spotify"), LRCLIB("lrclib");
+        APPLE_MUSIC("apple"), SPICY("spicy"), SPOTIFY("spotify"), LRCLIB("lrclib"), NETEASE("netease"), QQ_MUSIC("qq_music");
         public final String id;
         Source(String id) { this.id = id; }
         public static Source parse(String value) {
@@ -34,7 +34,7 @@ public final class LyricsSourcePreferences {
             String v = value.trim().toLowerCase(Locale.ROOT);
             for (RankingMode mode : values()) if (mode.id.equals(v) || mode.name().toLowerCase(Locale.ROOT).equals(v)) return mode;
             if ("auto".equals(v)) return AUTO;
-            if ("source order".equals(v)) return SOURCE_ORDER;
+            if ("source order".equals(v) || "userorder".equals(v)) return SOURCE_ORDER;
             // Legacy three-way ranking collapsed to Auto: both old automatic modes
             // prioritized content over position, so they migrate to AUTO.
             if ("smart ranking".equals(v) || "smart_ranking".equals(v) || "smart".equals(v)) return AUTO;
@@ -51,7 +51,7 @@ public final class LyricsSourcePreferences {
     private static final String OVERRIDE_ORDER = "override_order";
     private static final int MAX_OVERRIDES = 200;
     private static final List<Source> DEFAULT_ORDER = Collections.unmodifiableList(
-            java.util.Arrays.asList(Source.APPLE_MUSIC, Source.SPICY, Source.SPOTIFY, Source.LRCLIB));
+            java.util.Arrays.asList(Source.APPLE_MUSIC, Source.QQ_MUSIC, Source.SPOTIFY, Source.NETEASE, Source.LRCLIB));
 
     private LyricsSourcePreferences() {}
 

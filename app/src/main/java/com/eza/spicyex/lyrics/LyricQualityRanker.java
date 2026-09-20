@@ -54,6 +54,16 @@ public final class LyricQualityRanker {
             return 1000;
         }
 
+        // QQ and NetEase are peers: both can serve genuine word-level timing (QRC and YRC
+        // respectively) or fall back to line-level for the same track, so they share a band and
+        // the sync level decides between them rather than the provider name.
+        if (source == Source.QQ_MUSIC || source == Source.NETEASE) {
+            if (sync == Sync.SYLLABLE) return 3500;
+            if (sync == Sync.WORD) return 3450;
+            if (sync == Sync.LINE) return 3400;
+            if (sync == Sync.STATIC) return 2200;
+            return 1000;
+        }
         if (sync == Sync.SYLLABLE) return 1200;
         if (sync == Sync.WORD) return 1150;
         if (sync == Sync.LINE) return 1100;
@@ -80,7 +90,7 @@ public final class LyricQualityRanker {
         return sourceTier(candidate) > sourceTier(currentBest);
     }
 
-    /** Source tiebreak tier: Apple Music (any fetcher) > Spotify > LRCLIB > unknown. */
+    /** Source tiebreak tier: Apple Music (any fetcher) > Spotify > LRCLIB > QQ/NetEase > unknown. */
     static int sourceTier(LyricsDocument doc) {
         if (doc == null) return -1;
         String hay = (LyricsDocument.safe(doc.fetchSource) + " " + LyricsDocument.safe(doc.provider))
@@ -93,7 +103,8 @@ public final class LyricQualityRanker {
             return 2;
         }
         if (hay.contains("lrclib")) return 1;
-        return 0;
+        if (hay.contains("qq") || hay.contains("netease")) return 0;
+        return -1;
     }
 
     /** Sync-level rank: syllable (3) > word (2) > line (1) > static (0) > unknown (-1). */
@@ -134,6 +145,8 @@ public final class LyricQualityRanker {
             return Source.NATIVE;
         }
         if (providerLabel.contains("spicy") || providerLabel.contains("apple") || providerLabel.contains("lenerd")) return Source.SPICY;
+        if ("qq_music".equals(fetchSource) || "qq music".equals(provider.toLowerCase(java.util.Locale.US))) return Source.QQ_MUSIC;
+        if (source.contains("netease") || providerLabel.contains("netease")) return Source.NETEASE;
         return Source.UNKNOWN;
     }
 
@@ -149,6 +162,8 @@ public final class LyricQualityRanker {
         SPICY,
         NATIVE,
         LRCLIB,
+        QQ_MUSIC,
+        NETEASE,
         UNKNOWN
     }
 
