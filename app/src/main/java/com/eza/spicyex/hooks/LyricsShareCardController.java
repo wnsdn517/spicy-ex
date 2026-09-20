@@ -20,6 +20,7 @@ import android.provider.MediaStore;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -289,36 +290,83 @@ final class LyricsShareCardController {
         paint.setColor(Color.WHITE);
         paint.setTypeface(Typeface.DEFAULT_BOLD);
         int width = CARD_WIDTH - dp(48) * 2;
+        int topPad = dp(150);
+        int bottomPad = CARD_HEIGHT - dp(230);
+        int available = Math.max(dp(160), bottomPad - topPad);
+        String fittedQuote = safe(quote);
         int size = dp(48);
         StaticLayout layout;
+        TextPaint sub = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        sub.setColor(Color.argb(180, 255, 255, 255));
+        sub.setTypeface(Typeface.DEFAULT);
+        int subSize = dp(24);
+        StaticLayout subLayout = null;
+
+        // Fit the quote and its optional translation as one block. The old code only limited the
+        // quote to five lines, then appended translation below it without measuring that extra
+        // height, which could push both the translation and the footer outside the bitmap.
         while (true) {
             paint.setTextSize(size);
-            layout = staticLayout(quote, paint, width);
-            if (layout.getLineCount() <= 5 || size <= dp(22)) break;
-            size -= dp(3);
+            sub.setTextSize(subSize);
+            layout = staticLayout(fittedQuote, paint, width);
+            subLayout = isBlank(translation) ? null : staticLayout(safe(translation), sub, width);
+            int total = layout.getHeight() + (subLayout == null ? 0 : dp(16) + subLayout.getHeight());
+            if (total <= available || (size <= dp(22) && subSize <= dp(16))) break;
+            if (size > dp(22)) size -= dp(2);
+            else subSize -= dp(1);
         }
-        int topPad = dp(170);
-        int bottomPad = CARD_HEIGHT - dp(220);
-        int available = bottomPad - topPad;
-        int textHeight = layout.getHeight();
-        int yOffset = topPad + Math.max(0, (available - textHeight) / 2);
+
+        // Extremely long provider lines can still exceed the card at the minimum font size. Keep
+        // the quote inside the measured region by trimming only the tail and retaining an ellipsis.
+        if (subLayout != null) {
+            int quoteBudget = available - dp(16) - subLayout.getHeight();
+            int lineHeight = Math.max(1, paint.getFontMetricsInt(null));
+            int maxLines = Math.max(1, quoteBudget / lineHeight);
+            fittedQuote = ellipsizeToLines(fittedQuote, paint, width, maxLines);
+            layout = staticLayout(fittedQuote, paint, width);
+        } else {
+            int lineHeight = Math.max(1, paint.getFontMetricsInt(null));
+            fittedQuote = ellipsizeToLines(fittedQuote, paint, width, Math.max(1, available / lineHeight));
+            layout = staticLayout(fittedQuote, paint, width);
+        }
+        int textHeight = layout.getHeight() + (subLayout == null ? 0 : dp(16) + subLayout.getHeight());
+        // Bias the block toward the upper half. Centering a short line in the whole quote area was
+        // the reason a normal one-line share quote appeared to start conspicuously low.
+        int yOffset = topPad + Math.max(0, (available - textHeight) / 3);
+        canvas.save();
+        canvas.clipRect(dp(48), topPad, CARD_WIDTH - dp(48), bottomPad);
         canvas.save();
         canvas.translate(dp(48), yOffset);
         layout.draw(canvas);
-        float usedHeight = layout.getHeight();
         canvas.restore();
 
-        if (!isBlank(translation)) {
-            TextPaint sub = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-            sub.setColor(Color.argb(180, 255, 255, 255));
-            sub.setTextSize(dp(24));
-            sub.setTypeface(Typeface.DEFAULT);
-            StaticLayout subLayout = staticLayout(translation, sub, width);
+        if (subLayout != null) {
             canvas.save();
-            canvas.translate(dp(48), yOffset + usedHeight + dp(16));
+            canvas.translate(dp(48), yOffset + layout.getHeight() + dp(16));
             subLayout.draw(canvas);
             canvas.restore();
         }
+        canvas.restore();
+    }
+
+    private static String ellipsizeToLines(String text, TextPaint paint, int width, int maxLines) {
+        String value = safe(text);
+        if (value.isEmpty() || staticLayout(value, paint, width).getLineCount() <= maxLines) return value;
+        int low = 0;
+        int high = value.length();
+        String best = "…";
+        while (low <= high) {
+            int mid = (low + high) >>> 1;
+            String candidate = TextUtils.ellipsize(value.substring(0, mid), paint, width,
+                    TextUtils.TruncateAt.END).toString();
+            if (staticLayout(candidate, paint, width).getLineCount() <= maxLines) {
+                best = candidate;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+        return best;
     }
 
     private void drawCenteredArt(Canvas canvas, Bitmap art) {
