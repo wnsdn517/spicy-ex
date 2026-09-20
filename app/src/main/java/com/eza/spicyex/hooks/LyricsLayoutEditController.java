@@ -196,6 +196,7 @@ final class LyricsLayoutEditController {
         private Integer panelTopMargin;
         private Integer panelContainerHeight;
         private boolean panelVisible;
+        private boolean panelUserPositioned;
         private View artCapture;
         private View artHandle;
         private View trackTextCapture;
@@ -1335,8 +1336,10 @@ final class LyricsLayoutEditController {
          *  mid-screen) settles on the moved position rather than oscillating forever. */
         private void avoidPanelOverlap() {
             if (!panelVisible || panelContainer.getVisibility() != View.VISIBLE) return;
-            View selectedCapture = captureFor(selected);
-            View[] candidates = {selectedCapture, skipCapture, followCapture, dockCapture};
+            // The selected element is allowed to sit behind the sheet: selecting it is exactly
+            // what opened the sheet. Only floating chrome must stay visible beside its boundary.
+            if (panelUserPositioned) return;
+            View[] candidates = {skipCapture, followCapture, dockCapture};
             View overlapping = null;
             Rect panelRect = screenRect(panelContainer);
             for (View candidate : candidates) {
@@ -1346,7 +1349,13 @@ final class LyricsLayoutEditController {
                     break;
                 }
             }
-            if (overlapping == null) return;
+            if (overlapping == null) {
+                if (panelTopMargin != null) {
+                    panelTopMargin = null;
+                    applyPanelLayout();
+                }
+                return;
+            }
             Rect captureRect = screenRect(overlapping);
             Rect overlayRect = screenRect(overlay);
             boolean captureInUpperHalf = overlay.getHeight() <= 0
@@ -1360,6 +1369,7 @@ final class LyricsLayoutEditController {
         /** Opens the option tray like a bottom sheet. It stays INVISIBLE while closed so its
          * measured height remains available for the first opening and for overlap calculations. */
         private void showPanelSheet(boolean animate) {
+            if (!panelVisible && !panelUserPositioned) panelTopMargin = null;
             panelVisible = true;
             panelContainer.setVisibility(View.VISIBLE);
             panelContainer.post(() -> {
@@ -2023,6 +2033,7 @@ final class LyricsLayoutEditController {
                         float dy = event.getRawY() - startRawY[0];
                         if (!dragging[0] && Math.abs(dy) > slopPx) dragging[0] = true;
                         if (dragging[0]) {
+                            panelUserPositioned = true;
                             panelTopMargin = clampPanelTopMargin(Math.round(startTopMargin[0] + dy));
                             applyPanelLayout();
                         }

@@ -2950,7 +2950,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             AppliedLine line = document.appliedLines.get(i);
             View row = rowMountController.attachedRowView(line);
             if (row == null) continue;
-            float distance = activeIndex < 0 ? 0f : Math.abs(i - activeIndex);
+            float distance = cascadeDistance(line, i, activeIndex);
             // Every row starts displaced by the FULL scroll delta, with no per-row weighting.
             // The ScrollView has already carried the content the other way by exactly this much,
             // so an offset of exactly the delta is what leaves the column visually untouched at
@@ -2994,6 +2994,34 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             rowCascades.put(line, new RowCascade(initialOffset, delay, frequency, damping));
             row.setTranslationY(initialOffset);
         }
+    }
+
+    /**
+     * Background/dual-vocal rows are inserted directly after their lead row in appliedLines.
+     * Using raw list indices therefore gives the lower row a different delay, so the upper and
+     * lower voices visibly arrive apart. Measure rows by their source lyric line instead: a lead
+     * and its paired background row share one cascade phase, while adjacent source lines remain
+     * one step apart.
+     */
+    private float cascadeDistance(AppliedLine line, int rowIndex, int activeIndex) {
+        if (activeIndex < 0 || document == null || document.appliedLines == null
+                || activeIndex >= document.appliedLines.size()) {
+            return 0f;
+        }
+        AppliedLine active = document.appliedLines.get(activeIndex);
+        if (line != null && active != null && line.sourceLine != null
+                && line.sourceLine == active.sourceLine) {
+            return 0f;
+        }
+        if (line != null && active != null && line.sourceLine != null
+                && active.sourceLine != null && document.lines != null) {
+            int lineIndex = document.lines.indexOf(line.sourceLine);
+            int activeLineIndex = document.lines.indexOf(active.sourceLine);
+            if (lineIndex >= 0 && activeLineIndex >= 0) {
+                return Math.abs(lineIndex - activeLineIndex);
+            }
+        }
+        return Math.abs(rowIndex - activeIndex);
     }
 
     private void stepRowCascade(float deltaSeconds) {
