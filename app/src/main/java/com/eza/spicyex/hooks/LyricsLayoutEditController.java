@@ -1869,6 +1869,9 @@ final class LyricsLayoutEditController {
                     new String[]{"Gradient wash", "Spotlight", "Apple Music"},
                     () -> selectElement(Element.BACKGROUND)), matchWrap(8));
 
+            addOption(toggleRow(Settings.LOAD_LIFT_ANIMATION,
+                    strings.setting(Settings.LOAD_LIFT_ANIMATION), null), matchWrap(12));
+
             addDivider();
             addSectionLabel(Settings.APPLE_CASCADE_SPEED, 10);
             addOption(dragRow(

@@ -169,13 +169,13 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private static final float SCROLL_SPRING_FREQUENCY_HZ = 1.3f;
     /** Used for a hop of roughly one row; blended toward the frequency above as the jump grows
      *  (see scrollSpringFrequency). A line-to-line advance has to keep up with the song. */
-    private static final float SCROLL_SPRING_NEAR_FREQUENCY_HZ = 2.2f;
-    private static final float SCROLL_SPRING_DAMPING = 0.90f;
+    private static final float SCROLL_SPRING_NEAR_FREQUENCY_HZ = 1.55f;
+    private static final float SCROLL_SPRING_DAMPING = 0.97f;
     // Returning to the playing line after reading ahead. Livelier than an ordinary advance on
     // purpose: this one is a deliberate request, and Apple answers it with motion that clearly
     // travels rather than a polite ease. Lower damping leaves a touch of overshoot at the end.
-    private static final float RETURN_SPRING_FREQUENCY_HZ = 1.65f;
-    private static final float RETURN_SPRING_DAMPING = 0.78f;
+    private static final float RETURN_SPRING_FREQUENCY_HZ = 1.30f;
+    private static final float RETURN_SPRING_DAMPING = 0.90f;
     /** Launch speed given per pixel of distance, so a longer return leaves faster. */
     private static final float RETURN_LAUNCH_VELOCITY_PER_PX = 1.05f;
     private static final float RETURN_MAX_LAUNCH_VELOCITY_PX_PER_SEC = 2600f;
@@ -2942,9 +2942,9 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // a stop and then twitched back, which reads as a mechanical bounce rather than weight
         // settling; dropping the frequency lengthens the travel so the motion is legible, and
         // raising the damping trades the visible rebound for a single clean arrival.
-        float baseFrequency = (apple ? (landscape ? 1.55f : 1.62f) : ROW_CASCADE_FREQUENCY_HZ)
+        float baseFrequency = (apple ? (landscape ? 1.30f : 1.36f) : ROW_CASCADE_FREQUENCY_HZ)
                 * speedMul * springStrengthMultiplier();
-        float baseDamping = apple ? (landscape ? 0.94f : 0.95f) : ROW_CASCADE_DAMPING;
+        float baseDamping = apple ? (landscape ? 0.98f : 0.985f) : ROW_CASCADE_DAMPING;
         for (int i : rowMountController.mountedIndices()) {
             if (i < 0 || i >= document.appliedLines.size()) continue;
             AppliedLine line = document.appliedLines.get(i);

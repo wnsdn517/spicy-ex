@@ -128,12 +128,14 @@ public final class LyricsFrameRenderer {
                     config.lineBlurEnabled, activeChanged, scrollHoldChanged, userScrollHeld);
             if (!lineState.active && !blurNeedsRefresh
                     && !LyricsLineViewState.needsFrame(line, targetClass)) {
-                // Still drive the blur spring toward its target even when the row
-                // is otherwise idle (opacity/opacity settled, no animation needed).
-                // Without this, an overdamped blur spring could remain non-zero
-                // indefinitely because stepLineBlur is never called.
+                // Keep applying the frame while the blur spring settles. Stepping the spring but
+                // returning here left the View's RenderEffect at its old value, so the next
+                // active-line refresh appeared to "undo" the gradual blur in one frame.
                 float blurTarget = mobileLineBlurPx(line, i, activeIndex, lineState.active, userScrollHeld, config);
-                LyricsLineViewState.stepLineBlur(line, blurTarget, deltaSeconds);
+                float blur = LyricsLineViewState.stepLineBlur(line, blurTarget, deltaSeconds);
+                float opacity = LyricsAnimationApplier.stepLineOpacity(line, lineState.active,
+                        lineState.sung, deltaSeconds, config.appleDimPassed);
+                LyricsLineViewState.applyRowFrame(line, styleBatcher, opacity, blur);
                 continue;
             }
             float opacity = LyricsAnimationApplier.stepLineOpacity(line, lineState.active, lineState.sung,
@@ -448,6 +450,9 @@ public final class LyricsFrameRenderer {
                                    boolean userScrollHeld, LyricsRenderConfig config) {
         if (line == null || Build.VERSION.SDK_INT < 31) return 0f;
         if (!config.lineBlurEnabled) return 0f;
+        // Background-vocal/provider rows remain readable. They still take part in the shared
+        // row translation cascade, but must not inherit the lead lyric's blur target.
+        if (line.bgLine) return 0f;
         if (userScrollHeld) return 0f;
         float quality = config.blurQuality;
         if (quality <= 0f) return 0f;
