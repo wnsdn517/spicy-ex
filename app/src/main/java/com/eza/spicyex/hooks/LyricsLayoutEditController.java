@@ -474,46 +474,74 @@ final class LyricsLayoutEditController {
             }
 
             optionsCard.setOrientation(LinearLayout.VERTICAL);
-            optionsCard.setPadding(dp(14), dp(10), dp(14), dp(10));
+            optionsCard.setPadding(dp(14), dp(4), dp(14), dp(10));
 
             // The card can run long (Artwork/Background have half a dozen rows each), and in
             // landscape's shorter height a plain WRAP_CONTENT card would grow tall enough to sit
             // under the top bar, with no way to reach whatever scrolled past it. Wrapping it in a
             // scroll view - capped well short of the full height by MaxHeightScrollView - keeps it
             // reachable by drag in both orientations instead.
-            // Darker and near-opaque, with a barely-there border and no drop shadow - this panel
-            // sits directly over the lyrics it's editing, so it should read as a quiet utility
-            // tray rather than a bright card competing with them for attention.
-            GradientDrawable cardBg = new GradientDrawable();
-            cardBg.setColor(0xF20A0A0D);
-            cardBg.setCornerRadius(dp(20));
-            cardBg.setStroke(dp(1), 0x14FFFFFF);
-            optionsScroll.setBackground(cardBg);
-            optionsScroll.setElevation(dp(4));
+            //
+            // Moved background and elevation to the panelContainer itself to create a cohesive 
+            // full-width BottomSheet appearance.
             optionsScroll.setVerticalScrollBarEnabled(false);
             optionsScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
             optionsScroll.addView(optionsCard, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+            GradientDrawable panelBg = new GradientDrawable();
+            panelBg.setColor(0xF21C1C22);
+            float cornerRadius = dp(24);
+            panelBg.setCornerRadii(new float[]{cornerRadius, cornerRadius, cornerRadius, cornerRadius, 0, 0, 0, 0});
+            panelBg.setStroke(dp(1), 0x24FFFFFF);
+            panelContainer.setBackground(panelBg);
+            panelContainer.setElevation(dp(16));
+
+            panelContainer.removeAllViews();
+            panelContainer.addView(panelDragHandle(), panelDragHandleLp());
             panelContainer.addView(actionIconsRow(), new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            panelContainer.addView(panelDragHandle(), panelDragHandleLp());
             panelContainer.addView(optionsScroll, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
             panelContainer.addView(panelBottomResizeHandle(), new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(20)));
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(12)));
 
             overlay.addView(panelContainer, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             applyPanelLayout();
+            
+            // Slide-up entrance animation: start hidden to prevent flickering pops on frame one.
             panelContainer.setVisibility(View.INVISIBLE);
+            overlay.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+                @Override
+                public boolean onPreDraw() {
+                    overlay.getViewTreeObserver().removeOnPreDrawListener(this);
+                    int height = panelContainer.getHeight();
+                    if (height > 0) {
+                        // Position below the bottom edge before making it visible.
+                        panelContainer.setTranslationY(height);
+                        panelContainer.setAlpha(1f);
+                        panelContainer.setVisibility(View.VISIBLE);
+                        panelContainer.animate()
+                                .translationY(0f)
+                                .setDuration(400)
+                                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f))
+                                .start();
+                    } else {
+                        panelContainer.setVisibility(View.VISIBLE);
+                    }
+                    return true;
+                }
+            });
 
             refreshArtwork();
             refreshTrackText();
             selectElement(Element.ARTWORK, false);
 
+            overlay.setAlpha(0f);
             shellRoot.addView(overlay, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            overlay.animate().alpha(1f).setDuration(240).start();
 
             // Floating chips and the top controls cluster only reliably show under their own
             // real-state conditions (an active skip gap, follow state away from the current line,
@@ -1987,8 +2015,8 @@ final class LyricsLayoutEditController {
         // -- movable options panel -----------------------------------------------
 
         private static final int PANEL_MIN_TOP_DP = 72;
-        private static final int PANEL_BOTTOM_MARGIN_DP = 28;
-        private static final int PANEL_SIDE_MARGIN_DP = 20;
+        private static final int PANEL_BOTTOM_MARGIN_DP = 0;
+        private static final int PANEL_SIDE_MARGIN_DP = 0;
         /** Opening height as a fraction of the overlay - a plain WRAP_CONTENT panel only shows a
          *  couple of rows before the user has to find and drag panelBottomResizeHandle just to see
          *  the rest of that element's options, every single time the editor opens. Slightly under
@@ -1997,8 +2025,9 @@ final class LyricsLayoutEditController {
         private static final float DEFAULT_PANEL_HEIGHT_FRACTION = 0.55f;
 
         private LinearLayout.LayoutParams panelDragHandleLp() {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(50), dp(12));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(36), dp(4));
             lp.gravity = Gravity.CENTER_HORIZONTAL;
+            lp.topMargin = dp(10);
             lp.bottomMargin = dp(8);
             return lp;
         }
@@ -2009,8 +2038,8 @@ final class LyricsLayoutEditController {
         private View panelDragHandle() {
             View handle = new View(activity);
             GradientDrawable bg = new GradientDrawable();
-            bg.setColor(0x40FFFFFF);
-            bg.setCornerRadius(dp(3));
+            bg.setColor(0x33FFFFFF);
+            bg.setCornerRadius(dp(2));
             handle.setBackground(bg);
             installPanelDrag(handle);
             return handle;

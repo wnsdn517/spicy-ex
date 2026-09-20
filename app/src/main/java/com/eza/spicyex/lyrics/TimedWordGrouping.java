@@ -65,8 +65,38 @@ final class TimedWordGrouping {
         // the entire clause into one unwrappable view, same failure this method's class comment
         // already warns about for providerPartOfWord - so total absence of any boundary in the
         // line means "no grouping info available", not "this is one giant word".
-        if (!lineHasAnyBoundary(line)) return false;
+        if (!lineHasAnyBoundary(line)) {
+            // For Korean and other space-less languages without provider boundaries,
+            // group consecutive non-punctuation segments to form words.
+            String language = ReadingLanguagePolicy.layoutLanguage(line);
+            if ("ko".equals(language)) {
+                return !isPunctuationOrSpace(segment.text) && !isPunctuationOrSpace(line.words.get(index + 1).text);
+            }
+            return false;
+        }
         return !segment.boundaryAfter;
+    }
+
+    private static boolean isPunctuationOrSpace(String text) {
+        if (text == null || text.isEmpty()) return true;
+        for (int i = 0; i < text.length(); ) {
+            int cp = text.codePointAt(i);
+            if (Character.isWhitespace(cp) || isPunctuation(cp)) return true;
+            i += Character.charCount(cp);
+        }
+        return false;
+    }
+
+    private static boolean isPunctuation(int cp) {
+        return "،।，．！？!?、。，．！？!?」』）】〉》〕］)…‥〜ー".indexOf(cp) >= 0
+                || Character.getType(cp) == Character.OTHER_PUNCTUATION
+                || Character.getType(cp) == Character.CONNECTOR_PUNCTUATION
+                || Character.getType(cp) == Character.DASH_PUNCTUATION
+                || Character.getType(cp) == Character.END_PUNCTUATION
+                || Character.getType(cp) == Character.FINAL_QUOTE_PUNCTUATION
+                || Character.getType(cp) == Character.INITIAL_QUOTE_PUNCTUATION
+                || Character.getType(cp) == Character.OTHER_PUNCTUATION
+                || Character.getType(cp) == Character.START_PUNCTUATION;
     }
 
     private static boolean lineHasAnyBoundary(AppliedLine line) {

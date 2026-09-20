@@ -38,6 +38,17 @@ public final class FrameStyleBatcher {
         queueFloatStyle(view, StyleField.TRANSLATION_Y, translationY, 0.5f);
     }
 
+    /**
+     * Queues a row blur radius. {@code epsilon} is the dedupe threshold, and it is the only thing
+     * that should be throttling these writes.
+     *
+     * <p>Rounding the radius onto a coarser grid to save RenderEffect churn was tried and reverted:
+     * the whole blur range is small (about 1.7px end to end on the "low" render-quality tier, since
+     * the tier already scales every radius down), so a grid wide enough to matter turns the curve
+     * into one or two visible steps and the column reads as flickering between sharp and blurred on
+     * every line advance. The existing epsilon already drops sub-quarter-pixel writes, which is as
+     * much as can be taken here without it being seen.
+     */
     public void queueBlurIfChanged(View view, float blurPx, float epsilon) {
         queueFloatStyle(view, StyleField.BLUR, blurPx, epsilon);
     }

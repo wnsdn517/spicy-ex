@@ -195,9 +195,11 @@ final class LyricsShellEmptyStateController {
         lyricsScroll.post(align);
     }
 
-    static int loadingTopMargin(int viewportHeightPx, int paddingTopPx) {
+    private int loadingTopMargin(int viewportHeightPx, int paddingTopPx) {
         if (viewportHeightPx <= 0) return 0;
-        return Math.max(0, viewportHeightPx / 2 - Math.max(0, paddingTopPx));
+        // Position loading at the top of the lyrics area (where first line appears)
+        // instead of centering in the viewport. This matches the lyrics render position.
+        return Math.max(0, paddingTopPx + dp(56));
     }
 
     void showError(LinearLayout lyricsColumn, String error) {

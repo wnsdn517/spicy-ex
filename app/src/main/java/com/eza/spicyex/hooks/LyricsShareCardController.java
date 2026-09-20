@@ -31,9 +31,13 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.eza.spicyex.SpotifyTrack;
+import com.eza.spicyex.lyrics.AppliedLine;
+import com.eza.spicyex.lyrics.LyricsDocument;
 import com.eza.spicyex.xposed.XpLog;
 
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 import static com.eza.spicyex.lyrics.LyricUtils.isBlank;
 import static com.eza.spicyex.lyrics.LyricUtils.safe;
@@ -42,46 +46,81 @@ import static com.eza.spicyex.lyrics.LyricUtils.spotifyUriToWebUrl;
 /**
  * Renders an Apple Music-style share card (quoted lyric line or, with no lyrics available, a
  * plain track card) as a bitmap, shows it in a long-press "pop in" preview over the fullscreen
- * lyrics screen, and hands it to the system share sheet. Runs entirely inside the hooked Spotify
- * process, so sharing goes through {@link MediaStore} (any app's process can insert its own rows
- * there without special provider wiring) rather than a FileProvider, which would need a file
- * living under this module's own app-private storage - not reachable from here.
+ * lyrics screen, and hands it to the system share sheet.
  */
 final class LyricsShareCardController {
     private static final String TAG = "[SpotifyPlusLyricsShare]";
     private static final int CARD_WIDTH = 1080;
     private static final int CARD_HEIGHT = 1350;
+    private static final int MIN_TEXT_SIZE_DP = 22;
 
     private final Activity activity;
     private View overlay;
+    private ImageView cardView;
+    private LyricsDocument document;
+    private int startIndex, endIndex;
+    private boolean showTranslation = true;
+    private SpotifyTrack track;
+    private Bitmap artwork;
+    private ViewGroup root;
 
     LyricsShareCardController(Activity activity) {
         this.activity = activity;
     }
 
     /** Long-pressed a real lyric line: quote it, with its translation underneath if present. */
-    void showForLine(ViewGroup root, SpotifyTrack track, Bitmap art, String quote, String translation) {
-        show(root, track, art, safe(quote), safe(translation));
+    void showForLine(ViewGroup root, LyricsDocument doc, SpotifyTrack track, Bitmap art, int index) {
+        this.root = root;
+        this.document = doc;
+        this.track = track;
+        this.artwork = art;
+        this.startIndex = index;
+        this.endIndex = index;
+        this.showTranslation = true;
+        show();
     }
 
     /** No lyrics for this track at all: fall back to a plain "now playing" track card. */
     void showTrackCard(ViewGroup root, SpotifyTrack track, Bitmap art) {
-        show(root, track, art, "", "");
+        this.root = root;
+        this.document = null;
+        this.track = track;
+        this.artwork = art;
+        this.startIndex = -1;
+        this.endIndex = -1;
+        this.showTranslation = false;
+        show();
     }
 
-    private void show(ViewGroup root, SpotifyTrack track, Bitmap art, String quote, String translation) {
+    private void show() {
         if (activity == null || root == null || track == null) return;
         dismiss();
-        Bitmap card;
-        try {
-            card = renderCard(art, quote, translation, safe(track.title), safe(track.artist));
-        } catch (Throwable t) {
-            XpLog.log(TAG + " render failed: " + t);
-            return;
-        }
-        overlay = buildPreview(root, card, track, quote);
+
+        Bitmap card = refreshCard();
+        if (card == null) return;
+
+        overlay = buildPreview(card);
         root.addView(overlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    private Bitmap refreshCard() {
+        try {
+            List<String> quotes = new ArrayList<>();
+            List<String> translations = new ArrayList<>();
+            if (document != null && startIndex >= 0) {
+                for (int i = startIndex; i <= endIndex; i++) {
+                    AppliedLine line = document.appliedLines.get(i);
+                    if (line.dotLine || isBlank(line.text)) continue;
+                    quotes.add(line.text);
+                    translations.add(showTranslation ? line.translatedText : "");
+                }
+            }
+            return renderCard(artwork, quotes, translations, safe(track.title), safe(track.artist));
+        } catch (Throwable t) {
+            XpLog.log(TAG + " render failed: " + t);
+            return null;
+        }
     }
 
     void dismiss() {
@@ -91,9 +130,7 @@ final class LyricsShareCardController {
         overlay = null;
     }
 
-    // --- Preview UI: dim scrim + a card that springs in like a long-press context menu ---
-
-    private View buildPreview(ViewGroup root, Bitmap card, SpotifyTrack track, String quote) {
+    private View buildPreview(Bitmap card) {
         FrameLayout scrim = new FrameLayout(activity);
         scrim.setBackgroundColor(Color.BLACK);
         scrim.getBackground().setAlpha(0);
@@ -102,20 +139,22 @@ final class LyricsShareCardController {
         LinearLayout column = new LinearLayout(activity);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setGravity(Gravity.CENTER_HORIZONTAL);
-        column.setClickable(true); // swallow taps so they don't fall through to the scrim
+        column.setClickable(true);
 
-        ImageView cardView = new ImageView(activity);
+        cardView = new ImageView(activity);
         cardView.setImageBitmap(card);
         cardView.setAdjustViewBounds(true);
         int cardWidthPx = Math.round(root.getResources().getDisplayMetrics().widthPixels * 0.78f);
         column.addView(cardView, new LinearLayout.LayoutParams(cardWidthPx, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        installPreviewGestures(cardView);
 
         TextView shareButton = pillButton("Share", true);
         LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         shareLp.topMargin = dp(20);
         shareButton.setOnClickListener(v -> {
-            shareCard(card, track, quote);
+            shareCard(track);
             dismiss();
         });
         column.addView(shareButton, shareLp);
@@ -127,7 +166,6 @@ final class LyricsShareCardController {
         column.setScaleX(0.55f);
         column.setScaleY(0.55f);
         column.setAlpha(0f);
-        scrim.getBackground().setAlpha(0);
         scrim.post(() -> {
             fadeScrimIn(scrim);
             column.animate()
@@ -137,6 +175,70 @@ final class LyricsShareCardController {
                     .start();
         });
         return scrim;
+    }
+
+    private void installPreviewGestures(View view) {
+        android.view.GestureDetector detector = new android.view.GestureDetector(activity, new android.view.GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onSingleTapConfirmed(android.view.MotionEvent e) {
+                if (document != null) {
+                    showTranslation = !showTranslation;
+                    updatePreview();
+                }
+                return true;
+            }
+
+            @Override
+            public boolean onFling(android.view.MotionEvent e1, android.view.MotionEvent e2, float velocityX, float velocityY) {
+                if (document == null || startIndex < 0) return false;
+                float dy = e2.getY() - e1.getY();
+                if (Math.abs(dy) > Math.abs(e2.getX() - e1.getX())) {
+                    expandSelection(dy < 0);
+                    return true;
+                }
+                return false;
+            }
+        });
+        view.setOnTouchListener((v, event) -> {
+            detector.onTouchEvent(event);
+            return true;
+        });
+    }
+
+    private void expandSelection(boolean down) {
+        if (document == null) return;
+        boolean changed = false;
+        if (down) {
+            if (endIndex < document.appliedLines.size() - 1) {
+                endIndex++;
+                changed = true;
+            }
+        } else {
+            if (startIndex > 0) {
+                startIndex--;
+                changed = true;
+            }
+        }
+        if (changed) updatePreview();
+    }
+
+    private void updatePreview() {
+        Bitmap card = refreshCard();
+        if (card != null && cardView != null) {
+            // Subtle pop animation to provide feedback that lines were added or mode changed.
+            cardView.animate().cancel();
+            cardView.animate()
+                    .scaleX(0.98f).scaleY(0.98f).alpha(0.85f)
+                    .setDuration(80)
+                    .withEndAction(() -> {
+                        cardView.setImageBitmap(card);
+                        cardView.animate()
+                                .scaleX(1f).scaleY(1f).alpha(1f)
+                                .setDuration(180)
+                                .setInterpolator(new OvershootInterpolator(1.2f))
+                                .start();
+                    }).start();
+        }
     }
 
     private void fadeScrimIn(FrameLayout scrim) {
@@ -162,62 +264,48 @@ final class LyricsShareCardController {
         return button;
     }
 
-    // --- Sharing ---
-
-    private void shareCard(Bitmap card, SpotifyTrack track, String quote) {
+    private void shareCard(SpotifyTrack track) {
         new Thread(() -> {
             try {
-                // Save card image to gallery
+                Bitmap card = refreshCard();
+                if (card == null) return;
                 Uri cardUri = saveToGallery(card, track);
-
                 String link = spotifyUriToWebUrl(track.uri);
                 if (isBlank(link)) link = safe(track.uri);
 
+                StringBuilder quoteBuilder = new StringBuilder();
+                if (document != null && startIndex >= 0) {
+                    for (int i = startIndex; i <= endIndex; i++) {
+                        AppliedLine line = document.appliedLines.get(i);
+                        if (line.dotLine || isBlank(line.text)) continue;
+                        if (quoteBuilder.length() > 0) quoteBuilder.append("\n");
+                        quoteBuilder.append(line.text);
+                    }
+                }
+                String quote = quoteBuilder.toString();
                 String text = isBlank(quote)
                         ? safe(track.title) + " - " + safe(track.artist)
                         : "\"" + quote + "\"\n" + safe(track.title) + " - " + safe(track.artist);
 
+                Intent send = new Intent(Intent.ACTION_SEND);
                 if (cardUri != null) {
-                    // Share image + text
-                    shareWithImage(cardUri, text, link);
+                    send.setType("image/png");
+                    send.putExtra(Intent.EXTRA_STREAM, cardUri);
+                    send.putExtra(Intent.EXTRA_TEXT, text + "\n" + link);
+                    send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 } else {
-                    // Fallback: text-only share
-                    shareTextOnly(text, link);
+                    send.setType("text/plain");
+                    send.putExtra(Intent.EXTRA_TEXT, text + "\n" + link);
                 }
+                Intent chooser = Intent.createChooser(send, "Share lyric");
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.runOnUiThread(() -> activity.startActivity(chooser));
             } catch (Throwable t) {
                 XpLog.log(TAG + " share failed: " + t);
             }
         }).start();
     }
 
-    private void shareWithImage(Uri imageUri, String text, String link) {
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("image/png");
-        send.putExtra(Intent.EXTRA_STREAM, imageUri);
-        send.putExtra(Intent.EXTRA_TEXT, text + "\n" + link);
-        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
-        Intent chooser = Intent.createChooser(send, "Share lyric");
-        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        activity.runOnUiThread(() -> activity.startActivity(chooser));
-    }
-
-    private void shareTextOnly(String text, String link) {
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_TEXT, text + "\n" + link);
-        send.putExtra(Intent.EXTRA_SUBJECT, "Share lyric");
-
-        Intent chooser = Intent.createChooser(send, "Share lyric");
-        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        activity.runOnUiThread(() -> activity.startActivity(chooser));
-    }
-
-    /**
-     * Any process's UID can insert its own rows into MediaStore - unlike a FileProvider, which
-     * would need the backing file under this module's own (unreachable, from inside the host
-     * process) private storage. The inserted row is immediately shareable via its content Uri.
-     */
     private Uri saveToGallery(Bitmap card, SpotifyTrack track) {
         Context context = activity.getApplicationContext();
         String name = "spicyex_lyric_" + System.currentTimeMillis() + ".png";
@@ -248,9 +336,7 @@ final class LyricsShareCardController {
         return item;
     }
 
-    // --- Card rendering ---
-
-    private Bitmap renderCard(Bitmap art, String quote, String translation, String title, String artist) {
+    private Bitmap renderCard(Bitmap art, List<String> quotes, List<String> translations, String title, String artist) {
         Bitmap bitmap = Bitmap.createBitmap(CARD_WIDTH, CARD_HEIGHT, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
         int[] gradient = extractGradient(art);
@@ -265,15 +351,15 @@ final class LyricsShareCardController {
                 gradient[0], gradient[1], Shader.TileMode.CLAMP));
         canvas.drawRect(bounds, bg);
 
-        boolean isQuote = !isBlank(quote);
-        if (isQuote) {
+        boolean hasQuotes = quotes != null && !quotes.isEmpty();
+        if (hasQuotes) {
             drawQuoteGlyph(canvas);
-            drawQuoteText(canvas, quote, translation);
+            drawQuotesText(canvas, quotes, translations);
         } else if (art != null) {
             drawCenteredArt(canvas, art);
         }
 
-        drawFooter(canvas, art, title, artist, isQuote);
+        drawFooter(canvas, art, title, artist, hasQuotes);
         return bitmap;
     }
 
@@ -285,97 +371,80 @@ final class LyricsShareCardController {
         canvas.drawText("\u201C", dp(48), dp(140), mark);
     }
 
-    private void drawQuoteText(Canvas canvas, String quote, String translation) {
+    private void drawQuotesText(Canvas canvas, List<String> quotes, List<String> translations) {
         TextPaint paint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         paint.setColor(Color.WHITE);
         paint.setTypeface(Typeface.DEFAULT_BOLD);
+        TextPaint sub = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        sub.setColor(Color.argb(180, 255, 255, 255));
+        sub.setTypeface(Typeface.DEFAULT);
+
         int side = dp(48);
         int width = CARD_WIDTH - side * 2;
-        // Derive the lyric area from the footer line instead of the old fixed bottom limit. This
-        // keeps the quote in the real free space above the metadata, even when the footer layout
-        // changes, and prevents the previous top/bottom clamp from making the UI look unchanged.
         int contentTop = dp(132);
         int footerLine = CARD_HEIGHT - dp(210);
         int contentBottom = footerLine - dp(30);
         int available = Math.max(dp(160), contentBottom - contentTop);
-        String fittedQuote = safe(quote);
-        int size = dp(48);
-        StaticLayout layout;
-        String fittedTranslation = safe(translation);
-        TextPaint sub = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        sub.setColor(Color.argb(180, 255, 255, 255));
-        sub.setTypeface(Typeface.DEFAULT);
-        int subSize = dp(24);
-        StaticLayout subLayout = null;
 
-        // Fit the quote and its optional translation as one block. The old code only limited the
-        // quote to five lines, then appended translation below it without measuring that extra
-        // height, which could push both the translation and the footer outside the bitmap.
+        int size = dp(48);
+        int subSize = dp(24);
+        List<StaticLayout> layouts = new ArrayList<>();
+        List<StaticLayout> subLayouts = new ArrayList<>();
+
         while (true) {
+            layouts.clear();
+            subLayouts.clear();
             paint.setTextSize(size);
             sub.setTextSize(subSize);
-            layout = staticLayout(fittedQuote, paint, width);
-            subLayout = isBlank(fittedTranslation) ? null : staticLayout(fittedTranslation, sub, width);
-            int total = layout.getHeight() + (subLayout == null ? 0 : dp(16) + subLayout.getHeight());
-            if (total <= available || (size <= dp(22) && subSize <= dp(16))) break;
-            if (size > dp(22)) size -= dp(2);
+            int totalHeight = 0;
+            for (int i = 0; i < quotes.size(); i++) {
+                StaticLayout l = staticLayout(quotes.get(i), paint, width);
+                layouts.add(l);
+                totalHeight += l.getHeight();
+                String trans = translations != null && i < translations.size() ? translations.get(i) : "";
+                if (!isBlank(trans)) {
+                    StaticLayout sl = staticLayout(trans, sub, width);
+                    subLayouts.add(sl);
+                    totalHeight += dp(8) + sl.getHeight();
+                } else {
+                    subLayouts.add(null);
+                }
+                if (i < quotes.size() - 1) totalHeight += dp(24);
+            }
+            if (totalHeight <= available || (size <= dp(MIN_TEXT_SIZE_DP) && subSize <= dp(16))) break;
+            if (size > dp(MIN_TEXT_SIZE_DP)) size -= dp(2);
             else subSize -= dp(1);
         }
 
-        // Extremely long provider lines can still exceed the card at the minimum font size. Keep
-        // the quote inside the measured region by trimming only the tail and retaining an ellipsis.
-        if (subLayout != null) {
-            int quoteLineHeight = Math.max(1, paint.getFontMetricsInt(null));
-            int subLineHeight = Math.max(1, sub.getFontMetricsInt(null));
-            int subBudget = Math.max(subLineHeight, available - dp(16) - quoteLineHeight);
-            fittedTranslation = ellipsizeToLines(fittedTranslation, sub, width,
-                    Math.max(1, subBudget / subLineHeight));
-            subLayout = staticLayout(fittedTranslation, sub, width);
-            int quoteBudget = available - dp(16) - subLayout.getHeight();
-            int maxLines = Math.max(1, quoteBudget / quoteLineHeight);
-            fittedQuote = ellipsizeToLines(fittedQuote, paint, width, maxLines);
-            layout = staticLayout(fittedQuote, paint, width);
-        } else {
-            int lineHeight = Math.max(1, paint.getFontMetricsInt(null));
-            fittedQuote = ellipsizeToLines(fittedQuote, paint, width, Math.max(1, available / lineHeight));
-            layout = staticLayout(fittedQuote, paint, width);
+        int textHeight = 0;
+        for (int i = 0; i < layouts.size(); i++) {
+            textHeight += layouts.get(i).getHeight();
+            StaticLayout sl = subLayouts.get(i);
+            if (sl != null) textHeight += dp(8) + sl.getHeight();
+            if (i < layouts.size() - 1) textHeight += dp(24);
         }
-        int textHeight = layout.getHeight() + (subLayout == null ? 0 : dp(16) + subLayout.getHeight());
-        // Bias the block toward the upper half. Centering a short line in the whole quote area was
-        // the reason a normal one-line share quote appeared to start conspicuously low.
+
         int yOffset = contentTop + Math.max(0, (available - textHeight) / 4);
         yOffset = Math.min(yOffset, Math.max(contentTop, contentBottom - textHeight));
-        canvas.save();
-        canvas.translate(side, yOffset);
-        layout.draw(canvas);
-        canvas.restore();
 
-        if (subLayout != null) {
+        for (int i = 0; i < layouts.size(); i++) {
+            StaticLayout l = layouts.get(i);
             canvas.save();
-            canvas.translate(side, yOffset + layout.getHeight() + dp(16));
-            subLayout.draw(canvas);
+            canvas.translate(side, yOffset);
+            l.draw(canvas);
             canvas.restore();
-        }
-    }
-
-    private static String ellipsizeToLines(String text, TextPaint paint, int width, int maxLines) {
-        String value = safe(text);
-        if (value.isEmpty() || staticLayout(value, paint, width).getLineCount() <= maxLines) return value;
-        int low = 0;
-        int high = value.length();
-        String best = "…";
-        while (low <= high) {
-            int mid = (low + high) >>> 1;
-            String candidate = TextUtils.ellipsize(value.substring(0, mid), paint, width,
-                    TextUtils.TruncateAt.END).toString();
-            if (staticLayout(candidate, paint, width).getLineCount() <= maxLines) {
-                best = candidate;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
+            yOffset += l.getHeight();
+            StaticLayout sl = subLayouts.get(i);
+            if (sl != null) {
+                yOffset += dp(8);
+                canvas.save();
+                canvas.translate(side, yOffset);
+                sl.draw(canvas);
+                canvas.restore();
+                yOffset += sl.getHeight();
             }
+            if (i < layouts.size() - 1) yOffset += dp(24);
         }
-        return best;
     }
 
     private void drawCenteredArt(Canvas canvas, Bitmap art) {
@@ -429,11 +498,6 @@ final class LyricsShareCardController {
         canvas.drawText("SpicyEx", left, CARD_HEIGHT - dp(40), mark);
     }
 
-    private static String ellipsize(String text, TextPaint paint, int maxWidth) {
-        String safeText = safe(text);
-        return android.text.TextUtils.ellipsize(safeText, paint, maxWidth, android.text.TextUtils.TruncateAt.END).toString();
-    }
-
     private static void adaptiveTextSize(TextPaint paint, String text, int maxWidth, float minSize, float maxSize) {
         String safeText = safe(text);
         if (safeText.isEmpty()) return;
@@ -454,11 +518,6 @@ final class LyricsShareCardController {
                 .build();
     }
 
-    /**
-     * No {@code androidx.palette} dependency: downsamples the artwork and averages its pixels,
-     * then pushes that average toward a vivid top color and a near-black bottom color so the
-     * gradient reads the same way Apple Music/Spotify share-card backgrounds do.
-     */
     private static int[] extractGradient(Bitmap art) {
         if (art == null || art.getWidth() <= 0 || art.getHeight() <= 0) {
             return new int[]{Color.rgb(60, 60, 66), Color.rgb(14, 14, 16)};
@@ -475,7 +534,6 @@ final class LyricsShareCardController {
         }
         float[] hsv = new float[3];
         Color.RGBToHSV((int) (r / count), (int) (g / count), (int) (b / count), hsv);
-
         float[] top = hsv.clone();
         top[1] = Math.min(1f, top[1] * 1.3f + 0.1f);
         top[2] = Math.max(top[2], 0.5f);

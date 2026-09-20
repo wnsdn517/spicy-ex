@@ -226,10 +226,16 @@ public class SpicyAnimatedTextView extends TextView {
         }
         // Spicy CSS parity (Mixed.css): --gradient-alpha 0.85 (sung), --gradient-alpha-end 0.35
         // (unsung). glow nudges the sung edge toward full white (desktop does this via text-shadow).
+        // Use the current text color as the base for the gradient so the fill adapts to the
+        // text color (white on dark, dark on light, or any custom color).
+        int textColor = getCurrentTextColor();
+        int baseR = Color.red(textColor);
+        int baseG = Color.green(textColor);
+        int baseB = Color.blue(textColor);
         int startAlpha = Math.round(255f * (0.85f + 0.15f * Math.max(0f, Math.min(1f, glow))) * brightnessMultiplier);
         int endAlpha = Math.round(255f * 0.35f * brightnessMultiplier);
-        int sungColor = Color.argb(startAlpha, 255, 255, 255);
-        int unsungColor = Color.argb(endAlpha, 255, 255, 255);
+        int sungColor = Color.argb(startAlpha, baseR, baseG, baseB);
+        int unsungColor = Color.argb(endAlpha, baseR, baseG, baseB);
         float origin = verticalGradient
                 ? (verticalContainerSpace ? -offset : getPaddingTop())
                 : getPaddingLeft() - offset;

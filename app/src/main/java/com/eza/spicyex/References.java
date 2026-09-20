@@ -100,17 +100,17 @@ public class References {
                     Map<String, String> md = (Map<String, String>) XpReflect.callMethod(track, "metadata");
 
                     String title = firstNonBlankMeta(md,
-                            "title", "ad_title", "context_title", "name", "track_title");
+                            "title", "ad_title", "context_title", "name", "track_title", "advertiser_name", "ad_advertiser_name");
                     String artist = firstNonBlankMeta(md,
-                            "artist_name", "ad_advertiser_name", "artist_name:0", "artist", "subtitle");
+                            "artist_name", "ad_advertiser_name", "artist_name:0", "artist", "subtitle", "advertiser_name", "ad_advertiser");
                     String album = firstNonBlankMeta(md,
-                            "album_title", "ad_advertiser_name", "album", "context_title");
+                            "album_title", "ad_advertiser_name", "album", "context_title", "advertiser_name", "ad_album_title");
 
                     String color = md.get("extracted_color");
 
                     String imageId = firstNonBlankMeta(md,
                             "image_large_url", "image_url", "ad_image_url", "image_small_url",
-                            "coverart_image_url", "image_preview_url");
+                            "coverart_image_url", "image_preview_url", "ad_image_url:0", "image_url:0");
                     long duration = 0;
                     try {
                         String durationValue = md.get("duration_ms");

@@ -55,7 +55,6 @@ final class LyricsJumpToCurrentController {
     private boolean shown;
     private boolean collapsed;
     private ValueAnimator widthAnimator;
-    private ValueAnimator progressAnimator;
     /** Set only by {@link #showForEditing()}, so {@link #restoreAfterEditing()} never hides a
      *  chip real follow-state put up on its own. */
     private boolean editingForcedVisible;
@@ -127,8 +126,18 @@ final class LyricsJumpToCurrentController {
     void update(boolean show) {
         if (editingForcedVisible && !show) return;
         boolean wasShown = shown;
-        boolean appearing = show && !wasShown;
+        if (show == wasShown) {
+            // Already in the correct target state. Do nothing except ensuring the alpha
+            // stays applied if it's currently visible (to cover edge cases where 
+            // setAlpha might have been externally modified).
+            if (show && pill.getVisibility() == View.VISIBLE && pill.getAlpha() < 0.9f) {
+                pill.setAlpha(0.92f);
+            }
+            return;
+        }
+
         shown = show;
+        boolean appearing = show && !wasShown;
         boolean animationEnabled = config != null && config.get(Settings.FOLLOW_CHIP_ANIMATION);
 
         if (show) {
@@ -140,79 +149,42 @@ final class LyricsJumpToCurrentController {
                 pill.setVisibility(View.VISIBLE);
 
                 if (animationEnabled) {
-                    // Dynamic entrance with animation
-                    boolean isIconOnly = collapsed || style.equals("Icon");
-                    if (isIconOnly) {
-                        // Icon-only: just rise up with fade
-                        pill.setScaleX(1f);
-                        pill.setScaleY(1f);
-                        pill.setAlpha(0f);
-                        pill.setTranslationY(dp(MOTION_OFFSET_DP));
-                        pill.animate()
-                                .alpha(0.92f)
-                                .translationY(0f)
-                                .scaleX(1f).scaleY(1f)
-                                .setDuration(ENTER_DURATION_MS)
-                                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f))
-                                .start();
-                    } else {
-                        // Label + icon: a restrained rise makes the setting's purpose clear
-                        // without the old oversized pop from 0.3x.
-                        pill.setScaleX(ENTER_SCALE);
-                        pill.setScaleY(ENTER_SCALE);
-                        pill.setAlpha(0f);
-                        pill.setTranslationY(dp(MOTION_OFFSET_DP));
-                        pill.animate()
-                                .scaleX(1f)
-                                .scaleY(1f)
-                                .alpha(0.92f)
-                                .translationY(0f)
-                                .setDuration(ENTER_DURATION_MS)
-                                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f))
-                                .start();
-                    }
+                    // Dynamic entrance: pop in from 0.8x scale with overshoot for that Apple feel.
+                    pill.setScaleX(0.8f);
+                    pill.setScaleY(0.8f);
+                    pill.setAlpha(0f);
+                    pill.setTranslationY(dp(MOTION_OFFSET_DP));
+                    pill.animate()
+                            .alpha(0.92f)
+                            .translationY(0f)
+                            .scaleX(1f).scaleY(1f)
+                            .setDuration(300)
+                            .setInterpolator(new android.view.animation.OvershootInterpolator(1.4f))
+                            .start();
                 } else {
-                    // Simple fade-in without animation
                     pill.setScaleX(1f);
                     pill.setScaleY(1f);
                     pill.setAlpha(0f);
                     pill.setTranslationY(0f);
-                    pill.animate()
-                            .alpha(0.92f)
-                            .setDuration(150)
-                            .start();
+                    pill.animate().alpha(0.92f).setDuration(150).start();
                 }
-
             } else {
-                pill.setAlpha(0.92f);
+                pill.animate().alpha(0.92f).scaleX(1f).scaleY(1f).translationY(0f).setDuration(180).start();
             }
-            // update(true) is called from the playback frame loop. Reapplying Auto here would
-            // cancel and re-post the collapse timer on every frame, so the chip could never
-            // reach its automatic compact state. Preference changes call applyStyle separately.
             if (appearing) applyStyle(true);
-            // setCollapsed() replaces the background drawable, so progress must start after the
-            // style has been applied or the initial fill is lost/jumps.
-            if (appearing && config != null && config.get(Settings.FOLLOW_CHIP_PROGRESS)
-                    && !"Icon".equals(style)) {
-                pill.post(this::startProgressAnimation);
-            }
-        } else if (wasShown) {
+        } else {
             pill.removeCallbacks(collapse);
-            if (progressAnimator != null) {
-                progressAnimator.cancel();
-            }
             if (pill.getVisibility() == View.VISIBLE) {
                 pill.animate().cancel();
                 if (animationEnabled) {
-                    // Dynamic exit: fade and descend slightly; keep the chip readable until it
-                    // leaves instead of collapsing it to a tiny dot.
+                    // Dynamic exit: shrink away quickly (anticipate-style) to feel responsive.
                     pill.animate()
                             .alpha(0f)
-                            .scaleX(EXIT_SCALE)
-                            .scaleY(EXIT_SCALE)
+                            .scaleX(0.7f)
+                            .scaleY(0.7f)
                             .translationY(dp(MOTION_OFFSET_DP))
-                            .setDuration(EXIT_DURATION_MS)
-                            .setInterpolator(new android.view.animation.AccelerateInterpolator(1.2f))
+                            .setDuration(220)
+                            .setInterpolator(new android.view.animation.AccelerateInterpolator(1.5f))
                             .withEndAction(() -> {
                                 pill.setVisibility(View.GONE);
                                 pill.setScaleX(1f);
@@ -221,14 +193,11 @@ final class LyricsJumpToCurrentController {
                             })
                             .start();
                 } else {
-                    // Simple fade-out without animation
                     pill.animate()
                             .alpha(0f)
                             .setDuration(150)
                             .withEndAction(() -> {
                                 pill.setVisibility(View.GONE);
-                                pill.setScaleX(1f);
-                                pill.setScaleY(1f);
                                 pill.setTranslationY(0f);
                             })
                             .start();
@@ -237,26 +206,17 @@ final class LyricsJumpToCurrentController {
         }
     }
 
-    private void startProgressAnimation() {
-        if (progressAnimator != null) progressAnimator.cancel();
-        progressDrawable.setProgress(0f);
-        pill.setBackground(progressDrawable);
-
-        // The progress indicator is a countdown to automatic return to the current lyric, not
-        // to the visual compacting of this chip. Those are independent timers and can differ.
-        Integer resumeDelaySeconds = config == null ? null
-                : config.get(Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS);
-        long totalDuration = Math.max(1000L,
-                (resumeDelaySeconds == null ? 3L : resumeDelaySeconds.longValue()) * 1000L);
-
-        progressAnimator = ValueAnimator.ofFloat(0f, 1f);
-        progressAnimator.setDuration(totalDuration);
-        progressAnimator.setInterpolator(new android.view.animation.LinearInterpolator());
-        progressAnimator.addUpdateListener(animation -> {
-            float progress = (float) animation.getAnimatedValue();
-            progressDrawable.setProgress(progress);
-        });
-        progressAnimator.start();
+    /** Updates the visual countdown fill. Externally driven (see NativeSpicyShellViewImpl)
+     *  to match the actual auto-resume cooldown state. */
+    void setProgress(float value) {
+        if (config != null && config.get(Settings.FOLLOW_CHIP_PROGRESS) && !"Icon".equals(style)) {
+            // Re-apply the progress background if it was replaced by setCollapsed()'s 
+            // plain-button reset during a style or visibility transition.
+            if (pill.getBackground() != progressDrawable) {
+                pill.setBackground(progressDrawable);
+            }
+            progressDrawable.setProgress(value);
+        }
     }
 
     /** Draws the auto-collapse progress inside the chip without rebuilding its background every frame. */

@@ -232,6 +232,10 @@ public final class LyricsLineViewState {
                 state(line).translationView.setGradientPosition(LyricAnimations.GRADIENT_SUNG, 0f);
             }
         }
+        if (state(line).miniView != null) {
+            state(line).miniView.setBrightnessMultiplier(brightness);
+            applyLineGradientView(state(line).miniView, row, blockGradient, gradient, glow, bandWidth);
+        }
     }
 
     private static void applyLineGradientView(SpicyAnimatedTextView view, View row,
@@ -301,10 +305,9 @@ public final class LyricsLineViewState {
         if (line == null) return targetBlurPx;
         AppliedLineRenderState st = state(line);
         if (st.lineBlurSpring == null) {
-            // Underdamped spring (frequency 3.0Hz, damping 0.6) so blur releases
-            // quickly when no longer needed — the previous 1.4Hz/0.95 setup was
-            // heavily overdamped and took many seconds to settle to 0.
-            st.lineBlurSpring = new Spring(targetBlurPx, 3.0f, 0.6f);
+            // Snappy but controlled spring (2.8Hz, 0.92 damping) for a firm, "elastic" 
+            // feel when blur follows the active line transition.
+            st.lineBlurSpring = new Spring(targetBlurPx, 2.8f, 0.92f);
         }
         st.lineBlurSpring.setGoal(targetBlurPx);
         return Math.max(0f, st.lineBlurSpring.step(frameDelta(deltaSeconds)));

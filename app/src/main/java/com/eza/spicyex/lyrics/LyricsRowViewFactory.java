@@ -746,10 +746,10 @@ public final class LyricsRowViewFactory {
         return stack;
     }
 
-    private void buildLineLevelMain(LinearLayout row, AppliedLine line, boolean showJapaneseFurigana,
-                                    boolean lineLevelFillTopDown, boolean lineLevelFillSentence,
-                                    String weight, String font, boolean wrapLongLines,
-                                    boolean adaptiveSectioningEnabled) {
+private void buildLineLevelMain(LinearLayout row, AppliedLine line, boolean showJapaneseFurigana,
+                                     boolean lineLevelFillTopDown, boolean lineLevelFillSentence,
+                                     String weight, String font, boolean wrapLongLines,
+                                     boolean adaptiveSectioningEnabled) {
         int color = line.bgLine ? Color.rgb(170, 170, 170) : Color.WHITE;
 
         // Extract mini lyric from parentheses
@@ -757,9 +757,9 @@ public final class LyricsRowViewFactory {
         String mainTextStr = textParts[0];
         String miniTextStr = textParts[1];
 
-        // Create horizontal container for main + mini lyrics
+        // Create vertical container for main + mini lyrics (mini below main)
         LinearLayout textContainer = new LinearLayout(activity);
-        textContainer.setOrientation(LinearLayout.HORIZONTAL);
+        textContainer.setOrientation(LinearLayout.VERTICAL);
         textContainer.setGravity(line.oppositeAligned ? Gravity.END : Gravity.START);
 
         SpicyAnimatedTextView main = new SpicyAnimatedTextView(activity);
@@ -781,20 +781,13 @@ public final class LyricsRowViewFactory {
         main.setVerticalGradient(lineLevelFillTopDown);
         main.setContentGradient(lineLevelFillSentence);
         main.setGradientPosition(LyricAnimations.GRADIENT_UNSUNG, 0f);
-        LinearLayout.LayoutParams mainLp;
-        if (wrapLongLines && !isBlank(miniTextStr)) {
-            // The parenthetical mini lyric shares this horizontal row. MATCH_PARENT here would
-            // measure the main text at the full width and then append the mini text beyond it.
-            mainLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        } else {
-            mainLp = new LinearLayout.LayoutParams(
-                    wrapLongLines ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-        }
+        LinearLayout.LayoutParams mainLp = new LinearLayout.LayoutParams(
+                wrapLongLines ? ViewGroup.LayoutParams.MATCH_PARENT : ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
         textContainer.addView(main, mainLp);
         LyricsLineViewState.setMainView(line, main);
 
-        // Add mini lyric if present
+        // Add mini lyric below main if present
         if (!isBlank(miniTextStr)) {
             SpicyAnimatedTextView mini = new SpicyAnimatedTextView(activity);
             mini.setText(miniTextStr);
@@ -809,10 +802,10 @@ public final class LyricsRowViewFactory {
             mini.setMaxLines(1);
             mini.setVerticalGradient(lineLevelFillTopDown);
 
-            // Add spacing and mini lyric
+            // Add mini lyric below main with small top margin
             LinearLayout.LayoutParams miniLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            miniLp.leftMargin = dp(4);
+            miniLp.topMargin = dp(2);
             textContainer.addView(mini, miniLp);
 
             // Store for animation
@@ -829,19 +822,27 @@ public final class LyricsRowViewFactory {
             return new String[]{"", ""};
         }
 
-        // Extract content between parentheses
-        int startIdx = text.indexOf('(');
-        int endIdx = text.lastIndexOf(')');
+        // Extract content between parentheses or quotes
+        int parenStart = text.indexOf('(');
+        int parenEnd = text.lastIndexOf(')');
+        int quoteStart = text.indexOf('"');
+        int quoteEnd = text.lastIndexOf('"');
 
-        if (startIdx >= 0 && endIdx > startIdx) {
-            // Found parentheses
-            String miniText = text.substring(startIdx + 1, endIdx).trim();
-            // Main text: remove parentheses but keep the content
-            String mainText = text.substring(0, startIdx) + text.substring(endIdx + 1);
+        // Check for parentheses first
+        if (parenStart >= 0 && parenEnd > parenStart) {
+            String miniText = text.substring(parenStart + 1, parenEnd).trim();
+            String mainText = text.substring(0, parenStart) + text.substring(parenEnd + 1);
             return new String[]{mainText.trim(), miniText};
         }
 
-        // No parentheses found
+        // Check for double quotes (but only if they form a pair and aren't at start/end for Korean quotes)
+        if (quoteStart >= 0 && quoteEnd > quoteStart && quoteStart > 0 && quoteEnd < text.length() - 1) {
+            String miniText = text.substring(quoteStart + 1, quoteEnd).trim();
+            String mainText = text.substring(0, quoteStart) + text.substring(quoteEnd + 1);
+            return new String[]{mainText.trim(), miniText};
+        }
+
+        // No parentheses or valid quote pair found
         return new String[]{text, ""};
     }
 

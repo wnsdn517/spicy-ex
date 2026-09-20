@@ -61,6 +61,7 @@ import com.eza.spicyex.lyrics.ai.AiSettings;
 import com.eza.spicyex.lyrics.ChipSpinnerDrawable;
 import com.eza.spicyex.lyrics.FrameStyleBatcher;
 import com.eza.spicyex.lyrics.GlyphIconDrawable;
+import com.eza.spicyex.lyrics.LyricCascadeProfile;
 import com.eza.spicyex.lyrics.LyricTimeline;
 import com.eza.spicyex.lyrics.LyricsAmbientController;
 import com.eza.spicyex.lyrics.LyricsDocument;
@@ -208,22 +209,36 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
 
     private static final class RowCascade {
         final Spring spring;
+        /** Launch speed this row is owed once its stagger delay is up. Held rather than applied at
+         *  construction so the row is genuinely still during the delay instead of drifting through
+         *  it, which is what would make the stagger read as two separate motions. */
+        float pendingLaunchVelocity;
         long startedAtMs;
         float delayRemaining;
 
-        RowCascade(float startOffset, float delaySeconds, float frequencyHz, float damping) {
-            spring = new Spring(startOffset, frequencyHz, damping);
+        RowCascade(float startOffset, LyricCascadeProfile profile) {
+            spring = new Spring(startOffset, profile.frequencyHz, profile.damping);
             spring.setGoal(0f);
-            delayRemaining = delaySeconds;
+            delayRemaining = profile.delaySeconds;
+            pendingLaunchVelocity = profile.launchVelocityPxPerSec;
             startedAtMs = SystemClock.uptimeMillis();
         }
 
         /** Folds another wave's displacement into this still-settling row instead of restarting
          *  its spring. Also resets the max-lifetime clock: the extra distance this adds needs its
          *  own budget to decay, or the hard cutoff below can clip it mid-motion into a visible pop. */
-        void bump(float delta) {
+        void bump(float delta, float launchVelocity) {
             spring.nudgePosition(delta);
+            if (delayRemaining > 0f) pendingLaunchVelocity += launchVelocity;
+            else spring.nudgeVelocity(launchVelocity);
             startedAtMs = SystemClock.uptimeMillis();
+        }
+
+        /** Hands the row the speed it was launched with, once. */
+        void releaseLaunchVelocity() {
+            if (pendingLaunchVelocity == 0f) return;
+            spring.nudgeVelocity(pendingLaunchVelocity);
+            pendingLaunchVelocity = 0f;
         }
     }
     private TrackInfoReadoutController trackInfoController;
@@ -2200,12 +2215,15 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             // distance - a small, tight range keeps every row's motion nearly identical regardless
             // of its own height, so the reveal reads as one soft fade-in rather than rows visibly
             // "popping" up from different starting points.
-            float travel = Math.max(dp(6), Math.min(dp(14), row.getHeight() * 0.12f));
-            int distance = focus < 0 ? i : Math.abs(i - focus);
+            // Capped at 8dp for a more subtle and smooth appearance.
+            float travel = Math.max(dp(4), Math.min(dp(8), row.getHeight() * 0.08f));
+            int distance = focus < 0 ? i : Math.round(cascadeDistance(line, i, focus));
             // A visible lag reads as janky rather than deliberate once the rise distance above is
             // this subtle - keep the whole column's stagger tight enough that it reads as
             // nearly-simultaneous instead of a wave with a felt time gap between rows.
-            float delay = Math.min(8, distance) * 0.018f / speedMul;
+            // Keep the reveal nearly simultaneous, but give neighbouring rows a readable order
+            // instead of making the whole column flash in one frame.
+            float delay = Math.min(8, distance) * 0.026f / speedMul;
             loadEntrances.put(line, new LoadEntrance(travel, delay, duration));
             LyricsLineViewState.setEntranceProgress(line, 0f);
             applyLoadEntranceFrame(row, 0f, travel);
@@ -2291,11 +2309,16 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 it.remove();
                 continue;
             }
+            float step = deltaSeconds;
             if (entrance.delayRemaining > 0f) {
                 entrance.delayRemaining -= deltaSeconds;
-                continue;
+                if (entrance.delayRemaining > 0f) continue;
+                // Carry the leftover into the first real step, so a stagger shorter than one frame
+                // still orders the rows instead of rounding up to the next frame boundary.
+                step = Math.min(deltaSeconds, -entrance.delayRemaining);
+                entrance.delayRemaining = 0f;
             }
-            entrance.elapsed += deltaSeconds;
+            entrance.elapsed += step;
             float t = Math.min(1f, entrance.elapsed / entrance.duration);
             // Decelerating quintic: leaves 0 with real speed and arrives with none, so the reveal
             // never looks like it stops short or lands with a bump.
@@ -2367,6 +2390,14 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         remeasureLine(line);
         View row = rowMountController.attachedRowView(line);
         if (row == null) return;
+        
+        LoadEntrance load = loadEntrances.get(line);
+        if (load != null) {
+            // Part of an active reveal: start hidden so it doesn't flash.
+            applyLoadEntranceFrame(row, 0f, load.travelPx);
+            return;
+        }
+
         // A scroll can remount rows mid-cascade: join in place from the cascade's current
         // offset instead of snapping to zero. Anything without a live cascade must land flat -
         // a row that was unmounted while displaced would otherwise reappear still offset.
@@ -2563,7 +2594,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         AppliedLine line = (index >= 0 && index < document.appliedLines.size())
                 ? document.appliedLines.get(index) : null;
         if (line != null && line.text != null && !line.text.trim().isEmpty()) {
-            shareCardController.showForLine(this, track, art, line.text, line.translatedText);
+            shareCardController.showForLine(this, document, track, art, index);
         } else {
             shareCardController.showTrackCard(this, track, art);
         }
@@ -2663,6 +2694,16 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             return;
         }
 
+        // post(), deliberately NOT postOnAnimation(). This block reads the row's real position out
+        // of the view tree (centeredScrollTarget -> offsetDescendantRectToMyCoords) to decide where
+        // to scroll. A plain post runs after the current frame's traversal, so any layout requested
+        // earlier in the frame - a window remount, a re-styled active line, a secondary text
+        // arriving - has already been performed and those coordinates are current.
+        // postOnAnimation runs BEFORE the traversal instead, so it would read pre-layout
+        // coordinates, jump the scroll to a target computed from them, and then have the layout
+        // move the rows out from under both that scroll and the cascade's compensating
+        // translations. The column lands a few pixels off for exactly one frame and is corrected on
+        // the next, which is seen as the lyrics flickering every time a line advances.
         lyricsScroll.post(() -> {
             if (!running || followState.isHoldingNow()) return;
             if (index != followState.activeIndex() || row.getParent() != mountedRowsHost) return;
@@ -2785,9 +2826,11 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         }
         clearScrollSubpixel();
         float frequency = returning
-                ? RETURN_SPRING_FREQUENCY_HZ * cascadeSpeedMultiplier() * springStrengthMultiplier()
+                ? RETURN_SPRING_FREQUENCY_HZ * cascadeSpeedMultiplier() * elasticFrequencyMultiplier()
                 : scrollSpringFrequency(target - start);
-        float damping = returning ? RETURN_SPRING_DAMPING : scrollSpringDamping();
+        float damping = returning
+                ? elasticDamping(RETURN_SPRING_DAMPING)
+                : scrollSpringDamping();
         scrollSpring = new com.eza.spicyex.lyrics.Spring(start, frequency, damping);
         scrollSpring.setGoal(target);
         if (returning) {
@@ -2809,14 +2852,14 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         float reach = Math.min(1f, Math.abs(distancePx) / span);
         float hz = SCROLL_SPRING_NEAR_FREQUENCY_HZ
                 + (SCROLL_SPRING_FREQUENCY_HZ - SCROLL_SPRING_NEAR_FREQUENCY_HZ) * reach;
-        return hz * cascadeSpeedMultiplier() * springStrengthMultiplier();
+        return hz * cascadeSpeedMultiplier() * elasticFrequencyMultiplier();
     }
 
     /** With the Apple slide on, the scroll spring is the same family of motion as the row cascade
      *  and may overshoot a little. With it off the user has opted out of that character, so the
      *  glide is critically damped and simply arrives. */
     private float scrollSpringDamping() {
-        return slideAnimationEnabled ? SCROLL_SPRING_DAMPING : 1f;
+        return slideAnimationEnabled ? elasticDamping(SCROLL_SPRING_DAMPING) : 1f;
     }
 
     private float cascadeSpeedMultiplier() {
@@ -2824,9 +2867,24 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         return Math.max(0.5f, Math.min(2f, speedPct / 100f));
     }
 
-    private float springStrengthMultiplier() {
+    /** Maps the editor's strength control to elasticity (damping), not travel speed. */
+    private float elasticDamping(float baseDamping) {
         float strengthPct = config != null ? (float) config.get(Settings.APPLE_SPRING_STRENGTH) : 100f;
-        return Math.max(0.5f, Math.min(2f, strengthPct / 100f));
+        // Strength > 100% reduces damping for more bounce; < 100% increases it toward 1.0 (dead).
+        // Widened range (0.35x multiplier) for a much more dramatic feel when set to high strength.
+        float elasticity = (strengthPct - 100f) / 100f;
+        float adjusted = baseDamping - elasticity * 0.35f;
+        return Math.max(0.55f, Math.min(1f, adjusted));
+    }
+
+    /** Compensates for the "slower" feel of low-damping bouncy springs by slightly raising 
+     *  the base frequency as strength increases. */
+    private float elasticFrequencyMultiplier() {
+        float strengthPct = config != null ? (float) config.get(Settings.APPLE_SPRING_STRENGTH) : 100f;
+        if (strengthPct <= 100f) return 1f;
+        float extra = (strengthPct - 100f) / 100f;
+        // Raised from 0.15 to 0.28 to keep the "snappiness" even when damping is very low.
+        return 1f + extra * 0.28f;
     }
 
     /** How much of a far jump the scroll spring actually animates, in px. */
@@ -2929,22 +2987,32 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         boolean apple = renderConfig != null && renderConfig.appleStyle;
         boolean landscape = isLandscape();
         int activeIndex = followState.activeIndex();
-        // More dynamic than the shared defaults: noticeably lower damping so the spring actually
-        // overshoots and settles visibly instead of just easing in, and a touch more frequency
-        // for a snappier response - Apple Music's own row-follow reads far livelier than a plain
-        // critically-damped ease.
         float speedMul = cascadeSpeedMultiplier();
-        // Keep the cascade continuous: long per-row waits were perceived as dropped frames when
-        // the active line advanced again before the previous wave had reached the lower rows.
-        float stagger = (apple ? (landscape ? 0.030f : 0.024f) : ROW_CASCADE_STAGGER_SEC) / speedMul;
-        float maxDelay = (apple ? (landscape ? 0.15f : 0.12f) : ROW_CASCADE_MAX_DELAY_SEC) / speedMul;
-        // Softer and a little slower than before. At ~1.9Hz with 0.89 damping the rows snapped to
-        // a stop and then twitched back, which reads as a mechanical bounce rather than weight
-        // settling; dropping the frequency lengthens the travel so the motion is legible, and
-        // raising the damping trades the visible rebound for a single clean arrival.
-        float baseFrequency = (apple ? (landscape ? 1.30f : 1.36f) : ROW_CASCADE_FREQUENCY_HZ)
-                * speedMul * springStrengthMultiplier();
-        float baseDamping = apple ? (landscape ? 0.98f : 0.985f) : ROW_CASCADE_DAMPING;
+        // Most of the wave now lives in the per-row launch velocity (see LyricCascadeProfile), not
+        // in this delay. A stagger long enough to be felt on its own is also long enough to read as
+        // rows stopping and restarting, and on a phone rendering at 30fps a few tens of
+        // milliseconds is under one frame, so a delay-driven wave collapses onto frame boundaries
+        // and degenerates into lockstep jumps. Keep it short: it orders the rows, the velocities
+        // shape them.
+        float stagger = (apple ? (landscape ? 0.026f : 0.020f) : ROW_CASCADE_STAGGER_SEC) / speedMul;
+        float maxDelay = (apple ? (landscape ? 0.13f : 0.10f) : ROW_CASCADE_MAX_DELAY_SEC) / speedMul;
+        // Genuinely underdamped, which is the whole character of the Apple slide: the focused row
+        // travels past its resting place by a few pixels and settles back out of it, so the line
+        // dips as it arrives instead of merely translating into position.
+        //
+        // This was previously ~1.35Hz at 0.985 damping - an overshoot of well under a tenth of a
+        // pixel, i.e. a plain exponential ease, which is exactly the "flat" motion this is meant to
+        // have character instead of. That tuning was chasing a "mechanical bounce" that the springs
+        // were not actually producing: VsyncFrameScheduler was reporting a frame delta of zero
+        // whenever the scroll listener asked for a frame, so every spring stepped a fixed 1/60s of
+        // simulated time per real frame - double speed on a 120Hz panel (snap, then twitch) and
+        // half speed on a phone dropping frames (sluggish stutter). With the delta fixed at the
+        // source, the spring can be tuned for how it should look rather than around that.
+        float baseFrequency = (apple ? (landscape ? 1.72f : 1.85f) : ROW_CASCADE_FREQUENCY_HZ)
+                * speedMul * elasticFrequencyMultiplier();
+        float baseDamping = apple
+                ? elasticDamping(landscape ? 0.78f : 0.74f)
+                : ROW_CASCADE_DAMPING;
         for (int i : rowMountController.mountedIndices()) {
             if (i < 0 || i >= document.appliedLines.size()) continue;
             AppliedLine line = document.appliedLines.get(i);
@@ -2960,19 +3028,11 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             // 0.78x, all scaled by 0.72) therefore didn't make the wave softer - it tore the column
             // into three groups that each popped by a different fraction of a line before any
             // spring had run, which is the step every lyric transition was being seen as. The wave
-            // lives in the stagger and in the per-row spring below, both continuous at t=0.
+            // lives in the stagger, the launch velocity and the per-row spring, all of which are
+            // continuous at t=0.
             float initialOffset = scrollDelta;
-            // The focused row leads: stiffer and slightly less damped so it arrives first and with
-            // the most life, while rows further out trail marginally softer. Varying the spring
-            // rather than the starting offset keeps every row visually in place on frame one and
-            // still reads as one travelling wave rather than a rigid block.
-            // Smoothstep rather than a straight ramp: the difference between neighbouring rows is
-            // smallest right around the focused line, where they sit side by side and any abrupt
-            // change in behaviour between them is most visible.
-            float reach = Math.min(1f, distance / 6f);
-            float falloff = reach * reach * (3f - 2f * reach);
-            float frequency = baseFrequency * (1f - 0.10f * falloff);
-            float damping = Math.min(1f, baseDamping + 0.03f * falloff);
+            LyricCascadeProfile profile = LyricCascadeProfile.forRow(
+                    scrollDelta, distance, baseFrequency, baseDamping, stagger, maxDelay);
             // A lyric can advance again before the previous cascade has settled. Retargeting with
             // a brand new spring resets its phase every time, which was the source of the visible
             // Apple slide hitch. But dropping this row from the new wave entirely (the old fix)
@@ -2983,15 +3043,14 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             // still carrying it along with the rest of the wave (no premature stop).
             RowCascade existing = rowCascades.get(line);
             if (existing != null) {
-                existing.bump(initialOffset);
+                existing.bump(initialOffset, profile.launchVelocityPxPerSec);
                 // Re-assert the position on this frame too. The bumped row is skipped by
                 // stepRowCascade() while it is still inside its stagger delay, so without this the
                 // View keeps last frame's translation and the scroll jump shows through on it.
                 row.setTranslationY(existing.spring.position());
                 continue;
             }
-            float delay = Math.min(maxDelay, distance * stagger);
-            rowCascades.put(line, new RowCascade(initialOffset, delay, frequency, damping));
+            rowCascades.put(line, new RowCascade(initialOffset, profile));
             row.setTranslationY(initialOffset);
         }
     }
@@ -3054,11 +3113,20 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 }
                 continue;
             }
+            float step = deltaSeconds;
             if (cascade.delayRemaining > 0f) {
                 cascade.delayRemaining -= deltaSeconds;
-                continue;
+                if (cascade.delayRemaining > 0f) continue;
+                // Spend only the part of this frame that falls past the delay. Without this the
+                // stagger is rounded up to a whole frame, so on a device rendering at 30fps - where
+                // one frame is longer than the entire stagger between neighbouring rows - every row
+                // in the wave started on the same frame anyway and the cascade collapsed into the
+                // rigid block slide it exists to avoid.
+                step = Math.min(deltaSeconds, -cascade.delayRemaining);
+                cascade.delayRemaining = 0f;
             }
-            float value = cascade.spring.step(Math.max(0.001f, Math.min(0.05f, deltaSeconds)));
+            cascade.releaseLaunchVelocity();
+            float value = cascade.spring.step(Math.max(0.001f, Math.min(0.05f, step)));
             row.setTranslationY(value);
             if (cascade.spring.isAtRest(0.5f, 2f)) {
                 row.setTranslationY(0f);
@@ -3873,8 +3941,18 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     }
 
     private void updateJumpToCurrentVisibility() {
-        boolean show = document != null && followState.activeIndex() >= 0 && followState.isHoldingNow();
+        // Show the chip only if we have an active line AND user has manually scrolled away.
+        // We only show it when the user is NOT touching the screen AND the scrolling has 
+        // completely settled (no inertia/momentum). This makes the appearance feels deliberate.
+        boolean show = document != null && followState.activeIndex() >= 0 
+                && followState.isHoldingNow() && !followState.isTouching() && !scrollInProgress;
         jumpToCurrentController.update(show);
+        
+        if (show) {
+            int delaySeconds = config == null ? Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS.defaultValue
+                    : config.get(Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS);
+            jumpToCurrentController.setProgress(followState.autoResumeProgress(delaySeconds * 1000L));
+        }
     }
 
     /**
@@ -4183,7 +4261,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
 
     private void updateLikedButton(SpotifyTrack track) {
         if (likeButton == null) return;
-        likedMode = config.get(Settings.LIKED_SONGS_BUTTON);
+        // likedMode is not re-read here: this runs on every vsync frame, and each read is a pair of
+        // SharedPreferences lookups plus the per-orientation key it builds to try first. The value
+        // is already kept current at construction and by refreshPreferences(), which the
+        // SharedPreferences change listener drives.
         refreshLikedButton(track);
     }
 

@@ -9,11 +9,12 @@ import android.view.ViewGroup;
 
 import java.util.Set;
 
-import static com.eza.spicyex.lyrics.LyricUtils.safe;
-
 /** Applies one fullscreen lyric animation frame to the currently mounted row window. */
 public final class LyricsFrameRenderer {
     private static final int SCROLL_RENDER_MARGIN_ROWS = 8;
+    /** A row this short reads as a visual accent rather than a paragraph, and takes a gentler blur
+     *  curve so it does not dissolve entirely while its neighbours stay legible. */
+    private static final int SHORT_LINE_CODE_POINTS = 12;
     private final FrameStyleBatcher styleBatcher;
     private final LyricsAnimationApplier.StyleSink styleSink;
     private final float scaledDensity;
@@ -450,38 +451,34 @@ public final class LyricsFrameRenderer {
                                    boolean userScrollHeld, LyricsRenderConfig config) {
         if (line == null || Build.VERSION.SDK_INT < 31) return 0f;
         if (!config.lineBlurEnabled) return 0f;
-        // Background-vocal/provider rows remain readable. They still take part in the shared
-        // row translation cascade, but must not inherit the lead lyric's blur target.
-        if (line.bgLine) return 0f;
         if (userScrollHeld) return 0f;
+        
+        // Active rows (currently being sung) must always remain sharp.
+        if (lineActive) return 0f;
+        
         float quality = config.blurQuality;
         if (quality <= 0f) return 0f;
         if (active < 0) return 0f;
-        // Apple only: an extended-window active row (index past the active one) never blurs.
-        if (config.appleStyle && lineActive) return 0f;
         int distance = Math.abs(index - active);
         if (distance == 0) return 0f;
-        String lineText = safe(line.text);
+        boolean emphasized = line.dotLine || line.isShortText(SHORT_LINE_CODE_POINTS);
         if (config.appleStyle) {
             // Let nearby rows dissolve into the ambient blur as focus advances. The active row
             // remains sharp; the first neighbour gets a restrained veil and the curve grows
             // smoothly with distance rather than switching on abruptly at row two.
-            boolean shortAppleLine = lineText.codePointCount(0, lineText.length()) <= 12 || line.dotLine;
             float max = config.lineBlurHeavy
-                    ? (shortAppleLine ? 7.0f : 10.0f)
-                    : (shortAppleLine ? 3.2f : 4.8f);
+                    ? (emphasized ? 7.0f : 10.0f)
+                    : (emphasized ? 3.2f : 4.8f);
             float curved = (float) Math.pow(Math.min(1f, distance / 3.2f), 0.72);
             return max * curved * quality;
         }
         if (config.lineBlurHeavy) {
-            boolean emphasized = lineText.codePointCount(0, lineText.length()) <= 12 || line.dotLine;
             float max = emphasized ? 5.0f : 8.0f;
             float curved = (float) Math.pow(Math.min(1f, distance / 4f), 0.75);
             return max * curved * quality;
         }
         if (distance <= 1) return 0f;
-        boolean legacyEmphasized = lineText.codePointCount(0, lineText.length()) <= 12 || line.dotLine;
-        float legacyMax = legacyEmphasized ? 1.0f : 1.8f;
+        float legacyMax = emphasized ? 1.0f : 1.8f;
         float weighted = legacyMax * Math.min(1f, distance / 4f);
         if (distance == 2) weighted *= 0.55f;
         return weighted * quality;

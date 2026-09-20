@@ -100,6 +100,12 @@ public class Spring {
         this.velocity = velocity;
     }
 
+    /** Adds to the current speed without touching position or goal - gives an in-flight spring a
+     *  push while leaving the column it belongs to visually continuous on this frame. */
+    public void nudgeVelocity(float delta) {
+        velocity += delta;
+    }
+
     public float velocity() {
         return velocity;
     }
