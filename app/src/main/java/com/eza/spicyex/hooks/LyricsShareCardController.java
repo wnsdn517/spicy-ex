@@ -289,13 +289,19 @@ final class LyricsShareCardController {
         TextPaint paint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         paint.setColor(Color.WHITE);
         paint.setTypeface(Typeface.DEFAULT_BOLD);
-        int width = CARD_WIDTH - dp(48) * 2;
-        int topPad = dp(150);
-        int bottomPad = CARD_HEIGHT - dp(230);
-        int available = Math.max(dp(160), bottomPad - topPad);
+        int side = dp(48);
+        int width = CARD_WIDTH - side * 2;
+        // Derive the lyric area from the footer line instead of the old fixed bottom limit. This
+        // keeps the quote in the real free space above the metadata, even when the footer layout
+        // changes, and prevents the previous top/bottom clamp from making the UI look unchanged.
+        int contentTop = dp(132);
+        int footerLine = CARD_HEIGHT - dp(210);
+        int contentBottom = footerLine - dp(30);
+        int available = Math.max(dp(160), contentBottom - contentTop);
         String fittedQuote = safe(quote);
         int size = dp(48);
         StaticLayout layout;
+        String fittedTranslation = safe(translation);
         TextPaint sub = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         sub.setColor(Color.argb(180, 255, 255, 255));
         sub.setTypeface(Typeface.DEFAULT);
@@ -309,7 +315,7 @@ final class LyricsShareCardController {
             paint.setTextSize(size);
             sub.setTextSize(subSize);
             layout = staticLayout(fittedQuote, paint, width);
-            subLayout = isBlank(translation) ? null : staticLayout(safe(translation), sub, width);
+            subLayout = isBlank(fittedTranslation) ? null : staticLayout(fittedTranslation, sub, width);
             int total = layout.getHeight() + (subLayout == null ? 0 : dp(16) + subLayout.getHeight());
             if (total <= available || (size <= dp(22) && subSize <= dp(16))) break;
             if (size > dp(22)) size -= dp(2);
@@ -319,9 +325,14 @@ final class LyricsShareCardController {
         // Extremely long provider lines can still exceed the card at the minimum font size. Keep
         // the quote inside the measured region by trimming only the tail and retaining an ellipsis.
         if (subLayout != null) {
+            int quoteLineHeight = Math.max(1, paint.getFontMetricsInt(null));
+            int subLineHeight = Math.max(1, sub.getFontMetricsInt(null));
+            int subBudget = Math.max(subLineHeight, available - dp(16) - quoteLineHeight);
+            fittedTranslation = ellipsizeToLines(fittedTranslation, sub, width,
+                    Math.max(1, subBudget / subLineHeight));
+            subLayout = staticLayout(fittedTranslation, sub, width);
             int quoteBudget = available - dp(16) - subLayout.getHeight();
-            int lineHeight = Math.max(1, paint.getFontMetricsInt(null));
-            int maxLines = Math.max(1, quoteBudget / lineHeight);
+            int maxLines = Math.max(1, quoteBudget / quoteLineHeight);
             fittedQuote = ellipsizeToLines(fittedQuote, paint, width, maxLines);
             layout = staticLayout(fittedQuote, paint, width);
         } else {
@@ -332,21 +343,19 @@ final class LyricsShareCardController {
         int textHeight = layout.getHeight() + (subLayout == null ? 0 : dp(16) + subLayout.getHeight());
         // Bias the block toward the upper half. Centering a short line in the whole quote area was
         // the reason a normal one-line share quote appeared to start conspicuously low.
-        int yOffset = topPad + Math.max(0, (available - textHeight) / 3);
+        int yOffset = contentTop + Math.max(0, (available - textHeight) / 4);
+        yOffset = Math.min(yOffset, Math.max(contentTop, contentBottom - textHeight));
         canvas.save();
-        canvas.clipRect(dp(48), topPad, CARD_WIDTH - dp(48), bottomPad);
-        canvas.save();
-        canvas.translate(dp(48), yOffset);
+        canvas.translate(side, yOffset);
         layout.draw(canvas);
         canvas.restore();
 
         if (subLayout != null) {
             canvas.save();
-            canvas.translate(dp(48), yOffset + layout.getHeight() + dp(16));
+            canvas.translate(side, yOffset + layout.getHeight() + dp(16));
             subLayout.draw(canvas);
             canvas.restore();
         }
-        canvas.restore();
     }
 
     private static String ellipsizeToLines(String text, TextPaint paint, int width, int maxLines) {
