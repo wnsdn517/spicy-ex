@@ -78,6 +78,7 @@ public final class SettingsUiSchema {
             Settings.PER_ORIENTATION_SETTINGS,
             Settings.ANIMATION_STYLE,
             Settings.APPLE_CASCADE_SPEED,
+            Settings.APPLE_SPRING_STRENGTH,
             // Apple Music (dedicated section; renders only while the Animation style is Apple Music)
             Settings.APPLE_FADE_PASSED_LINES,
             Settings.LINE_SLIDE_ANIMATION,

@@ -195,6 +195,7 @@ final class LyricsLayoutEditController {
          *  case that needs no persisted number at all. Session-local only, not a setting. */
         private Integer panelTopMargin;
         private Integer panelContainerHeight;
+        private boolean panelVisible;
         private View artCapture;
         private View artHandle;
         private View trackTextCapture;
@@ -504,10 +505,11 @@ final class LyricsLayoutEditController {
             overlay.addView(panelContainer, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             applyPanelLayout();
+            panelContainer.setVisibility(View.INVISIBLE);
 
             refreshArtwork();
             refreshTrackText();
-            selectElement(Element.ARTWORK);
+            selectElement(Element.ARTWORK, false);
 
             shellRoot.addView(overlay, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -1262,6 +1264,7 @@ final class LyricsLayoutEditController {
             layer.addView(capture, lp);
             bindCapture(capture, supplier);
             paintCapture(capture, selected == element);
+            if (panelVisible) overlay.post(this::avoidPanelOverlap);
             return capture;
         }
 
@@ -1271,6 +1274,10 @@ final class LyricsLayoutEditController {
          *  interactive chip strip here any more, just a label naming the current selection for
          *  orientation. */
         private void selectElement(Element element) {
+            selectElement(element, true);
+        }
+
+        private void selectElement(Element element, boolean revealPanel) {
             int previousScrollY = optionsScroll.getScrollY();
             selected = element;
             optionsCard.removeAllViews();
@@ -1312,7 +1319,10 @@ final class LyricsLayoutEditController {
             }
             // Rebuilding the option rows must not throw away the user's panel position.
             optionsScroll.post(() -> optionsScroll.scrollTo(0, Math.max(0, previousScrollY)));
-            afterNextLayout(this::avoidPanelOverlap);
+            afterNextLayout(() -> {
+                if (revealPanel) showPanelSheet(true);
+                avoidPanelOverlap();
+            });
         }
 
         /** Moves the panel to the opposite vertical half of the screen from the selected
@@ -1324,10 +1334,20 @@ final class LyricsLayoutEditController {
          *  retry loop, so an element that overlaps everywhere (e.g. the focus line dragged to
          *  mid-screen) settles on the moved position rather than oscillating forever. */
         private void avoidPanelOverlap() {
-            View capture = captureFor(selected);
-            if (capture == null || capture.getWidth() <= 0 || capture.getHeight() <= 0) return;
-            Rect captureRect = screenRect(capture);
-            if (!Rect.intersects(captureRect, screenRect(panelContainer))) return;
+            if (!panelVisible || panelContainer.getVisibility() != View.VISIBLE) return;
+            View selectedCapture = captureFor(selected);
+            View[] candidates = {selectedCapture, skipCapture, followCapture, dockCapture};
+            View overlapping = null;
+            Rect panelRect = screenRect(panelContainer);
+            for (View candidate : candidates) {
+                if (candidate == null || candidate.getWidth() <= 0 || candidate.getHeight() <= 0) continue;
+                if (Rect.intersects(screenRect(candidate), panelRect)) {
+                    overlapping = candidate;
+                    break;
+                }
+            }
+            if (overlapping == null) return;
+            Rect captureRect = screenRect(overlapping);
             Rect overlayRect = screenRect(overlay);
             boolean captureInUpperHalf = overlay.getHeight() <= 0
                     || (captureRect.centerY() - overlayRect.top) < overlay.getHeight() / 2f;
@@ -1335,6 +1355,29 @@ final class LyricsLayoutEditController {
             // vice versa; a plain top/bottom flip, mirroring what a two-position dock used to do.
             panelTopMargin = captureInUpperHalf ? null : dp(PANEL_MIN_TOP_DP);
             applyPanelLayout();
+        }
+
+        /** Opens the option tray like a bottom sheet. It stays INVISIBLE while closed so its
+         * measured height remains available for the first opening and for overlap calculations. */
+        private void showPanelSheet(boolean animate) {
+            panelVisible = true;
+            panelContainer.setVisibility(View.VISIBLE);
+            panelContainer.post(() -> {
+                panelContainer.animate().cancel();
+                float hidden = panelContainer.getHeight() + dp(24);
+                if (!animate) {
+                    panelContainer.setTranslationY(0f);
+                    avoidPanelOverlap();
+                    return;
+                }
+                panelContainer.setTranslationY(hidden);
+                panelContainer.animate()
+                        .translationY(0f)
+                        .setDuration(260L)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f))
+                        .withEndAction(this::avoidPanelOverlap)
+                        .start();
+            });
         }
 
         private View captureFor(Element element) {
@@ -1832,6 +1875,13 @@ final class LyricsLayoutEditController {
                     50, 200,
                     store.get(Settings.APPLE_CASCADE_SPEED), "%",
                     value -> writer.put(Settings.APPLE_CASCADE_SPEED, value)),
+                    matchWrap(12));
+
+            addSectionLabel(Settings.APPLE_SPRING_STRENGTH, 10);
+            addOption(dragRow(
+                    Settings.APPLE_SPRING_STRENGTH.minValue, Settings.APPLE_SPRING_STRENGTH.maxValue,
+                    store.get(Settings.APPLE_SPRING_STRENGTH), "%",
+                    value -> writer.put(Settings.APPLE_SPRING_STRENGTH, value)),
                     matchWrap(12));
 
         }
