@@ -70,7 +70,7 @@ public class LyricsSurfaceRowPlannerTest {
     @Test
     public void adaptiveTextSizeIsPublicAndDefaultsOn() {
         assertEquals("lyrics_adaptive_text_size", Settings.LYRICS_ADAPTIVE_TEXT_SIZE.key);
-        assertSame(Settings.TEXT, Settings.LYRICS_ADAPTIVE_TEXT_SIZE.section);
+        assertSame(Settings.INTERNAL, Settings.LYRICS_ADAPTIVE_TEXT_SIZE.section);
         assertTrue(Settings.LYRICS_ADAPTIVE_TEXT_SIZE.defaultValue);
     }
 

@@ -99,6 +99,8 @@ android {
             buildConfigField "boolean", "TRANSLITERATION_AVAILABLE", "false"
             buildConfigField "boolean", "TRANSLATION_AVAILABLE", "false"
             buildConfigField "boolean", "APPLE_FONT_AVAILABLE", "false"
+            // lite has no Spotify Connect feature at all - see FeatureAvailability.connectAvailable().
+            buildConfigField "boolean", "CONNECT_AVAILABLE", "false"
         }
         full {
             dimension "tier"
@@ -106,6 +108,7 @@ android {
             buildConfigField "boolean", "TRANSLITERATION_AVAILABLE", "true"
             buildConfigField "boolean", "TRANSLATION_AVAILABLE", "true"
             buildConfigField "boolean", "APPLE_FONT_AVAILABLE", "true"
+            buildConfigField "boolean", "CONNECT_AVAILABLE", "true"
         }
     }
 
@@ -168,6 +171,8 @@ dependencies {
     // where 4.x burned the full connect timeout per new connection. See
     // docs/backlog/HAPPY_EYEBALLS_TRANSPORT_REQUIREMENTS.md.
     implementation 'com.squareup.okhttp3:okhttp:5.0.0'
+    // WebViewCompat/WebViewFeature - document-start JS injection for the Connect web player.
+    implementation 'androidx.webkit:webkit:1.13.0'
     fullImplementation 'org.apache.tika:tika-langdetect-charsoup-core:4.0.0'
     fullImplementation 'com.atilika.kuromoji:kuromoji-unidic:0.9.0'
     fullImplementation 'com.belerweb:pinyin4j:2.5.1'

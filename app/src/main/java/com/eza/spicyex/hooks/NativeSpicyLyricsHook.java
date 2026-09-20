@@ -36,6 +36,9 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
     private final NowPlayingInjector nowPlayingInjector = new NowPlayingInjector(this);
     private final LyricsActivityTakeoverHook activityTakeoverHook =
             new LyricsActivityTakeoverHook(this, nowPlayingInjector);
+    private volatile float audioReactiveLevel;
+    private final AudioReactiveController audioReactiveController =
+            new AudioReactiveController(level -> audioReactiveLevel = level);
     private final PlaybackBridge playbackBridge = new PlaybackBridge();
     private final LyricsFetchCoordinator lyricsFetchCoordinator =
             new LyricsFetchCoordinator(
@@ -88,6 +91,32 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
             bridgeCoordinator = new SpicyLyricBridgeCoordinator(
                     lyricsSessionManager, applicationContext);
             bridgeCoordinator.start();
+            // Ad muting runs process-wide, not per screen: it applies to local playback
+            // everywhere while changing only Spotify's ad AudioTrack.
+            new AdMuteController(this, applicationContext).start();
+            // Installs only the AudioTrack#play hook, which is cheap. The Visualizer it can
+            // trigger stays off until the lyrics screen asks for it - see setListeningEnabled.
+            audioReactiveController.start();
+            SpotifyConnectHook.init(applicationContext);
+            SpotifyConnectHook.installPickerButton();
+            if (Boolean.TRUE.equals(com.eza.spicyex.SpotifyPlusConfig.from(applicationContext)
+                    .get(com.eza.spicyex.Settings.CONNECT_ENABLED))) {
+                // The setting being on previously only actually started the web player at the
+                // moment it was toggled - restarting Spotify with it already on left it cold
+                // until the user re-toggled it. Warm it every startup instead, then transfer
+                // playback to it once it's had time to register as a device with Spotify.
+                //
+                // Note: WebPlayerService lives in com.eza.spicyex's own process/UID, a different
+                // app from Spotify - Android's background-service-start restriction is evaluated
+                // against THAT app's foreground state, not Spotify's, so nothing this hook does
+                // inside Spotify's own process (process start, an Activity#onResume, anything)
+                // can satisfy it. See BootWarmReceiver for the actual fix: a BOOT_COMPLETED
+                // receiver in com.eza.spicyex, which Android explicitly exempts from this
+                // restriction, keeps the service warm from boot onward so this broadcast usually
+                // lands on an already-running service instead of needing a fresh background start.
+                SpotifyConnectHook.startWebViewService(applicationContext);
+                ConnectAutoTransfer.scheduleOnce(8000L);
+            }
             Diagnostics.event("bootstrap", "hook_ready",
                     Diagnostics.context("result", "main_process"));
         } else {
@@ -139,6 +168,11 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
 
     public boolean seekSpotifyTo(long positionMs) {
         return playbackBridge.seekSpotifyTo(positionMs);
+    }
+
+    @Override
+    public boolean canSeek() {
+        return playbackBridge.canSeek();
     }
 
     @Override
@@ -195,6 +229,18 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
     @Override
     public void restoreLyricsLayer(com.eza.spicyex.lyrics.session.LayerKind layer) {
         lyricsSessionManager.restoreLayer(layer);
+    }
+
+    /** Smoothed 0..1 real audio level from AudioReactiveController; 0 whenever no session is
+     *  attached (feature off, nothing playing, or the device refused the Visualizer). */
+    @Override
+    public float currentAudioLevel() {
+        return audioReactiveLevel;
+    }
+
+    @Override
+    public void setAudioReactiveListening(boolean enabled) {
+        audioReactiveController.setListeningEnabled(enabled);
     }
 
     @Override

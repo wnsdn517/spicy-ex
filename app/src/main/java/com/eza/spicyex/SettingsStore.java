@@ -14,14 +14,16 @@ import java.util.Map;
  */
 public final class SettingsStore implements TypedStore {
     private final SharedPreferences prefs;
+    private final Context context;
 
     public SettingsStore(Context context) {
         // NB: not getApplicationContext() — it's null during Application.attach on the hook path.
-        this(context.getSharedPreferences(SpotifyPlusConfig.PREFS_NAME, Context.MODE_PRIVATE));
+        this(context.getSharedPreferences(SpotifyPlusConfig.PREFS_NAME, Context.MODE_PRIVATE), context);
     }
 
-    SettingsStore(SharedPreferences prefs) {
+    SettingsStore(SharedPreferences prefs, Context context) {
         this.prefs = prefs;
+        this.context = context;
         migrateLikedSongsButton(prefs);
         migrateLineBlurLevel(prefs);
         migratePanelMediaControls(prefs);
@@ -69,19 +71,29 @@ public final class SettingsStore implements TypedStore {
 
     public <T> T get(Settings.Setting<T> setting) {
         try {
-            Object value;
-            if (setting instanceof Settings.BooleanSetting) {
-                value = prefs.getBoolean(setting.key, (Boolean) setting.defaultValue);
-            } else if (setting instanceof Settings.StringSetting) {
-                value = prefs.getString(setting.key, (String) setting.defaultValue);
-            } else if (setting instanceof Settings.IntegerSetting) {
-                value = prefs.getInt(setting.key, (Integer) setting.defaultValue);
-            } else {
-                value = prefs.getAll().get(setting.key);
+            // Per-orientation: try orientation-suffixed key first
+            String oKey = Settings.orientationKey(context, setting);
+            if (oKey != null) {
+                Object value = readRaw(oKey, setting);
+                if (value != null) return setting.coerce(value);
             }
+            // Fall back to base key
+            Object value = readRaw(setting.key, setting);
             return setting.coerce(value);
         } catch (ClassCastException | IllegalArgumentException invalidStoredValue) {
             return setting.defaultValue;
+        }
+    }
+
+    private Object readRaw(String key, Settings.Setting<?> setting) {
+        if (setting instanceof Settings.BooleanSetting) {
+            return prefs.getBoolean(key, (Boolean) setting.defaultValue);
+        } else if (setting instanceof Settings.StringSetting) {
+            return prefs.getString(key, (String) setting.defaultValue);
+        } else if (setting instanceof Settings.IntegerSetting) {
+            return prefs.getInt(key, (Integer) setting.defaultValue);
+        } else {
+            return prefs.getAll().get(key);
         }
     }
 
@@ -105,15 +117,21 @@ public final class SettingsStore implements TypedStore {
     }
 
     public <T> void put(Settings.Setting<T> setting, T value) {
+        // Per-orientation: write to orientation-suffixed key when active
+        String key = setting.key;
+        if (context != null) {
+            String oKey = Settings.orientationKey(context, setting);
+            if (oKey != null) key = oKey;
+        }
         SharedPreferences.Editor editor = prefs.edit();
         if (value instanceof Boolean) {
-            editor.putBoolean(setting.key, (Boolean) value);
+            editor.putBoolean(key, (Boolean) value);
         } else if (value instanceof String) {
-            editor.putString(setting.key, (String) value);
+            editor.putString(key, (String) value);
         } else if (value instanceof Integer) {
-            editor.putInt(setting.key, (Integer) value);
+            editor.putInt(key, (Integer) value);
         } else if (value instanceof Long) {
-            editor.putLong(setting.key, (Long) value);
+            editor.putLong(key, (Long) value);
         }
         editor.apply();
     }
