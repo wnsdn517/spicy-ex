@@ -245,7 +245,8 @@ public final class DisplayLayoutGroup {
                     shouldBreak = true;
                 }
             }
-            // Break at space
+            // Break at space. Keep the space out of the previous group so authored gaps remain
+            // explicit boundaries instead of swallowing the separator into the syllable run.
             else if (isSpace) {
                 shouldBreak = true;
             }
@@ -253,10 +254,10 @@ public final class DisplayLayoutGroup {
             else if (syllableCount >= MAX_SYLLABLES_PER_GROUP) {
                 shouldBreak = true;
             }
-            
+
             if (shouldBreak) {
-                int end = i + charCount;
-                // Extend to include following punctuation
+                int end = isSpace ? i : i + charCount;
+                // Extend to include following punctuation, but never absorb the separating space.
                 while (end < text.length()) {
                     int nextCp = text.codePointAt(end);
                     if (isKoreanPunctuation(nextCp)) {
@@ -268,7 +269,12 @@ public final class DisplayLayoutGroup {
                 if (end > start) {
                     groups.add(new DisplayLayoutGroup(start, end, "ko-syllable-group", true, 0.8));
                 }
-                start = end;
+                start = isSpace ? end + 1 : end;
+                if (isSpace) {
+                    while (start < text.length() && Character.isWhitespace(text.charAt(start))) {
+                        start++;
+                    }
+                }
                 syllableCount = 0;
             }
             

@@ -13,7 +13,7 @@ public class LanguageModelPackStateTest {
         LanguageModelPack.clearTransientState();
         LanguageModelPack.DownloadStatus status = LanguageModelPack.status();
         assertNotNull(status);
-        assertEquals(LanguageModelPack.DownloadStatus.Phase.IDLE, status.phase);
+        assertEquals(LanguageModelPack.Phase.IDLE, status.phase);
         assertEquals(0, status.progressPercent);
         assertEquals("", status.errorCode);
     }

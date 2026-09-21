@@ -30,6 +30,7 @@
     <string name="settings_label_settings_ui_language">Interface language</string>
     <string name="settings_label_lyric_tap_seek_mode">Tap lyric to seek</string>
     <string name="settings_label_lyric_stay_on_track_change">Stay in lyric screen on song change</string>
+    <string name="settings_label_lyrics_per_orientation_settings">Per-orientation settings</string>
     <string name="settings_label_lyric_auto_resume_follow">Auto-resume lyric follow</string>
     <string name="settings_label_lyric_auto_resume_follow_delay_seconds">Auto-resume follow delay</string>
     <string name="settings_label_lyric_auto_skip_intro_outro">Auto-skip intro/outro</string>
@@ -37,6 +38,8 @@
     <string name="settings_label_lyric_skip_chip_position">Skip chip position</string>
     <string name="settings_label_lyric_follow_chip_position">Follow-lyrics chip position</string>
     <string name="settings_label_lyric_follow_chip_style">Follow-lyrics chip style</string>
+    <string name="settings_label_lyric_follow_chip_animation">Follow chip animation</string>
+    <string name="settings_label_lyric_follow_chip_progress">Follow chip progress bar</string>
     <string name="settings_label_auto_mute_ads">Auto-mute ads</string>
     <string name="settings_label_mini_player_lyrics_icon">Show lyrics icon on mini player</string>
     <string name="settings_label_lyric_liked_songs_button">Add to Liked Songs button</string>
@@ -54,7 +57,11 @@
     <string name="settings_label_lyrics_source_order">Lyrics source order</string>
     <string name="settings_label_lyrics_source_overrides">Per-track lyric sources</string>
     <string name="settings_option_lyrics_source_selection_mode_auto">Auto</string>
+    <string name="settings_option_lyrics_source_selection_mode_smart">Smart</string>
+    <string name="settings_option_lyrics_source_selection_mode_userorder">User order</string>
     <string name="settings_option_lyrics_source_selection_mode_source_order">Source order</string>
+    <string name="settings_option_lyrics_source_override_netease">NetEase</string>
+    <string name="settings_option_lyrics_source_override_qq_music">QQ Music</string>
     <string name="settings_option_auto">Auto</string>
     <string name="settings_option_icon">Icon</string>
     <string name="settings_option_label">Label</string>
@@ -150,7 +157,9 @@
     <string name="settings_label_lyric_apple_fade_passed_lines">Fade passed lines</string>
     <string name="settings_label_lyric_apple_compact_text">Compact text size</string>
     <string name="settings_label_lyric_apple_cjk_wrap_fix">Wrap long CJK words</string>
+    <string name="settings_label_apple_cascade_speed">Slide speed</string>
     <string name="settings_label_lyric_line_slide_animation">Apple Music-style slide</string>
+    <string name="settings_label_apple_spring_strength">Spring strength</string>
     <string name="settings_label_lyric_apple_lift">Apple lift</string>
     <string name="settings_label_lyric_load_lift_animation">Rise in on load</string>
     <string name="settings_label_lyric_word_bounce">Word bounce</string>
@@ -198,6 +207,7 @@
     <string name="settings_label_lyrics_transliteration_enabled">Transliterate lyrics</string>
     <string name="settings_label_lyric_aligned_per_word_romaji">Attach transliteration under each word</string>
     <string name="settings_label_lyrics_japanese_reading_mode">Japanese reading</string>
+    <string name="settings_label_download_language_models">Download language models</string>
     <string name="settings_label_lyrics_furigana_brightness">Furigana brightness</string>
     <string name="settings_label_lyrics_furigana_position_percent">Furigana position</string>
     <string name="settings_label_lyrics_chinese_mode">Chinese reading</string>

@@ -238,6 +238,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         PanelSnapshot.Builder snapshot = PanelSnapshot.builder()
                 .translationAvailable(FeatureAvailability.translationAvailable())
                 .transliterationAvailable(FeatureAvailability.transliterationAvailable())
+                .languageModelReady(com.eza.spicyex.lyrics.LanguageModelPack.isReady())
                 .appleFontAvailable(FeatureAvailability.appleFontAvailable())
                 .connectAvailable(FeatureAvailability.connectAvailable())
                 .animatedBackgroundAvailable(FeatureAvailability.animatedBackgroundAvailable())

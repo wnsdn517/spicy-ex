@@ -18,6 +18,7 @@ public final class PanelSnapshot {
     private final Map<String, Object> values;
     private final boolean translationAvailable;
     private final boolean transliterationAvailable;
+    private final boolean languageModelReady;
     private final boolean appleFontAvailable;
     private final boolean connectAvailable;
     private final boolean animatedBackgroundAvailable;
@@ -28,6 +29,7 @@ public final class PanelSnapshot {
         this.values = Collections.unmodifiableMap(new HashMap<>(builder.values));
         this.translationAvailable = builder.translationAvailable;
         this.transliterationAvailable = builder.transliterationAvailable;
+        this.languageModelReady = builder.languageModelReady;
         this.appleFontAvailable = builder.appleFontAvailable;
         this.connectAvailable = builder.connectAvailable;
         this.animatedBackgroundAvailable = builder.animatedBackgroundAvailable;
@@ -54,6 +56,10 @@ public final class PanelSnapshot {
 
     public boolean transliterationAvailable() {
         return transliterationAvailable;
+    }
+
+    public boolean languageModelReady() {
+        return languageModelReady;
     }
 
     public boolean appleFontAvailable() {
@@ -85,6 +91,7 @@ public final class PanelSnapshot {
         private final Map<String, Object> values = new HashMap<>();
         private boolean translationAvailable;
         private boolean transliterationAvailable;
+        private boolean languageModelReady;
         private boolean appleFontAvailable;
         private boolean connectAvailable;
         private boolean animatedBackgroundAvailable;
@@ -103,6 +110,11 @@ public final class PanelSnapshot {
 
         public Builder transliterationAvailable(boolean value) {
             transliterationAvailable = value;
+            return this;
+        }
+
+        public Builder languageModelReady(boolean value) {
+            languageModelReady = value;
             return this;
         }
 
@@ -135,6 +147,7 @@ public final class PanelSnapshot {
         public Builder allCapabilities() {
             translationAvailable = true;
             transliterationAvailable = true;
+            languageModelReady = true;
             appleFontAvailable = true;
             connectAvailable = true;
             animatedBackgroundAvailable = true;

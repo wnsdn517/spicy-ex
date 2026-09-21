@@ -53,12 +53,15 @@ public final class PanelPolicy {
                     && Boolean.TRUE.equals(snapshot.get(Settings.FORCE_DARK_BACKGROUND));
         }
         if (setting == Settings.LINE_SYNC_FILL) {
-            return !"Apple Music".equals(snapshot.get(Settings.ANIMATION_STYLE));
+            return "Gradient wash".equals(snapshot.get(Settings.ANIMATION_STYLE));
         }
         if (setting == Settings.WORD_BOUNCE || setting == Settings.WORD_BOUNCE_STYLE) {
             // Apple motion is owned by the Apple section under Apple Music; the shared
             // bounce rows would compete, so they stand down while the Apple card is up.
             return !"Apple Music".equals(snapshot.get(Settings.ANIMATION_STYLE));
+        }
+        if (setting == Settings.APPLE_SPRING_STRENGTH) {
+            return "Apple Music".equals(snapshot.get(Settings.ANIMATION_STYLE));
         }
         if (isAppleOwned(setting)) {
             return "Apple Music".equals(snapshot.get(Settings.ANIMATION_STYLE));
@@ -103,45 +106,8 @@ public final class PanelPolicy {
                 || setting == Settings.LIKED_SONGS_BUTTON
                 || setting == Settings.SKIP_CHIP_POSITION
                 || setting == Settings.FOLLOW_CHIP_POSITION
-                || setting == Settings.TRACK_INFO_ART_RADIUS
-                || setting == Settings.TRACK_INFO_ART_SIZE
-                || setting == Settings.TRACK_INFO_ART_SIZE_CUSTOM_DP
-                || setting == Settings.TRACK_INFO_TEXT_ALIGN
-                || setting == Settings.TRACK_INFO_TEXT_SIZE_ADAPTIVE
-                || setting == Settings.TRACK_INFO_SHOW_TITLE
-                || setting == Settings.TRACK_INFO_SHOW_ARTIST
-                || setting == Settings.TRACK_INFO_SHOW_ALBUM
-                || setting == Settings.LYRICS_FOCUS_POSITION
-                || setting == Settings.LYRICS_FOCUS_POSITION_CUSTOM_PERCENT
-                || setting == Settings.ENABLE_LINE_BLUR
-                || setting == Settings.LYRICS_BLUR_INTENSITY
-                || setting == Settings.LYRICS_TEXT_SIZE
-                || setting == Settings.LYRICS_TEXT_SIZE_CUSTOM
-                || setting == Settings.LYRICS_FONT
-                || setting == Settings.LYRICS_WEIGHT
-                || setting == Settings.LINE_SPACING
-                || setting == Settings.LINE_SPACING_CUSTOM
-                || setting == Settings.TRACK_INFO_TEXT_SIZE
-                || setting == Settings.TRACK_INFO_TEXT_SIZE_CUSTOM
-                || setting == Settings.BACKGROUND_STYLE
-                || setting == Settings.BEAT_REACTIVE_BACKGROUND
-                || setting == Settings.FORCE_DARK_BACKGROUND
-                || setting == Settings.EXTRA_DARK_BACKGROUND
-                || setting == Settings.BACKGROUND_RENDER_QUALITY
                 || setting == Settings.SKIP_CHIP_STYLE
-                || setting == Settings.FOLLOW_CHIP_STYLE
-                || setting == Settings.TRACK_INFO_BACKGROUND
-                || setting == Settings.TRACK_INFO_TEXT_OVERFLOW
-                || setting == Settings.WORD_BOUNCE
-                || setting == Settings.WORD_BOUNCE_STYLE
-                || setting == Settings.ENABLE_GLOW_BLUR
-                || setting == Settings.LINE_SYNC_FILL
-                || setting == Settings.ANIMATION_STYLE
-                || setting == Settings.APPLE_CASCADE_SPEED
-                || setting == Settings.APPLE_SPRING_STRENGTH
-                || setting == Settings.LYRICS_ADAPTIVE_TEXT_SIZE
-                || setting == Settings.INTERLUDE_ICON
-                || setting == Settings.LOAD_LIFT_ANIMATION;
+                || setting == Settings.FOLLOW_CHIP_STYLE;
     }
 
     private static boolean shouldRenderForceDark(PanelSnapshot snapshot) {
@@ -167,7 +133,7 @@ public final class PanelPolicy {
     }
 
     public static boolean unavailable(Settings.Setting<?> setting, PanelSnapshot snapshot) {
-        return (setting == Settings.TRANSLITERATION_ENABLED && !snapshot.transliterationAvailable())
+        return (setting == Settings.TRANSLITERATION_ENABLED && (!snapshot.transliterationAvailable() || !snapshot.languageModelReady()))
                 || (setting == Settings.TRANSLATION_ENABLED && !snapshot.translationAvailable())
                 || (setting == Settings.LYRICS_FONT && !snapshot.appleFontAvailable())
                 || (setting == Settings.CONNECT_ENABLED && !snapshot.connectAvailable());

@@ -65,7 +65,13 @@ public final class SourcePreferencesAdapter {
         writer.put(Settings.LYRICS_SOURCE_MODE, commit.rankingLabel);
         sink.setRankingMode(RankingMode.parse(commit.rankingLabel));
         sink.setSourceOrder(commit.order);
-        for (Source source : Source.values()) {
+        for (Source source : new Source[] {
+                Source.APPLE_MUSIC,
+                Source.SPICY,
+                Source.SPOTIFY,
+                Source.LRCLIB,
+                Source.NETEASE
+        }) {
             Boolean on = commit.enabled.get(source);
             sink.setSourceEnabled(source, on != null && on);
         }
