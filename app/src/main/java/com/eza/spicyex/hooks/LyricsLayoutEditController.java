@@ -1391,45 +1391,16 @@ final class LyricsLayoutEditController {
             if (!panelVisible && !panelUserPositioned) panelTopMargin = null;
             panelVisible = true;
             panelContainer.setVisibility(View.VISIBLE);
-            panelContainer.post(() -> {
-                panelContainer.animate().cancel();
-                float hidden = panelContainer.getHeight() + dp(24);
-                if (!animate) {
-                    panelContainer.setTranslationY(0f);
-                    avoidPanelOverlap();
-                    return;
-                }
-                panelContainer.setTranslationY(hidden);
-                panelContainer.animate()
-                        .translationY(0f)
-                        .setDuration(260L)
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f))
-                        .withEndAction(this::avoidPanelOverlap)
-                        .start();
-            });
+            panelContainer.setAlpha(1f);
+            panelContainer.setTranslationY(0f);
+            panelContainer.post(this::avoidPanelOverlap);
         }
 
         private void hidePanelSheet(boolean animate) {
             panelVisible = false;
-            panelContainer.post(() -> {
-                panelContainer.animate().cancel();
-                if (!animate) {
-                    panelContainer.setTranslationY(panelContainer.getHeight() + dp(24));
-                    panelContainer.setVisibility(View.INVISIBLE);
-                    return;
-                }
-                float target = panelContainer.getHeight() + dp(24);
-                panelContainer.animate()
-                        .translationY(target)
-                        .alpha(0.94f)
-                        .setDuration(200L)
-                        .setInterpolator(new android.view.animation.AccelerateInterpolator(1.4f))
-                        .withEndAction(() -> {
-                            panelContainer.setVisibility(View.INVISIBLE);
-                            panelContainer.setAlpha(1f);
-                        })
-                        .start();
-            });
+            panelContainer.setVisibility(View.INVISIBLE);
+            panelContainer.setAlpha(1f);
+            panelContainer.setTranslationY(0f);
         }
 
         private View captureFor(Element element) {
@@ -1454,8 +1425,10 @@ final class LyricsLayoutEditController {
          *  it is the selection, gray otherwise - without rebuilding any of them. Cheap: just
          *  mutates each capture's existing GradientDrawable stroke color. */
         private void repaintAllCaptures() {
-            paintCapture(artCapture, selected == Element.ARTWORK);
-            paintCapture(trackTextCapture, selected == Element.TRACK_TEXT);
+            boolean artworkSelected = selected == Element.ARTWORK || selected == Element.TRACK_TEXT;
+            boolean trackTextSelected = selected == Element.TRACK_TEXT || selected == Element.ARTWORK;
+            paintCapture(artCapture, artworkSelected);
+            paintCapture(trackTextCapture, trackTextSelected);
             if (focusHandle instanceof FocusLineView) {
                 ((FocusLineView) focusHandle).setSelectedState(selected == Element.FOCUS);
             }

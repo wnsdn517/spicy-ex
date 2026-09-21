@@ -197,6 +197,14 @@ public class PanelPolicyTest {
     }
 
     @Test
+    public void layoutEditorOnlyRowsStayOutOfTheNormalSettingsPanel() {
+        assertFalse(PanelPolicy.shouldRender(Settings.CHROME_CLUSTER_POSITION, full()));
+        assertFalse(PanelPolicy.shouldRender(Settings.FULLSCREEN_CONTROLS, full()));
+        assertFalse(PanelPolicy.shouldRender(Settings.LIKED_SONGS_BUTTON, full()));
+        assertFalse(PanelPolicy.shouldRender(Settings.TRACK_INFO_POSITION, full()));
+    }
+
+    @Test
     public void ordinaryRowsAlwaysRender() {
         assertTrue(PanelPolicy.shouldRender(Settings.TAP_SEEK_MODE, full()));
         assertTrue(PanelPolicy.shouldRender(Settings.CACHE_SIZE, full()));

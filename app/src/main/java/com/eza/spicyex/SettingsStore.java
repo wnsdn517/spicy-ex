@@ -25,6 +25,9 @@ public final class SettingsStore implements TypedStore {
     SettingsStore(SharedPreferences prefs, Context context) {
         this.prefs = prefs;
         this.context = context;
+        if (context != null) {
+            com.eza.spicyex.lyrics.LanguageModelPack.attachContext(context);
+        }
         migrateLikedSongsButton(prefs);
         migrateLineBlurLevel(prefs);
         migratePanelMediaControls(prefs);

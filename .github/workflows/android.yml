@@ -37,25 +37,25 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Full Debug
-        run: ./gradlew :app:assembleFullDebug --no-daemon
+      - name: Build Debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon
 
-      - name: Run Full Unit Tests
-        run: ./gradlew :app:testFullDebugUnitTest --no-daemon
+      - name: Run Debug Unit Tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
 
       - name: Compress debug APK with zstd
         run: |
           mkdir -p app/build/outputs/apk/debug-zstd
-          for apk in app/build/outputs/apk/full/debug/*.apk; do
+          for apk in app/build/outputs/apk/debug/*.apk; do
             out="app/build/outputs/apk/debug-zstd/$(basename "$apk").zst"
             zstd -T0 -19 -f "$apk" -o "$out"
           done
 
-      - name: Upload Full APK
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: SpicyEX-full-debug
-          path: app/build/outputs/apk/full/debug/*.apk
+          name: SpicyEX-debug
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 7
           if-no-files-found: error
 
@@ -99,8 +99,8 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run Full Lint
-        run: ./gradlew :app:lintFullDebug --no-daemon
+      - name: Run Debug Lint
+        run: ./gradlew :app:lintDebug --no-daemon
 
       - name: Upload Lint Reports
         if: always()
@@ -145,13 +145,13 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Full Release
-        run: ./gradlew :app:assembleFullRelease --no-daemon
+      - name: Build Release APK
+        run: ./gradlew :app:assembleRelease --no-daemon
 
       - name: Compress release APK with zstd
         run: |
           mkdir -p app/build/outputs/apk/release-zstd
-          for apk in app/build/outputs/apk/full/release/*.apk; do
+          for apk in app/build/outputs/apk/release/*.apk; do
             out="app/build/outputs/apk/release-zstd/$(basename "$apk").zst"
             zstd -T0 -19 -f "$apk" -o "$out"
           done
@@ -160,6 +160,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            app/build/outputs/apk/full/release/*.apk
+            app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/release-zstd/*.zst
           generate_release_notes: true

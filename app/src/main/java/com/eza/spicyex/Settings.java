@@ -96,7 +96,8 @@ public final class Settings {
     );
 
     // Which side the "Follow lyrics" jump-to-current chip floats along the bottom edge at.
-    // Editable from the layout editor's Follow-lyrics element.
+    // Editable from the layout editor's Follow-lyrics element; hidden from the normal settings
+    // panel so the editor remains the single place a user can move this chip visually.
     public static final Setting<String> FOLLOW_CHIP_POSITION = enumSetting(
             "lyric_follow_chip_position", INTERNAL, "Follow-lyrics chip position", "Right",
             "Left", "Center", "Right"
@@ -322,7 +323,8 @@ public final class Settings {
             "dots", "note"
     );
 
-    // Editable from the layout editor's Top controls element.
+    // Editable from the layout editor's Top controls element; intentionally excluded from the
+    // normal settings panel because the layout editor is the single visual configuration surface.
     public static final Setting<String> LIKED_SONGS_BUTTON = enumSetting(
             "lyric_liked_songs_button", INTERNAL, "Add to Liked Songs button", "Off",
             "Off", "Heart", "Star"
@@ -331,6 +333,8 @@ public final class Settings {
     // Which edge the top chrome cluster (transliteration/translation/like/settings) and the Back
     // control anchor to. Internal order among the cluster's own icons is unaffected - this only
     // mirrors which side of the header they sit on (or which vertical rail, in Top mode).
+    // The layout editor is the only place this is positioned; the standard panel intentionally
+    // does not render it as a regular setting row.
     public static final Setting<String> CHROME_CLUSTER_POSITION = enumSetting(
             "lyrics_chrome_cluster_position", TEXT, "Top controls position", "Right",
             "Left", "Right"
@@ -362,7 +366,8 @@ public final class Settings {
 
     // Position of the fullscreen track-info readout (artwork + title/artist). Off hides the
     // readout, its metadata, and its artwork gestures; back, config toggles, and the floating
-    // cluster stay. New-feature rule: default Off for all installs, no migration.
+    // cluster stay. New-feature rule: default Off for all installs, no migration. This is a
+    // layout-editor-only control and should not appear in the standard settings panel.
     public static final Setting<String> TRACK_INFO_POSITION = enumSetting(
             "lyrics_track_info_position", INTERNAL, "Track info position", "Off",
             "Off", "Top", "Bottom", "Header"
