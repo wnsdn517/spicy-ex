@@ -3013,7 +3013,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         float baseFrequency = (apple ? (landscape ? 1.72f : 1.85f) : ROW_CASCADE_FREQUENCY_HZ)
                 * speedMul * elasticFrequencyMultiplier();
         float baseDamping = apple
-                ? elasticDamping(landscape ? 0.78f : 0.74f)
+                ? elasticDamping(landscape ? 0.88f : 0.86f)
                 : ROW_CASCADE_DAMPING;
         for (int i : rowMountController.mountedIndices()) {
             if (i < 0 || i >= document.appliedLines.size()) continue;
