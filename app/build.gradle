@@ -83,33 +83,28 @@ android {
                 .orElse("https://reports.eza.dpdns.org/v1/reports")
                 .get()
         buildConfigField "String", "DIAGNOSTIC_INTAKE_URL", "\"${diagnosticIntakeUrl}\""
+        buildConfigField "boolean", "TRANSLITERATION_AVAILABLE", "true"
+        buildConfigField "boolean", "TRANSLATION_AVAILABLE", "true"
+        buildConfigField "boolean", "APPLE_FONT_AVAILABLE", "true"
+        buildConfigField "boolean", "CONNECT_AVAILABLE", "true"
+        def modelPackUrl = providers.gradleProperty("LANGUAGE_MODEL_PACK_URL")
+            .orElse("")
+            .get()
+        def modelPackSha256 = providers.gradleProperty("LANGUAGE_MODEL_PACK_SHA256")
+            .orElse("")
+            .get()
+        def externalLanguageModels = providers.gradleProperty("externalLanguageModels")
+            .map { it.toBoolean() }
+            .orElse(true)
+            .get()
+        buildConfigField "String", "LANGUAGE_MODEL_PACK_URL", "\"${modelPackUrl}\""
+        buildConfigField "String", "LANGUAGE_MODEL_PACK_SHA256", "\"${modelPackSha256}\""
 
     }
 
     buildFeatures {
         aidl true
         buildConfig true
-    }
-
-    flavorDimensions += "tier"
-    productFlavors {
-        lite {
-            dimension "tier"
-            versionNameSuffix "-lite"
-            buildConfigField "boolean", "TRANSLITERATION_AVAILABLE", "false"
-            buildConfigField "boolean", "TRANSLATION_AVAILABLE", "false"
-            buildConfigField "boolean", "APPLE_FONT_AVAILABLE", "false"
-            // lite has no Spotify Connect feature at all - see FeatureAvailability.connectAvailable().
-            buildConfigField "boolean", "CONNECT_AVAILABLE", "false"
-        }
-        full {
-            dimension "tier"
-            versionNameSuffix "-full"
-            buildConfigField "boolean", "TRANSLITERATION_AVAILABLE", "true"
-            buildConfigField "boolean", "TRANSLATION_AVAILABLE", "true"
-            buildConfigField "boolean", "APPLE_FONT_AVAILABLE", "true"
-            buildConfigField "boolean", "CONNECT_AVAILABLE", "true"
-        }
     }
 
     signingConfigs {
@@ -126,7 +121,8 @@ android {
     buildTypes {
         release {
             if (releaseKeystoreValid) signingConfig signingConfigs.release
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -152,6 +148,21 @@ android {
                     'META-INF/CONTRIBUTORS.md',
                     'META-INF/LICENSE.md'
             ]
+            if (providers.gradleProperty("externalLanguageModels").orNull?.toBoolean() ?: true) {
+                excludes += [
+                        'com/atilika/kuromoji/unidic/characterDefinitions.bin',
+                        'com/atilika/kuromoji/unidic/connectionCosts.bin',
+                        'com/atilika/kuromoji/unidic/doubleArrayTrie.bin',
+                        'com/atilika/kuromoji/unidic/tokenInfoDictionary.bin',
+                        'com/atilika/kuromoji/unidic/tokenInfoFeaturesMap.bin',
+                        'com/atilika/kuromoji/unidic/tokenInfoPartOfSpeechMap.bin',
+                        'com/atilika/kuromoji/unidic/tokenInfoTargetMap.bin',
+                        'com/atilika/kuromoji/unidic/unknownDictionary.bin',
+                        'org/apache/tika/langdetect/charsoup/langdetect-20260320.bin',
+                        'com/eza/spicyex/lyrics/JmdictFurigana.txt.gz',
+                        'com/eza/spicyex/lyrics/JmdictPreferredReadings.txt.gz'
+                ]
+            }
         }
     }
 }
@@ -173,9 +184,32 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:5.0.0'
     // WebViewCompat/WebViewFeature - document-start JS injection for the Connect web player.
     implementation 'androidx.webkit:webkit:1.13.0'
-    fullImplementation 'org.apache.tika:tika-langdetect-charsoup-core:4.0.0'
-    fullImplementation 'com.atilika.kuromoji:kuromoji-unidic:0.9.0'
-    fullImplementation 'com.belerweb:pinyin4j:2.5.1'
+    implementation 'org.apache.tika:tika-langdetect-charsoup-core:4.0.0'
+    implementation 'com.atilika.kuromoji:kuromoji-unidic:0.9.0'
+    implementation 'com.belerweb:pinyin4j:2.5.1'
+}
+
+// Creates the ZIP consumed by LanguageModelPack. Publish it from a trusted HTTPS
+// release location and pass its SHA-256 when building the external-model APK.
+tasks.register("packageLanguageModelPack", Zip) {
+    archiveFileName = "spicyex-language-models-v1.zip"
+    destinationDirectory = layout.buildDirectory.dir("language-models")
+    from("src/main/resources/com/eza/spicyex/lyrics") {
+        include "JmdictFurigana.txt.gz", "JmdictPreferredReadings.txt.gz"
+        into "jmdict"
+    }
+    from(configurations.debugRuntimeClasspath.collect { zipTree(it) }) {
+        include "com/atilika/kuromoji/unidic/*.bin"
+        include "org/apache/tika/langdetect/charsoup/langdetect-20260320.bin"
+        eachFile { details ->
+            if (details.path.startsWith("com/atilika/kuromoji/unidic/")) {
+                details.path = "kuromoji/" + details.name
+            } else {
+                details.path = "tika/" + details.name
+            }
+        }
+        includeEmptyDirs = false
+    }
 }
 
 // Persist version-stamped debug APKs to <repo>/artifacts/ so installs do not dig through build/.
@@ -183,9 +217,9 @@ android.applicationVariants.configureEach { variant ->
     if (variant.buildType.name != 'debug') return
     def cap = variant.name.capitalize()
     tasks.register("copy${cap}Apk", Copy) {
-        from layout.buildDirectory.file("outputs/apk/${variant.flavorName}/debug/app-${variant.flavorName}-debug.apk")
+        from layout.buildDirectory.file("outputs/apk/debug/app-debug.apk")
         into rootProject.layout.projectDirectory.dir('artifacts')
-        rename { "SpicyEX-${variant.flavorName}-debug-${variant.versionName}.apk" }
+        rename { "SpicyEX-debug-${variant.versionName}.apk" }
     }
     tasks.named("assemble${cap}").configure { finalizedBy "copy${cap}Apk" }
 }

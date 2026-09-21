@@ -55,6 +55,19 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
             </intent-filter>
         </receiver>
+
+          <service
+               android:name="com.eza.spicyex.player.WebPlayerService"
+               android:exported="true"
+               android:foregroundServiceType="mediaPlayback"
+               android:process=":player"/>
+          <activity
+               android:name="com.eza.spicyex.player.WebLoginActivity"
+               android:exported="true"
+               android:process=":player"
+               android:launchMode="singleTask"
+               android:excludeFromRecents="true"
+               android:label="Spotify sign in"/>
     </application>
 
 </manifest>
