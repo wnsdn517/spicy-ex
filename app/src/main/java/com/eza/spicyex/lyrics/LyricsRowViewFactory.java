@@ -708,8 +708,16 @@ public final class LyricsRowViewFactory {
             // timing atom intact, but let the glyphs wrap inside its bounded view instead of
             // drawing one long line beyond the screen.
             word.setMaxWidth(Math.max(1, Math.round(contentWidthPx)));
+            word.setMinWidth(0);
+            word.setHorizontallyScrolling(false);
+            word.setEllipsize(null);
             word.setMaxLines(Integer.MAX_VALUE);
             applyAdaptiveWrapping(word, true, true);
+            // Keep one timed segment, but let Android split its glyphs across measured lines.
+            // This prevents a long CJK segment from expanding past the viewport during scale.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                word.setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY);
+            }
         } else {
             word.setMaxLines(1);
         }
