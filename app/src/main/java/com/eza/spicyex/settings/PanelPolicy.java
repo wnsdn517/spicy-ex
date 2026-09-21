@@ -101,6 +101,15 @@ public final class PanelPolicy {
 
     private static boolean isLayoutEditorOnly(Settings.Setting<?> setting) {
         return setting == Settings.TRACK_INFO_POSITION
+                || setting == Settings.BACKGROUND_STYLE
+                || setting == Settings.BEAT_REACTIVE_BACKGROUND
+                || setting == Settings.BACKGROUND_RENDER_QUALITY
+                || setting == Settings.FORCE_DARK_BACKGROUND
+                || setting == Settings.EXTRA_DARK_BACKGROUND
+                || setting == Settings.ANIMATION_STYLE
+                || setting == Settings.LOAD_LIFT_ANIMATION
+                || setting == Settings.APPLE_CASCADE_SPEED
+                || setting == Settings.APPLE_SPRING_STRENGTH
                 || setting == Settings.CHROME_CLUSTER_POSITION
                 || setting == Settings.FULLSCREEN_CONTROLS
                 || setting == Settings.LIKED_SONGS_BUTTON
