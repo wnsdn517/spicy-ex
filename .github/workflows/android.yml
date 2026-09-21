@@ -2,9 +2,13 @@ name: Android Build
 
 on:
   push:
-    branches: [main, develop]
+    branches:
+      - main
+      - develop
   pull_request:
-    branches: [main, develop]
+    branches:
+      - main
+      - develop
 
 permissions:
   contents: read
@@ -28,28 +32,24 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: |
-            platforms;android-34
-            build-tools;34.0.0
-            platform-tools
-            ndk;26.3.11579264
+          packages: 'platforms;android-34 build-tools;34.0.0 platform-tools ndk;26.3.11579264'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build with Gradle (Full flavor)
+      - name: Build Full Debug
         run: ./gradlew :app:assembleFullDebug --no-daemon
 
-      - name: Build with Gradle (Lite flavor)
+      - name: Build Lite Debug
         run: ./gradlew :app:assembleLiteDebug --no-daemon
 
-      - name: Run unit tests (Full)
+      - name: Run Full Unit Tests
         run: ./gradlew :app:testFullDebugUnitTest --no-daemon
 
-      - name: Run unit tests (Lite)
+      - name: Run Lite Unit Tests
         run: ./gradlew :app:testLiteDebugUnitTest --no-daemon
 
-      - name: Upload APK artifacts (Full)
+      - name: Upload Full APK
         uses: actions/upload-artifact@v4
         with:
           name: SpicyEX-full-debug
@@ -57,7 +57,7 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Upload APK artifacts (Lite)
+      - name: Upload Lite APK
         uses: actions/upload-artifact@v4
         with:
           name: SpicyEX-lite-debug
@@ -65,9 +65,9 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Upload test reports
-        uses: actions/upload-artifact@v4
+      - name: Upload Test Reports
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: test-reports
           path: app/build/reports/tests/
@@ -92,23 +92,20 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: |
-            platforms;android-34
-            build-tools;34.0.0
-            platform-tools
+          packages: 'platforms;android-34 build-tools;34.0.0 platform-tools'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run lint (Full)
+      - name: Run Full Lint
         run: ./gradlew :app:lintFullDebug --no-daemon
 
-      - name: Run lint (Lite)
+      - name: Run Lite Lint
         run: ./gradlew :app:lintLiteDebug --no-daemon
 
-      - name: Upload lint reports
-        uses: actions/upload-artifact@v4
+      - name: Upload Lint Reports
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: lint-reports
           path: app/build/reports/lint/
@@ -116,7 +113,10 @@ jobs:
           if-no-files-found: ignore
 
   release:
-    needs: [build, lint]
+    needs:
+      - build
+      - lint
+
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -141,22 +141,18 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: |
-            platforms;android-34
-            build-tools;34.0.0
-            platform-tools
-            ndk;26.3.11579264
+          packages: 'platforms;android-34 build-tools;34.0.0 platform-tools ndk;26.3.11579264'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Release (Full)
+      - name: Build Full Release
         run: ./gradlew :app:assembleFullRelease --no-daemon
 
-      - name: Build Release (Lite)
+      - name: Build Lite Release
         run: ./gradlew :app:assembleLiteRelease --no-daemon
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
