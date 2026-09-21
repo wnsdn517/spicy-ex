@@ -3,6 +3,8 @@ package com.eza.spicyex;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -95,6 +97,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
      * repaint a detached badge.
      */
     private volatile boolean panelAttached;
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
 
     /** Locale lookup for the pure policy layer; reads the current uiStrings on every call. */
     private final PanelStrings panelStrings = new PanelStrings() {
@@ -708,6 +711,12 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
                 actions.toArray(new AiSettingsRows.IconAction[0]));
     }
 
+    private void refreshLanguageModelDownloadStatus() {
+        if (!panelAttached || LanguageModelPack.status().phase != LanguageModelPack.Phase.DOWNLOADING) return;
+        rebuildSection(Settings.TRANSLITERATION);
+        uiHandler.postDelayed(this::refreshLanguageModelDownloadStatus, 500);
+    }
+
     private void downloadLanguageModelsRow(LinearLayout content) {
         LanguageModelPack.DownloadStatus status = LanguageModelPack.status();
         LinearLayout row = style.newRow(content);
@@ -730,6 +739,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
             }
             LanguageModelPack.requestDownload();
             rebuildSection(Settings.TRANSLITERATION);
+            refreshLanguageModelDownloadStatus();
         });
 
         TextView title = style.text(uiStrings.setting(Settings.DOWNLOAD_LANGUAGE_MODELS), 16, PanelStyle.COL_TITLE, false);
