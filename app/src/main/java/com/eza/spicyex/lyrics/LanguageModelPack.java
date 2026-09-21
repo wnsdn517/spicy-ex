@@ -52,6 +52,7 @@ public final class LanguageModelPack {
     private static final ExecutorService DOWNLOADS = Executors.newSingleThreadExecutor();
     private static volatile Context appContext;
     private static volatile boolean downloadStarted;
+    private static volatile Runnable readyListener;
     private static volatile DownloadStatus transientStatus = new DownloadStatus(Phase.IDLE, 0, "");
 
     private LanguageModelPack() {
@@ -60,6 +61,10 @@ public final class LanguageModelPack {
     public static void attachContext(Context context) {
         if (context == null) return;
         appContext = context.getApplicationContext();
+    }
+
+    public static void setReadyListener(Runnable listener) {
+        readyListener = listener;
     }
 
     public static void clearTransientState() {
@@ -184,6 +189,8 @@ public final class LanguageModelPack {
         downloadStarted = false;
         JapaneseReadingEngine.shared().trimMemory();
         LanguageDetectorManager.shared().trimMemory();
+        Runnable listener = readyListener;
+        if (listener != null) listener.run();
     }
 
     private static void unzip(File archive, File destination) throws IOException {

@@ -784,6 +784,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         SharedPreferences prefs = activity.getSharedPreferences("SpotifyPlus", Context.MODE_PRIVATE);
         preferences = prefs;
         renderConfig = LyricsRenderConfig.read(activity, config);
+        com.eza.spicyex.lyrics.LanguageModelPack.setReadyListener(
+                () -> handler.post(() -> { if (document != null) renderDocument(true); }));
         autoResumeFollow = config.get(Settings.AUTO_RESUME_FOLLOW);
         slideAnimationEnabled = readSlideEnabled();
         com.eza.spicyex.lyrics.FuriganaText.applySettings(
