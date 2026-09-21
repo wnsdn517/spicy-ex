@@ -19,13 +19,6 @@ public final class FeatureAvailability {
         return BuildConfig.APPLE_FONT_AVAILABLE;
     }
 
-    /**
-     * Full-only. Lite's own native Zeroconf-style Connect receiver (ConnectRuntime et al.) was
-     * removed outright rather than kept as a second implementation - it depended on broadcast
-     * forwarding to WebPlayerService/PlayerWarmReceiver, which are declared only in the full
-     * flavor's manifest, so its login/warm-up path was already silently broken in a lite build
-     * regardless.
-     */
     public static boolean connectAvailable() {
         return BuildConfig.CONNECT_AVAILABLE;
     }

@@ -2454,6 +2454,7 @@ public final class SpicyJapaneseChineseProcessor {
      */
     public static void attachContext(android.content.Context context) {
         JapaneseReadingEngine.attachContext(context);
+        LanguageModelPack.attachContext(context);
     }
 
     public static void trimMemory() {

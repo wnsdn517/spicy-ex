@@ -499,40 +499,15 @@ final class LyricsLayoutEditController {
 
             panelContainer.removeAllViews();
             panelContainer.addView(panelDragHandle(), panelDragHandleLp());
-            panelContainer.addView(actionIconsRow(), new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             panelContainer.addView(optionsScroll, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-            panelContainer.addView(panelBottomResizeHandle(), new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(12)));
 
             overlay.addView(panelContainer, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             applyPanelLayout();
-            
-            // Slide-up entrance animation: start hidden to prevent flickering pops on frame one.
+            panelVisible = false;
+            panelContainer.setTranslationY(dp(40));
             panelContainer.setVisibility(View.INVISIBLE);
-            overlay.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
-                @Override
-                public boolean onPreDraw() {
-                    overlay.getViewTreeObserver().removeOnPreDrawListener(this);
-                    int height = panelContainer.getHeight();
-                    if (height > 0) {
-                        // Position below the bottom edge before making it visible.
-                        panelContainer.setTranslationY(height);
-                        panelContainer.setAlpha(1f);
-                        panelContainer.setVisibility(View.VISIBLE);
-                        panelContainer.animate()
-                                .translationY(0f)
-                                .setDuration(400)
-                                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f))
-                                .start();
-                    } else {
-                        panelContainer.setVisibility(View.VISIBLE);
-                    }
-                    return true;
-                }
-            });
 
             refreshArtwork();
             refreshTrackText();
@@ -734,6 +709,21 @@ final class LyricsLayoutEditController {
             if (frame == null || frame.getWidth() <= 0 || frame.getHeight() <= 0) {
                 artCapture = null;
                 artHandle = null;
+                int sizePx = dp(safeGet(Settings.TRACK_INFO_ART_SIZE_CUSTOM_DP));
+                int[] pos = new int[] { shellRoot.getWidth() / 2 - sizePx / 2, Math.max(dp(90), shellRoot.getHeight() / 2 - sizePx / 2) };
+                View capture = new View(activity);
+                GradientDrawable outline = new GradientDrawable();
+                outline.setStroke(dp(2), ACCENT_COLOR);
+                outline.setCornerRadius(dp(safeGet(Settings.TRACK_INFO_ART_RADIUS)));
+                capture.setBackground(outline);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(sizePx, sizePx, Gravity.TOP | Gravity.START);
+                lp.leftMargin = pos[0];
+                lp.topMargin = pos[1];
+                capture.setOnClickListener(v -> selectElement(Element.ARTWORK));
+                artLayer.addView(capture, lp);
+                artCapture = capture;
+                bindCapture(capture, () -> null);
+                paintCapture(artCapture, selected == Element.ARTWORK);
                 return;
             }
             int[] pos = relativePosition(frame, shellRoot);
@@ -957,7 +947,7 @@ final class LyricsLayoutEditController {
                     frame.getWidth(), frame.getHeight(), Gravity.TOP | Gravity.START);
             lp.leftMargin = pos[0];
             lp.topMargin = pos[1];
-            capture.setOnClickListener(v -> selectElement(Element.TRACK_TEXT));
+            capture.setOnClickListener(v -> selectElement(Element.ARTWORK));
             trackTextLayer.addView(capture, lp);
             trackTextCapture = capture;
             bindCapture(capture, trackTextFrameSupplier);
@@ -1308,16 +1298,10 @@ final class LyricsLayoutEditController {
 
         private void selectElement(Element element, boolean revealPanel) {
             int previousScrollY = optionsScroll.getScrollY();
+            boolean wasSelected = panelVisible && selected == element;
             selected = element;
             optionsCard.removeAllViews();
             endGroup(); // the cards just removed above are gone; never append into a stale one
-            TextView editing = text(s("editing", "Editing  ·  ") + labelFor(element),
-                    14, TEXT_COLOR, true);
-            editing.setPadding(dp(4), dp(2), dp(4), dp(8));
-            optionsCard.addView(editing, matchWrap(0));
-            optionsCard.addView(elementSwitcherRow(), matchWrap(8));
-            optionsCard.addView(divider(), new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
             repaintAllCaptures();
 
             switch (element) {
@@ -1349,7 +1333,14 @@ final class LyricsLayoutEditController {
             // Rebuilding the option rows must not throw away the user's panel position.
             optionsScroll.post(() -> optionsScroll.scrollTo(0, Math.max(0, previousScrollY)));
             afterNextLayout(() -> {
-                if (revealPanel) showPanelSheet(true);
+                if (revealPanel) {
+                    if (wasSelected) {
+                        hidePanelSheet(true);
+                        overlay.postDelayed(() -> showPanelSheet(true), 150L);
+                    } else {
+                        showPanelSheet(true);
+                    }
+                }
                 avoidPanelOverlap();
             });
         }
@@ -1414,6 +1405,29 @@ final class LyricsLayoutEditController {
                         .setDuration(260L)
                         .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f))
                         .withEndAction(this::avoidPanelOverlap)
+                        .start();
+            });
+        }
+
+        private void hidePanelSheet(boolean animate) {
+            panelVisible = false;
+            panelContainer.post(() -> {
+                panelContainer.animate().cancel();
+                if (!animate) {
+                    panelContainer.setTranslationY(panelContainer.getHeight() + dp(24));
+                    panelContainer.setVisibility(View.INVISIBLE);
+                    return;
+                }
+                float target = panelContainer.getHeight() + dp(24);
+                panelContainer.animate()
+                        .translationY(target)
+                        .alpha(0.94f)
+                        .setDuration(200L)
+                        .setInterpolator(new android.view.animation.AccelerateInterpolator(1.4f))
+                        .withEndAction(() -> {
+                            panelContainer.setVisibility(View.INVISIBLE);
+                            panelContainer.setAlpha(1f);
+                        })
                         .start();
             });
         }
@@ -1508,13 +1522,13 @@ final class LyricsLayoutEditController {
                     Settings.TRACK_INFO_ART_RADIUS.minValue, Settings.TRACK_INFO_ART_RADIUS.maxValue,
                     safeGet(Settings.TRACK_INFO_ART_RADIUS), "dp", Settings.TRACK_INFO_ART_RADIUS.defaultValue,
                     value -> {
-                        // Plain write: refreshArtwork()'s outline radius comes from our own
-                        // store read, not the real view, and radius changes never reparent
-                        // anything - safe to read straight back synchronously.
                         writer.put(Settings.TRACK_INFO_ART_RADIUS, value);
                         refreshArtwork();
                     }),
                     matchWrap(0));
+
+            endGroup();
+            buildTrackTextOptions();
         }
 
         private void buildTrackTextOptions() {
@@ -2069,47 +2083,25 @@ final class LyricsLayoutEditController {
                         return true;
                     }
                     case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
+                    case MotionEvent.ACTION_CANCEL: {
+                        if (dragging[0]) {
+                            closeOrShrinkPanel(startRawY[0], event.getRawY());
+                        }
                         return true;
+                    }
                     default:
                         return false;
                 }
             });
         }
 
-        private View panelBottomResizeHandle() {
-            View handle = new View(activity);
-            handle.setBackgroundColor(0x20FFFFFF);
-            int minTouchHeight = dp(16);
-            float[] startRawY = new float[1];
-            int[] startHeight = new int[1];
-            boolean[] dragging = new boolean[1];
-            handle.setOnTouchListener((v, event) -> {
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        startRawY[0] = event.getRawY();
-                        startHeight[0] = panelContainer.getHeight();
-                        dragging[0] = false;
-                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
-                        return true;
-                    case MotionEvent.ACTION_MOVE: {
-                        float dy = event.getRawY() - startRawY[0];
-                        if (!dragging[0] && Math.abs(dy) > dp(4)) dragging[0] = true;
-                        if (dragging[0]) {
-                            int newHeight = clamp((int)(startHeight[0] - dy), dp(200), overlay.getHeight() - dp(PANEL_MIN_TOP_DP));
-                            panelContainerHeight = newHeight;
-                            applyPanelLayout();
-                        }
-                        return true;
-                    }
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        return true;
-                    default:
-                        return false;
-                }
-            });
-            return handle;
+        private void closeOrShrinkPanel(float startRawY, float currentRawY) {
+            float dy = currentRawY - startRawY;
+            if (dy < -dp(48)) {
+                hidePanelSheet(true);
+            } else if (dy > dp(48)) {
+                showPanelSheet(true);
+            }
         }
 
         private int clampPanelTopMargin(int desired) {

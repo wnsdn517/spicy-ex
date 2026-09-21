@@ -9,7 +9,9 @@ import com.atilika.kuromoji.dict.TokenInfoDictionary;
 import com.atilika.kuromoji.dict.UnknownDictionary;
 import com.atilika.kuromoji.trie.DoubleArrayTrie;
 import com.atilika.kuromoji.unidic.Tokenizer;
+import com.atilika.kuromoji.util.ResourceResolver;
 import com.atilika.kuromoji.util.SimpleResourceResolver;
+import java.io.InputStream;
 
 /**
  * Builds kuromoji's unidic {@link Tokenizer} with its largest table served from a memory-mapped
@@ -30,7 +32,11 @@ final class MappedTokenizerBuilder extends Tokenizer.Builder {
         // and SimpleResourceResolver resolves class-relative. In a subclass that getClass() is
         // this one, so every dictionary would be looked up in our own package and nothing would
         // be found - not even by super.loadDictionaries(). Point it back at kuromoji's package.
-        this.resolver = new SimpleResourceResolver(Tokenizer.class);
+        ResourceResolver packaged = new SimpleResourceResolver(Tokenizer.class);
+        this.resolver = name -> {
+            InputStream downloaded = LanguageModelPack.open("kuromoji/" + name);
+            return downloaded != null ? downloaded : packaged.resolve(name);
+        };
     }
 
     /** @return a tokenizer, mapped where possible; never null. */

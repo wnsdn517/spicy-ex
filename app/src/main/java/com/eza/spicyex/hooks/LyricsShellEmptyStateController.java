@@ -52,31 +52,33 @@ final class LyricsShellEmptyStateController {
         LinearLayout card = new LinearLayout(activity);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER);
+        card.setAlpha(0f);
+        card.setTranslationY(dp(12));
         GradientDrawable cardBg = new GradientDrawable();
-        cardBg.setColor(0x1AFFFFFF);
-        cardBg.setCornerRadius(dp(20));
-        cardBg.setStroke(dp(1), 0x22FFFFFF);
+        cardBg.setColor(0x14000000);
+        cardBg.setCornerRadius(dp(18));
+        cardBg.setStroke(dp(1), 0x26FFFFFF);
         card.setBackground(cardBg);
-        card.setPadding(dp(24), dp(28), dp(24), dp(24));
+        card.setPadding(dp(20), dp(18), dp(20), dp(18));
 
-        TextView badge = textFactory.createText(activity, "AD", 16, Color.WHITE,
+        TextView badge = textFactory.createText(activity, "AD", 13, Color.argb(255, 214, 214, 230),
                 textFactory.resolveTypeface(true));
         badge.setGravity(Gravity.CENTER);
-        badge.setLetterSpacing(0.12f);
+        badge.setLetterSpacing(0.10f);
         GradientDrawable badgeBg = new GradientDrawable();
-        badgeBg.setColor(0xCC8B5CF6);
-        badgeBg.setCornerRadius(dp(12));
+        badgeBg.setColor(0x1AFFFFFF);
+        badgeBg.setCornerRadius(dp(10));
         badge.setBackground(badgeBg);
-        card.addView(badge, new LinearLayout.LayoutParams(dp(64), dp(38)));
+        card.addView(badge, new LinearLayout.LayoutParams(dp(48), dp(28)));
 
         TextView label = textFactory.createText(
                 activity,
                 message,
-                18,
+                16,
                 Color.WHITE,
                 textFactory.resolveTypeface(false));
         label.setGravity(Gravity.CENTER);
-        label.setPadding(0, dp(16), 0, 0);
+        label.setPadding(0, dp(12), 0, 0);
         card.addView(label);
 
         boolean muted = Boolean.TRUE.equals(config.get(Settings.AUTO_MUTE_ADS));
@@ -85,32 +87,34 @@ final class LyricsShellEmptyStateController {
         if (muted) {
             ImageView muteIcon = new ImageView(activity);
             muteIcon.setImageDrawable(new ActionIconDrawable(
-                    ActionIconDrawable.Kind.VOLUME_OFF, Color.rgb(190, 180, 255),
+                    ActionIconDrawable.Kind.VOLUME_OFF, Color.rgb(204, 204, 214),
                     activity.getResources().getDisplayMetrics().density));
-            statusRow.addView(muteIcon, new LinearLayout.LayoutParams(dp(18), dp(18)));
+            statusRow.addView(muteIcon, new LinearLayout.LayoutParams(dp(16), dp(16)));
         }
         TextView hint = textFactory.createText(
                 activity,
-                muted ? "Ad audio muted · Lyrics return after the ad"
-                        : "Lyrics return after the ad",
-                13,
+                muted ? "Ad audio muted · lyrics resume after the ad"
+                        : "Lyrics resume after the ad",
+                12,
                 Color.rgb(178, 178, 188),
                 textFactory.resolveTypeface(false));
         hint.setGravity(Gravity.CENTER);
-        hint.setPadding(muted ? dp(6) : 0, dp(10), 0, 0);
+        hint.setPadding(muted ? dp(6) : 0, dp(8), 0, 0);
         statusRow.addView(hint);
         card.addView(statusRow);
 
         LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        cardLp.topMargin = dp(80);
-        cardLp.leftMargin = dp(32);
-        cardLp.rightMargin = dp(32);
+        cardLp.topMargin = dp(72);
+        cardLp.leftMargin = dp(18);
+        cardLp.rightMargin = dp(18);
         lyricsColumn.addView(card, cardLp);
 
-        // Subtle badge pulse keeps the ad state alive without making the whole placeholder jump.
-        ValueAnimator pulse = ValueAnimator.ofFloat(0.88f, 1f);
+        card.animate().alpha(1f).translationY(0f).setDuration(180).setInterpolator(
+                new AccelerateDecelerateInterpolator()).start();
+
+        ValueAnimator pulse = ValueAnimator.ofFloat(0.9f, 1f);
         pulse.setDuration(1200);
         pulse.setRepeatCount(ValueAnimator.INFINITE);
         pulse.setRepeatMode(ValueAnimator.REVERSE);

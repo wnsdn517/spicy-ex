@@ -59,6 +59,10 @@ final class LyricsJumpToCurrentController {
      *  chip real follow-state put up on its own. */
     private boolean editingForcedVisible;
 
+    boolean isVisible() {
+        return shown || editingForcedVisible;
+    }
+
     private LyricsJumpToCurrentController(SpotifyPlusConfig config, LinearLayout pill,
             TextView label, FrameLayout.LayoutParams lp) {
         this.config = config;
@@ -113,12 +117,12 @@ final class LyricsJumpToCurrentController {
         lp.setMargins(0, 0, dp(16), dp(24));
         parent.addView(pill, lp);
 
-        pill.setOnClickListener(v -> {
-            if (onClick != null) onClick.run();
-        });
-
         LyricsJumpToCurrentController controller =
                 new LyricsJumpToCurrentController(config, pill, label, lp);
+        pill.setOnClickListener(v -> {
+            controller.update(false);
+            if (onClick != null) onClick.run();
+        });
         controller.onPreferenceChanged();
         return controller;
     }

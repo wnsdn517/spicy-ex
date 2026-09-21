@@ -1685,7 +1685,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             lastDisplayedArtist = "";
             lastDisplayedAlbum = "";
             followState.resetActive();
-            followChipWasShown = false;
             lastLyricPositionMs = -1;
             resetScrollForNextDocument = true;
             document = null;
@@ -3270,7 +3269,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 renderConfig, Math.max(0, lyricPos), index, 1f / 60f, false);
         // Force hide follow chip even if layout editor forced it visible
         if (jumpToCurrentController != null) jumpToCurrentController.forceHide();
-        followChipWasShown = false;
     }
 
     private long adjustedLyricPositionMs(long playbackPositionMs) {
@@ -3966,44 +3964,26 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     }
 
     private void updateJumpToCurrentVisibility() {
-        // Show the chip only if we have an active line AND user has manually scrolled away.
-        // We only show it when the user is NOT touching the screen AND the scrolling has 
-        // completely settled (no inertia/momentum). This makes the appearance feels deliberate.
-        // Once shown, the chip stays visible until the user manually taps it to resume follow.
-        boolean show = document != null && followState.activeIndex() >= 0 
-                && followState.isHoldingNow() && !followState.isTouching() && !scrollInProgress;
-        
-        // Track if chip was ever shown to keep it visible until manual resume
-        if (show) {
-            followChipWasShown = true;
-        }
-        
-        // Keep showing if it was ever shown and user hasn't manually resumed follow
-        // Once shown, it stays visible even if user touches/scrolls again
-        // Only hide when follow is resumed (isHoldingNow becomes false via clearHold in resumeFollowCurrentLine)
-        boolean shouldShow = followChipWasShown && followState.activeIndex() >= 0 && document != null;
-        
-        // But don't show initially during auto-scroll (before any manual scroll)
-        if (!followChipWasShown && !show) {
-            shouldShow = false;
-        }
-        
+        // Show the chip only if we have an active line and the user has manually scrolled away.
+        // We keep an already visible chip in place while the user is still scrolling, because a
+        // mid-scroll fade-out reads as the chip being unexpectedly yanked away from its current
+        // place instead of a deliberate follow reset.
+        boolean show = document != null && followState.activeIndex() >= 0
+                && followState.isHoldingNow() && !followState.isTouching();
+        boolean chipAlreadyVisible = jumpToCurrentController.isVisible();
+        boolean shouldShow = show && (!scrollInProgress || chipAlreadyVisible);
+
         jumpToCurrentController.update(shouldShow);
-        
-        // Only update progress when playing - auto-resume only works during playback
-        // When paused, the progress fill is meaningless and can appear janky
+
         if (shouldShow && host.isPlayerActuallyPlaying()) {
             int delaySeconds = config == null ? Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS.defaultValue
                     : config.get(Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS);
             jumpToCurrentController.setProgress(followState.autoResumeProgress(delaySeconds * 1000L));
         } else if (shouldShow) {
-            // When paused, hide the progress bar
             jumpToCurrentController.setProgress(0f);
         }
     }
     
-    private boolean followChipWasShown = false;
-
     /**
      * Drives the intro/outro skip affordance (synced docs only; callers hide it elsewhere).
      * Off hides everything; On demand shows the chip while an unacknowledged gap is active;

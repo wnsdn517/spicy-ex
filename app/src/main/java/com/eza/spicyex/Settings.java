@@ -497,7 +497,7 @@ public final class Settings {
 
     // Row-scroll cascade. Apple-owned: rendered only inside the Apple sub-section.
     public static final Setting<Boolean> LINE_SLIDE_ANIMATION = boolSetting(
-            "lyric_line_slide_animation", APPLE, "Apple Music-style slide", false
+            "lyric_line_slide_animation", APPLE, "Apple Music-style slide", true
     );
 
     // Apple-owned lift motion. This is the only Apple lift entry: WORD_BOUNCE_STYLE deliberately
@@ -604,6 +604,10 @@ public final class Settings {
     // --- Romanization (transliteration controls) ---
     public static final Setting<Boolean> TRANSLITERATION_ENABLED = boolSetting(
             "lyrics_transliteration_enabled", TRANSLITERATION, "Transliterate lyrics", false
+    );
+
+    public static final Setting<Boolean> DOWNLOAD_LANGUAGE_MODELS = boolSetting(
+            "download_language_models", TRANSLITERATION, "Download language models", false
     );
 
     // Global romanization layout — aligned under each word (great for language learners comparing

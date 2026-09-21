@@ -3,6 +3,7 @@ package com.eza.spicyex;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.eza.spicyex.lyrics.LanguageModelPack;
 import com.eza.spicyex.settings.TypedStore;
 
 import java.util.Map;
@@ -103,6 +104,10 @@ public final class SettingsStore implements TypedStore {
 
     @Override
     public void putBoolean(Settings.BooleanSetting setting, boolean value) {
+        if (setting == Settings.DOWNLOAD_LANGUAGE_MODELS) {
+            // The row is intentionally a tap-to-download action rather than a persisted toggle.
+            return;
+        }
         prefs.edit().putBoolean(setting.key, value).apply();
     }
 

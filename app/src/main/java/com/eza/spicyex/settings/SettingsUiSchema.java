@@ -86,6 +86,7 @@ public final class SettingsUiSchema {
             Settings.LOAD_LIFT_ANIMATION,
             // Reading & transliteration
             Settings.TRANSLITERATION_ENABLED,
+            Settings.DOWNLOAD_LANGUAGE_MODELS,
             Settings.ALIGNED_PER_WORD_ROMAJI,
             Settings.JAPANESE_READING_MODE,
             Settings.FURIGANA_BRIGHTNESS,

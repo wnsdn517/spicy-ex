@@ -148,7 +148,9 @@ public final class JapaneseReadingEngine {
 
     private static FuriganaTable loadJmdictFurigana() {
         FuriganaTable.Builder out = new FuriganaTable.Builder();
-        try (InputStream in = JapaneseReadingEngine.class.getResourceAsStream("JmdictFurigana.txt.gz")) {
+        try (InputStream in = LanguageModelPack.openOrPackaged(
+            "jmdict/JmdictFurigana.txt.gz", JapaneseReadingEngine.class,
+            "JmdictFurigana.txt.gz")) {
             if (in == null) return out.build();
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(new GZIPInputStream(in), StandardCharsets.UTF_8))) {
@@ -175,7 +177,9 @@ public final class JapaneseReadingEngine {
 
     private static Map<String, String> loadJmdictPreferredReadings() {
         HashMap<String, String> out = new HashMap<>();
-        try (InputStream in = JapaneseReadingEngine.class.getResourceAsStream("JmdictPreferredReadings.txt.gz")) {
+        try (InputStream in = LanguageModelPack.openOrPackaged(
+            "jmdict/JmdictPreferredReadings.txt.gz", JapaneseReadingEngine.class,
+            "JmdictPreferredReadings.txt.gz")) {
             if (in == null) return out;
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(new GZIPInputStream(in), StandardCharsets.UTF_8))) {
