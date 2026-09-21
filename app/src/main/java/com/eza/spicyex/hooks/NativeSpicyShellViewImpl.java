@@ -2585,6 +2585,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private void shareLyricLineAt(float yInScroll) {
         SpotifyTrack track = currentTrackThrottled();
         if (track == null) return;
+        // Don't share during ads - only share actual songs
+        if (isAdTrack(track)) return;
         if (shareCardController == null) shareCardController = new LyricsShareCardController(activity);
         Bitmap art = SpotifyArtworkCache.snapshotLarge(track.imageId, track.uri, dp(420));
         if (art == null && track.imageId != null && !track.imageId.isEmpty()) {
@@ -3977,7 +3979,14 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         }
         
         // Keep showing if it was ever shown and user hasn't manually resumed follow
-        boolean shouldShow = show || (followChipWasShown && !followState.isHoldingNow() && followState.activeIndex() >= 0);
+        // Once shown, it stays visible even if user touches/scrolls again
+        // Only hide when follow is resumed (isHoldingNow becomes false via clearHold in resumeFollowCurrentLine)
+        boolean shouldShow = followChipWasShown && followState.activeIndex() >= 0 && document != null;
+        
+        // But don't show initially during auto-scroll (before any manual scroll)
+        if (!followChipWasShown && !show) {
+            shouldShow = false;
+        }
         
         jumpToCurrentController.update(shouldShow);
         
