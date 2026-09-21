@@ -213,7 +213,6 @@ final class LyricsJumpToCurrentController {
     /** Updates the visual countdown fill. Externally driven (see NativeSpicyShellViewImpl)
      *  to match the actual auto-resume cooldown state. */
     void setProgress(float value) {
-            if (progressFadeAnimator != null) { progressFadeAnimator.cancel(); progressFadeAnimator = null; }
 
         if (config != null && config.get(Settings.FOLLOW_CHIP_PROGRESS) && !"Icon".equals(style)) {
             // Re-apply the progress background if it was replaced by setCollapsed()'s 

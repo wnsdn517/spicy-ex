@@ -501,6 +501,8 @@ final class LyricsLayoutEditController {
             panelContainer.addView(panelDragHandle(), panelDragHandleLp());
             panelContainer.addView(optionsScroll, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            panelContainer.addView(actionIconsRow(), new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             overlay.addView(panelContainer, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -1385,22 +1387,36 @@ final class LyricsLayoutEditController {
             applyPanelLayout();
         }
 
-        /** Opens the option tray like a bottom sheet. It stays INVISIBLE while closed so its
-         * measured height remains available for the first opening and for overlap calculations. */
         private void showPanelSheet(boolean animate) {
             if (!panelVisible && !panelUserPositioned) panelTopMargin = null;
             panelVisible = true;
+            panelContainer.animate().cancel();
             panelContainer.setVisibility(View.VISIBLE);
             panelContainer.setAlpha(1f);
-            panelContainer.setTranslationY(0f);
+            if (animate) {
+                panelContainer.setTranslationY(Math.max(dp(40), panelContainer.getHeight()));
+                panelContainer.animate().translationY(0f).setDuration(220L).start();
+            } else {
+                panelContainer.setTranslationY(0f);
+            }
             panelContainer.post(this::avoidPanelOverlap);
         }
 
         private void hidePanelSheet(boolean animate) {
             panelVisible = false;
-            panelContainer.setVisibility(View.INVISIBLE);
-            panelContainer.setAlpha(1f);
-            panelContainer.setTranslationY(0f);
+            panelContainer.animate().cancel();
+            if (!animate) {
+                panelContainer.setVisibility(View.INVISIBLE);
+                panelContainer.setAlpha(1f);
+                panelContainer.setTranslationY(0f);
+                return;
+            }
+            float distance = Math.max(dp(40), panelContainer.getHeight());
+            panelContainer.animate().translationY(distance).setDuration(200L).withEndAction(() -> {
+                panelContainer.setVisibility(View.INVISIBLE);
+                panelContainer.setAlpha(1f);
+                panelContainer.setTranslationY(0f);
+            }).start();
         }
 
         private View captureFor(Element element) {
@@ -2070,9 +2086,9 @@ final class LyricsLayoutEditController {
 
         private void closeOrShrinkPanel(float startRawY, float currentRawY) {
             float dy = currentRawY - startRawY;
-            if (dy < -dp(48)) {
+            if (dy > dp(48)) {
                 hidePanelSheet(true);
-            } else if (dy > dp(48)) {
+            } else if (dy < -dp(48)) {
                 showPanelSheet(true);
             }
         }
