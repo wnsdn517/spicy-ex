@@ -1880,12 +1880,9 @@ final class LyricsLayoutEditController {
             }
 
             endGroup();
-            addOption(toggleRow(Settings.FORCE_DARK_BACKGROUND,
-                    strings.setting(Settings.FORCE_DARK_BACKGROUND), null), matchWrap(12));
-
-            endGroup();
-            // Force-dark is a single 0-100 intensity control. The persisted legacy toggle
-            // remains enabled for compatibility, while the intensity is visible immediately.
+            // Force-dark is one control: 0-100% intensity. The legacy boolean remains enabled
+            // internally for compatibility, but is no longer exposed as a separate button.
+            beginGroup(strings.setting(Settings.FORCE_DARK_BACKGROUND));
             int darkenValue = safeGet(Settings.EXTRA_DARK_BACKGROUND);
             addOption(dragRow(
                     Settings.EXTRA_DARK_BACKGROUND.minValue, Settings.EXTRA_DARK_BACKGROUND.maxValue,
