@@ -213,6 +213,8 @@ final class LyricsJumpToCurrentController {
     /** Updates the visual countdown fill. Externally driven (see NativeSpicyShellViewImpl)
      *  to match the actual auto-resume cooldown state. */
     void setProgress(float value) {
+            if (progressFadeAnimator != null) { progressFadeAnimator.cancel(); progressFadeAnimator = null; }
+
         if (config != null && config.get(Settings.FOLLOW_CHIP_PROGRESS) && !"Icon".equals(style)) {
             // Re-apply the progress background if it was replaced by setCollapsed()'s 
             // plain-button reset during a style or visibility transition.
@@ -224,10 +226,16 @@ final class LyricsJumpToCurrentController {
     }
 
     /** Draws the auto-collapse progress inside the chip without rebuilding its background every frame. */
+    void fadeProgress() {
+        progressDrawable.fadeOut();
+    }
+
     private static final class PillProgressDrawable extends Drawable {
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
         private float progress;
+        private float progressAlpha = 1f;
+        private ValueAnimator progressFadeAnimator;
 
         PillProgressDrawable() {
             stroke.setStyle(Paint.Style.STROKE);
@@ -236,8 +244,26 @@ final class LyricsJumpToCurrentController {
         }
 
         void setProgress(float value) {
+            if (progressFadeAnimator != null) { progressFadeAnimator.cancel(); progressFadeAnimator = null; }
+            progressAlpha = 1f;
             progress = Math.max(0f, Math.min(1f, value));
             invalidateSelf();
+        }
+
+        void fadeOut() {
+            if (progressAlpha <= 0.01f) return;
+            if (progressFadeAnimator != null) {
+                if (progressFadeAnimator.isRunning()) return;
+                progressFadeAnimator = null;
+            }
+            ValueAnimator animator = ValueAnimator.ofFloat(progressAlpha, 0f);
+            progressFadeAnimator = animator;
+            animator.setDuration(260L);
+            animator.addUpdateListener(a -> {
+                progressAlpha = (Float) a.getAnimatedValue();
+                invalidateSelf();
+            });
+            animator.start();
         }
 
         @Override public void draw(Canvas canvas) {
@@ -252,7 +278,7 @@ final class LyricsJumpToCurrentController {
                 float right = bounds.left + bounds.width() * progress;
                 canvas.save();
                 canvas.clipPath(roundRectPath(bounds, radius));
-                fill.setColor(Color.argb(Math.round(35 + 25 * progress), 255, 255, 255));
+                fill.setColor(Color.argb(Math.round((35 + 25 * progress) * progressAlpha), 255, 255, 255));
                 canvas.drawRect(bounds.left, bounds.top, right, bounds.bottom, fill);
                 canvas.restore();
             }

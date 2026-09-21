@@ -3969,9 +3969,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // mid-scroll fade-out reads as the chip being unexpectedly yanked away from its current
         // place instead of a deliberate follow reset.
         boolean show = document != null && followState.activeIndex() >= 0
-                && followState.isHoldingNow() && !followState.isTouching();
-        boolean chipAlreadyVisible = jumpToCurrentController.isVisible();
-        boolean shouldShow = show && (!scrollInProgress || chipAlreadyVisible);
+                && followState.isHoldingNow();
+        boolean shouldShow = show;
 
         jumpToCurrentController.update(shouldShow);
 
@@ -3980,7 +3979,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                     : config.get(Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS);
             jumpToCurrentController.setProgress(followState.autoResumeProgress(delaySeconds * 1000L));
         } else if (shouldShow) {
-            jumpToCurrentController.setProgress(0f);
+            jumpToCurrentController.fadeProgress();
         }
     }
     
