@@ -67,6 +67,10 @@ public final class DisplayLayoutGroup {
                 if (!groups.isEmpty()) return groups;
             }
         }
+        if (isKorean(language, source)) {
+            // Korean: use syllable-based grouping with punctuation awareness
+            return koreanGroups(source);
+        }
         return whitespaceGroups(source);
     }
 
@@ -203,5 +207,106 @@ public final class DisplayLayoutGroup {
     private static boolean isChinese(String language, String text) {
         String value = language == null ? "" : language.toLowerCase();
         return value.startsWith("zh") || value.isEmpty() && SpicyTextDetection.itemChineseTest(text);
+    }
+
+    private static boolean isKorean(String language, String text) {
+        String value = language == null ? "" : language.toLowerCase();
+        return value.equals("ko") || value.isEmpty() && SpicyTextDetection.itemKoreanTest(text);
+    }
+
+    /** Korean syllable-based grouping with punctuation awareness.
+     *  Korean doesn't use spaces between words, so we group by syllables
+     *  and ensure punctuation stays with the preceding text. */
+    private static List<DisplayLayoutGroup> koreanGroups(String text) {
+        ArrayList<DisplayLayoutGroup> groups = new ArrayList<>();
+        int start = 0;
+        int syllableCount = 0;
+        final int MAX_SYLLABLES_PER_GROUP = 8; // ~8 syllables per visual group
+        
+        for (int i = 0; i < text.length(); ) {
+            int cp = text.codePointAt(i);
+            int charCount = Character.charCount(cp);
+            
+            boolean isPunct = isKoreanPunctuation(cp);
+            boolean isSpace = Character.isWhitespace(cp);
+            
+            // Count Hangul syllables (each syllable = 1 code point in precomposed form)
+            if (!isPunct && !isSpace && cp >= 0xAC00 && cp <= 0xD7A3) {
+                syllableCount++;
+            }
+            
+            // Check if we should break here
+            boolean shouldBreak = false;
+            
+            // Break after punctuation if followed by non-punctuation
+            if (isPunct && i + charCount < text.length()) {
+                int nextCp = text.codePointAt(i + charCount);
+                if (!isKoreanPunctuation(nextCp) && !Character.isWhitespace(nextCp)) {
+                    shouldBreak = true;
+                }
+            }
+            // Break at space
+            else if (isSpace) {
+                shouldBreak = true;
+            }
+            // Break at max syllable count
+            else if (syllableCount >= MAX_SYLLABLES_PER_GROUP) {
+                shouldBreak = true;
+            }
+            
+            if (shouldBreak) {
+                int end = i + charCount;
+                // Extend to include following punctuation
+                while (end < text.length()) {
+                    int nextCp = text.codePointAt(end);
+                    if (isKoreanPunctuation(nextCp)) {
+                        end += Character.charCount(nextCp);
+                    } else {
+                        break;
+                    }
+                }
+                if (end > start) {
+                    groups.add(new DisplayLayoutGroup(start, end, "ko-syllable-group", true, 0.8));
+                }
+                start = end;
+                syllableCount = 0;
+            }
+            
+            i += charCount;
+        }
+        
+        // Add remaining
+        if (start < text.length()) {
+            groups.add(new DisplayLayoutGroup(start, text.length(), "ko-syllable-group", true, 0.8));
+        }
+        
+        // If no groups formed, fall back to whole text
+        if (groups.isEmpty()) {
+            groups.add(new DisplayLayoutGroup(0, text.length(), "ko-fallback", true, 0.5));
+        }
+        
+        return groups;
+    }
+
+    private static boolean isKoreanPunctuation(int cp) {
+        return cp == 0x3000 || // ideographic space
+               cp == 0x3001 || // ideographic comma
+               cp == 0x3002 || // ideographic full stop
+               cp == 0xFF01 || // fullwidth exclamation
+               cp == 0xFF0C || // fullwidth comma
+               cp == 0xFF0E || // fullwidth period
+               cp == 0xFF1A || // fullwidth colon
+               cp == 0xFF1B || // fullwidth semicolon
+               cp == 0xFF1F || // fullwidth question mark
+               cp == 0x2018 || cp == 0x2019 || // single quotes
+               cp == 0x201C || cp == 0x201D || // double quotes
+               cp == 0x3008 || cp == 0x3009 || // angle brackets
+               cp == 0x300A || cp == 0x300B || // double angle brackets
+               cp == 0x300C || cp == 0x300D || // corner brackets
+               cp == 0x300E || cp == 0x300F || // white corner brackets
+               cp == 0x3010 || cp == 0x3011 || // lenticular brackets
+               cp == 0xFF08 || cp == 0xFF09 || // fullwidth parentheses
+               cp == 0xFF3B || cp == 0xFF3D || // fullwidth brackets
+               cp >= 0xFE30 && cp <= 0xFE6B; // various CJK punctuation
     }
 }

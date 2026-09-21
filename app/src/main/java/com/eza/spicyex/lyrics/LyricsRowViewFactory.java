@@ -856,6 +856,7 @@ private void buildLineLevelMain(LinearLayout row, AppliedLine line, boolean show
         } else {
             view.setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED);
         }
+        // Prevent hyphenation which can break CJK text oddly
         view.setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE);
     }
 
@@ -867,6 +868,8 @@ private void buildLineLevelMain(LinearLayout row, AppliedLine line, boolean show
         view.setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY);
         view.setLineBreakStyle(LineBreakConfig.LINE_BREAK_STYLE_STRICT);
         view.setLineBreakWordStyle(LineBreakConfig.LINE_BREAK_WORD_STYLE_PHRASE);
+        // Prevent punctuation (quotes, brackets, etc.) from starting a new line
+        // by treating them as part of the preceding word/phrase
     }
 
     static AdaptiveBreakMode adaptiveBreakMode(boolean enabled, boolean cjkPhrase, int sdkInt) {
@@ -901,7 +904,7 @@ private void buildLineLevelMain(LinearLayout row, AppliedLine line, boolean show
 
     private boolean isCjkPhraseLine(AppliedLine line) {
         String language = ReadingLanguagePolicy.layoutLanguage(line);
-        return "ja".equals(language) || "zh".equals(language);
+        return "ja".equals(language) || "zh".equals(language) || "ko".equals(language);
     }
 
     private boolean hasJapaneseReading(AppliedLine line) {
