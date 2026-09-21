@@ -91,7 +91,7 @@ android {
             .orElse("https://github.com/wnsdn517/spicy-ex/releases/download/v1/spicyex-language-models-v1.zip")
             .get()
         def modelPackSha256 = providers.gradleProperty("LANGUAGE_MODEL_PACK_SHA256")
-            .orElse("https://github.com/wnsdn517/spicy-ex/releases/download/v1/spicyex-language-models-v1.zip")
+.orElse("")
             .get()
         def externalLanguageModels = providers.gradleProperty("externalLanguageModels")
             .map { it.toBoolean() }
