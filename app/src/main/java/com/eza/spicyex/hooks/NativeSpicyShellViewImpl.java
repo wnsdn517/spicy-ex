@@ -4297,6 +4297,13 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         refreshLikedButton(track);
     }
 
+    private void refreshChromeClusterSpacing() {
+        if (chromeViews == null) return;
+        LyricsShellChromeController.applyTopMode(chromeViews, isTopReadout(),
+                chromeButtonDp(), isLandscape());
+    }
+
+
     private void refreshLikedButton(SpotifyTrack track) {
         if (likeButton == null) return;
         com.eza.spicyex.ui.ActionIconDrawable.Kind kind =
@@ -4305,12 +4312,14 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // there just invites a tap that does nothing but pop the "unavailable" toast.
         if (kind == null || (track != null && !SpotifyCollectionAction.isSong(track))) {
             likeButton.setVisibility(View.GONE);
+            refreshChromeClusterSpacing();
             lastLikedSaved = null;
             lastLikedKind = null;
             pendingLikedUri = "";
             return;
         }
         likeButton.setVisibility(View.VISIBLE);
+        refreshChromeClusterSpacing();
         boolean saved = track != null && track.saved;
         if (track != null && !pendingLikedUri.isEmpty()) {
             if (!pendingLikedUri.equals(safe(track.uri))) {
