@@ -427,12 +427,12 @@ final class LyricsLayoutEditController {
 
         void start() {
             overlay.setBackgroundColor(0x4D000000);
-            overlay.setClickable(true);
-            // Any tap that reaches the overlay's own background - i.e. not claimed by the
-            // artwork, track text, the lyrics layer, the focus handle, the top bar, or the
-            // options card - is by definition a tap on open background. No extra geometry
-            // bookkeeping needed.
-            overlay.setOnClickListener(v -> selectElement(Element.BACKGROUND));
+            // Keep the full-screen editor layer visually present without making its parent
+            // consume taps. Otherwise taps on the real chrome buttons underneath (settings,
+            // liked songs, translation, romanization) are swallowed after dock captures are
+            // removed. Interactive editor children still handle their own touches.
+            overlay.setClickable(false);
+            overlay.setOnClickListener(null);
 
             artLayer.setClipChildren(false);
             overlay.addView(artLayer, new FrameLayout.LayoutParams(
