@@ -2779,16 +2779,17 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             // as choppy/disjointed rather than smooth, and at this distance the cascade alone was
             // already the "spring" motion, not something that also needed a scroll under it.
             // Hand the cascade the delta the ScrollView ACTUALLY moved, not the requested one:
-            // scrollTo() clamps at the ends of the song, and compensating for a movement that was
-            // clamped away would slide every row by a phantom offset on the first and last lines.
             returnToCurrentPending = false;
             pendingArrivalCascade = false;
             scrollSpring = null;
             clearScrollSubpixel();
+            // Prime the row offsets before moving the ScrollView. Applying the compensation after
+            // scrollTo() leaves one traversal frame where the column has jumped and the rows have
+            // not caught up yet, which is the visible Apple-slide twitch at each lyric boundary.
+            startRowCascade(target - oldScroll);
             applyingLyricScroll = true;
             lyricsScroll.scrollTo(0, target);
             applyingLyricScroll = false;
-            startRowCascade(lyricsScroll.getScrollY() - oldScroll);
             return;
         }
         // Everything else - the Apple slide turned off, or a jump too far for the cascade to
