@@ -1685,6 +1685,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             lastDisplayedArtist = "";
             lastDisplayedAlbum = "";
             followState.resetActive();
+            followChipWasShown = false;
             lastLyricPositionMs = -1;
             resetScrollForNextDocument = true;
             document = null;
@@ -3229,10 +3230,31 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private void resumeFollowCurrentLine() {
         if (document == null || document.appliedLines == null || document.appliedLines.isEmpty()) return;
         SpotifyTrack track = host.getCurrentTrackSafely();
-        long pos = track == null ? -1 : playbackClock.getPosition(track, host.isPlayerActuallyPlaying());
+        
+        // Check if audio is actually playing (including audio rescue case)
+        boolean playingNow = host.isPlayerActuallyPlaying();
+        boolean audioRescueActive = !playingNow && host.currentAudioLevel() > AUDIO_ACTIVE_LEVEL_THRESHOLD;
+        boolean clockPlayingNow = playingNow || audioRescueActive;
+        
+        long pos = track == null ? -1 : playbackClock.getPosition(track, clockPlayingNow);
         long lyricPos = pos >= 0 ? adjustedLyricPositionMs(pos) : pos;
         int index = lyricPos >= 0 ? LyricTimeline.findPrimaryActiveRow(document.appliedLines, lyricPos) : followState.activeIndex();
         if (index < 0 || index >= document.appliedLines.size()) return;
+        
+        // If playback is truly paused (not just audio rescue), resume it first
+        if (!clockPlayingNow) {
+            host.togglePlayPause(); // This will resume playback
+            // Give a moment for playback to start before scrolling
+            lyricsFrame.postDelayed(() -> {
+                doResumeFollowCurrentLine(track, index, lyricPos);
+            }, 150);
+            return;
+        }
+        
+        doResumeFollowCurrentLine(track, index, lyricPos);
+    }
+
+    private void doResumeFollowCurrentLine(SpotifyTrack track, int index, long lyricPos) {
         followState.clearHold();
         returnToCurrentPending = true;
         // Deliberately not resetActive(): that sets the active index to the "nothing has ever been
@@ -3246,6 +3268,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 renderConfig, Math.max(0, lyricPos), index, 1f / 60f, false);
         // Force hide follow chip even if layout editor forced it visible
         if (jumpToCurrentController != null) jumpToCurrentController.forceHide();
+        followChipWasShown = false;
     }
 
     private long adjustedLyricPositionMs(long playbackPositionMs) {
@@ -3944,16 +3967,33 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // Show the chip only if we have an active line AND user has manually scrolled away.
         // We only show it when the user is NOT touching the screen AND the scrolling has 
         // completely settled (no inertia/momentum). This makes the appearance feels deliberate.
+        // Once shown, the chip stays visible until the user manually taps it to resume follow.
         boolean show = document != null && followState.activeIndex() >= 0 
                 && followState.isHoldingNow() && !followState.isTouching() && !scrollInProgress;
-        jumpToCurrentController.update(show);
         
+        // Track if chip was ever shown to keep it visible until manual resume
         if (show) {
+            followChipWasShown = true;
+        }
+        
+        // Keep showing if it was ever shown and user hasn't manually resumed follow
+        boolean shouldShow = show || (followChipWasShown && !followState.isHoldingNow() && followState.activeIndex() >= 0);
+        
+        jumpToCurrentController.update(shouldShow);
+        
+        // Only update progress when playing - auto-resume only works during playback
+        // When paused, the progress fill is meaningless and can appear janky
+        if (shouldShow && host.isPlayerActuallyPlaying()) {
             int delaySeconds = config == null ? Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS.defaultValue
                     : config.get(Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS);
             jumpToCurrentController.setProgress(followState.autoResumeProgress(delaySeconds * 1000L));
+        } else if (shouldShow) {
+            // When paused, hide the progress bar
+            jumpToCurrentController.setProgress(0f);
         }
     }
+    
+    private boolean followChipWasShown = false;
 
     /**
      * Drives the intro/outro skip affordance (synced docs only; callers hide it elsewhere).
