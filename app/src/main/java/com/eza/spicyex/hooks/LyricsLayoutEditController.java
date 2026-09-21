@@ -1884,25 +1884,14 @@ final class LyricsLayoutEditController {
                     strings.setting(Settings.FORCE_DARK_BACKGROUND), null), matchWrap(12));
 
             endGroup();
-            // Backed by the same 0-100 setting rather than a separate boolean: 0% already has no
-            // visible effect (see LyricsAmbientController#applyExtraDark), so "off" just means 0
-            // and "on" restores the setting's own default - no extra persisted state needed, and
-            // the intensity row below only makes sense to show while there's something to tune.
+            // Force-dark is a single 0-100 intensity control. The persisted legacy toggle
+            // remains enabled for compatibility, while the intensity is visible immediately.
             int darkenValue = safeGet(Settings.EXTRA_DARK_BACKGROUND);
-            boolean darkenEnabled = darkenValue > 0;
-            addOption(toggleRow(strings.setting(Settings.EXTRA_DARK_BACKGROUND), darkenEnabled,
-                    (toggle, nextEnabled) -> {
-                writer.put(Settings.EXTRA_DARK_BACKGROUND,
-                        nextEnabled ? Settings.EXTRA_DARK_BACKGROUND.defaultValue : 0);
-                selectElement(Element.BACKGROUND);
-            }), matchWrap(darkenEnabled ? 8 : 12));
-            if (darkenEnabled) {
-                addOption(dragRow(
-                        Settings.EXTRA_DARK_BACKGROUND.minValue, Settings.EXTRA_DARK_BACKGROUND.maxValue,
-                        darkenValue, "%",
-                        value -> writer.put(Settings.EXTRA_DARK_BACKGROUND, value)),
-                        matchWrap(12));
-            }
+            addOption(dragRow(
+                    Settings.EXTRA_DARK_BACKGROUND.minValue, Settings.EXTRA_DARK_BACKGROUND.maxValue,
+                    darkenValue, "%",
+                    value -> writer.put(Settings.EXTRA_DARK_BACKGROUND, value)),
+                    matchWrap(12));
 
             addDivider();
             addSectionLabel(Settings.ANIMATION_STYLE, 10);
