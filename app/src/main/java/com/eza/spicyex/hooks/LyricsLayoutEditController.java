@@ -1261,8 +1261,13 @@ final class LyricsLayoutEditController {
          *  (barring the fullscreen auto-hide timer, which onChromeReveal keeps at bay for the
          *  duration of the edit), so no force-visible step is needed here. */
         private void refreshDock() {
-            dockCapture = refreshChipCapture(dockLayer, dockCapture,
-                    chromeClusterSupplier, Element.DOCK);
+            // The chrome buttons must remain interactive while the layout editor is open.
+            // A full-screen overlay capture here would sit above the real settings/like/
+            // translation buttons and swallow their clicks.
+            if (dockCapture != null) {
+                dockLayer.removeView(dockCapture);
+                dockCapture = null;
+            }
         }
 
         private View refreshChipCapture(FrameLayout layer, View existing, Supplier<View> supplier,
