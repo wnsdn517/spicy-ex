@@ -1,0 +1,198 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/beautifullyrics/entities/AmbientArtworkTexture.java</file>
+  <line>49</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.beautifullyrics.entities</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/beautifullyrics/entities/AmbientArtworkTexture.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 29 (current min is 27): &lt;code&gt;android.graphics.Bitmap#setColorSpace&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>setColorSpace</highlighted_element>
+  <language>JAVA</language>
+  <offset>14</offset>
+  <length>13</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/diagnostics/SpicyDiagnosticReportFactory.java</file>
+  <line>134</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.diagnostics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/diagnostics/SpicyDiagnosticReportFactory.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 28 (current min is 27): &lt;code&gt;android.app.Application#getProcessName&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>getProcessName</highlighted_element>
+  <language>JAVA</language>
+  <offset>67</offset>
+  <length>14</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/diagnostics/SpicySetupCheckCollector.java</file>
+  <line>37</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.diagnostics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/diagnostics/SpicySetupCheckCollector.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 28 (current min is 27): &lt;code&gt;android.app.Application#getProcessName&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>getProcessName</highlighted_element>
+  <language>JAVA</language>
+  <offset>41</offset>
+  <length>14</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/diagnostics/SpicySetupCheckCollector.java</file>
+  <line>68</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.diagnostics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/diagnostics/SpicySetupCheckCollector.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Field requires API level 28 (current min is 27): &lt;code&gt;android.content.pm.ApplicationInfo#appComponentFactory&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>context.getApplicationInfo().appComponentFactory</highlighted_element>
+  <language>JAVA</language>
+  <offset>29</offset>
+  <length>48</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyLyricsHook.java</file>
+  <line>70</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyLyricsHook.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 28 (current min is 27): &lt;code&gt;android.app.Application#getProcessName&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>getProcessName</highlighted_element>
+  <language>JAVA</language>
+  <offset>59</offset>
+  <length>14</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyLyricsHook.java</file>
+  <line>80</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyLyricsHook.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 28 (current min is 27): &lt;code&gt;android.app.Application#getProcessName&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>getProcessName</highlighted_element>
+  <language>JAVA</language>
+  <offset>41</offset>
+  <length>14</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/SpotifyConnectHook.java</file>
+  <line>558</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/SpotifyConnectHook.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 28 (current min is 27): &lt;code&gt;android.app.Application#getProcessName&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>getProcessName</highlighted_element>
+  <language>JAVA</language>
+  <offset>41</offset>
+  <length>14</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java</file>
+  <line>106</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 33 (current min is 27): &lt;code&gt;setPlaying&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>setPlaying</highlighted_element>
+  <language>JAVA</language>
+  <offset>64</offset>
+  <length>10</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java</file>
+  <line>158</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 33 (current min is 27): &lt;code&gt;setForceDark&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>setForceDark</highlighted_element>
+  <language>JAVA</language>
+  <offset>68</offset>
+  <length>12</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java</file>
+  <line>163</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 33 (current min is 27): &lt;code&gt;setDarkening&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>setDarkening</highlighted_element>
+  <language>JAVA</language>
+  <offset>64</offset>
+  <length>12</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java</file>
+  <line>164</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 33 (current min is 27): &lt;code&gt;setRenderScale&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>setRenderScale</highlighted_element>
+  <language>JAVA</language>
+  <offset>64</offset>
+  <length>14</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java</file>
+  <line>168</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 33 (current min is 27): &lt;code&gt;setMotionEnabled&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>setMotionEnabled</highlighted_element>
+  <language>JAVA</language>
+  <offset>64</offset>
+  <length>16</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java</file>
+  <line>398</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsAmbientController.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 33 (current min is 27): &lt;code&gt;setPaletteColors&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>setPaletteColors</highlighted_element>
+  <language>JAVA</language>
+  <offset>64</offset>
+  <length>16</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/xposed/SpicyEXModule.java</file>
+  <line>108</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/xposed/SpicyEXModule.java" />
+  <problem_class id="AndroidLintNewApi" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Calling new methods on older versions</problem_class>
+  <hints />
+  <description>&lt;html&gt;Call requires API level 28 (current min is 27): &lt;code&gt;android.app.Application#getProcessName&lt;/code&gt;&lt;/html&gt;</description>
+  <highlighted_element>getProcessName</highlighted_element>
+  <language>JAVA</language>
+  <offset>71</offset>
+  <length>14</length>
+</problem>
+</problems>

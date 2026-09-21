@@ -1,0 +1,28 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml</file>
+  <line>2</line>
+  <module>Spicy_EX.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml" />
+  <problem_class id="AndroidLintMonochromeLauncherIcon" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Monochrome icon is not defined</problem_class>
+  <hints />
+  <description>&lt;html&gt;The application adaptive icon is missing a monochrome tag&lt;/html&gt;</description>
+  <highlighted_element>&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;&gt; &lt;background android:d...</highlighted_element>
+  <language>XML</language>
+  <offset>0</offset>
+  <length>233</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml</file>
+  <line>2</line>
+  <module>Spicy_EX.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml" />
+  <problem_class id="AndroidLintMonochromeLauncherIcon" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Monochrome icon is not defined</problem_class>
+  <hints />
+  <description>&lt;html&gt;The application adaptive roundIcon is missing a monochrome tag&lt;/html&gt;</description>
+  <highlighted_element>&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;&gt; &lt;background android:d...</highlighted_element>
+  <language>XML</language>
+  <offset>0</offset>
+  <length>233</length>
+</problem>
+</problems>

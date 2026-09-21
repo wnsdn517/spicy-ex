@@ -1,0 +1,50 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsSecondaryProcessingSession.java</file>
+  <line>159</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.lyrics.LyricsSecondaryProcessingSession.Callback void status(java.lang.String message)" />
+  <problem_class id="EmptyMethod" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">빈 메서드</problem_class>
+  <hints>
+    <hint value="true" />
+  </hints>
+  <description>이 메서드의 모든 구현이 비어 있습니다.</description>
+  <highlighted_element>status</highlighted_element>
+  <language>JAVA</language>
+  <offset>13</offset>
+  <length>6</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsSecondaryProcessingSession.java</file>
+  <line>162</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.lyrics.LyricsSecondaryProcessingSession.Callback void progress(com.eza.spicyex.lyrics.LyricsDocument snapshot, java.lang.String message)" />
+  <problem_class id="EmptyMethod" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">빈 메서드</problem_class>
+  <hints>
+    <hint value="true" />
+  </hints>
+  <description>이 메서드의 모든 구현이 비어 있습니다.</description>
+  <highlighted_element>progress</highlighted_element>
+  <language>JAVA</language>
+  <offset>13</offset>
+  <length>8</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/spotifyconnect/ConnectEntry.java</file>
+  <line>25</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.spotifyconnect</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.spotifyconnect.ConnectEntry void init(android.content.Context context)" />
+  <problem_class id="EmptyMethod" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">빈 메서드</problem_class>
+  <hints>
+    <hint value="false" />
+  </hints>
+  <description>메서드가 비어 있습니다.</description>
+  <highlighted_element>init</highlighted_element>
+  <language>JAVA</language>
+  <offset>23</offset>
+  <length>4</length>
+</problem>
+</problems>

@@ -216,6 +216,103 @@ tasks.register("packageLanguageModelPack", Zip) {
     }
 }
 
+// Upload language model pack to GitHub Gist and return raw URL + SHA256.
+// Requires GH_TOKEN (or GIST_TOKEN) env var with 'gist' scope.
+// Gist ID is cached in build/language-model-gist.id so subsequent builds update the same gist.
+tasks.register("publishLanguageModelPackToGist") {
+    dependsOn "packageLanguageModelPack"
+    doLast {
+        def zipFile = layout.buildDirectory.file("language-models/spicyex-language-models-v1.zip")
+        if (!zipFile.exists()) {
+            throw new GradleException("Model pack not found: ${zipFile}. Run packageLanguageModelPack first.")
+        }
+
+        def sha256 = sha256(zipFile)
+        def token = System.getenv("GH_TOKEN") ?: System.getenv("GIST_TOKEN")
+        if (!token) {
+            throw new GradleException("GH_TOKEN or GIST_TOKEN env var required (needs 'gist' scope)")
+        }
+
+        def gistIdFile = layout.buildDirectory.file("language-model-gist.id")
+        def gistId = gistIdFile.exists() ? gistIdFile.readText().trim() : null
+
+        def filesJson = new groovy.json.JsonBuilder()
+        filesJson {
+            "spicyex-language-models-v1.zip" {
+                content zipFile.readText()
+            }
+        }
+
+        def gistJson = new groovy.json.JsonBuilder()
+        gistJson {
+            description "SpicyEX language model pack v1 (auto-updated)"
+            public false
+            files filesJson.toMap()
+        }
+
+        def url = gistId ? "https://api.github.com/gists/${gistId}" : "https://api.github.com/gists"
+        def method = gistId ? "PATCH" : "POST"
+
+        def connection = new URL(url).openConnection()
+        connection.setRequestMethod(method)
+        connection.setRequestProperty("Authorization", "Bearer ${token}")
+        connection.setRequestProperty("Accept", "application/vnd.github+json")
+        connection.setRequestProperty("Content-Type", "application/json")
+        connection.setDoOutput(true)
+        connection.getOutputStream().write(gistJson.toString().bytes)
+        connection.getOutputStream().flush()
+
+        def responseCode = connection.getResponseCode()
+        if (responseCode < 200 || responseCode >= 300) {
+            def err = connection.getErrorStream()?.getText() ?: "HTTP ${responseCode}"
+            throw new GradleException("Gist ${gistId ? 'update' : 'create'} failed: ${err}")
+        }
+
+        def response = new groovy.json.JsonSlurper().parseText(connection.getInputStream().getText())
+        def rawUrl = response.files["spicyex-language-models-v1.zip"].raw_url
+        gistIdFile.write(response.id)
+
+        println "=== Language Model Pack Published to Gist ==="
+        println "Gist ID: ${response.id}"
+        println "Raw URL: ${rawUrl}"
+        println "SHA256:  ${sha256}"
+        println ""
+        println "Add to your build command:"
+        println "  -PLANGUAGE_MODEL_PACK_URL=\"${rawUrl}\""
+        println "  -PLANGUAGE_MODEL_PACK_SHA256=\"${sha256}\""
+
+        // Export as project properties for downstream tasks
+        project.ext.set("LANGUAGE_MODEL_PACK_URL", rawUrl)
+        project.ext.set("LANGUAGE_MODEL_PACK_SHA256", sha256)
+    }
+}
+
+// Convenience task: package -> upload to gist -> build debug APK with the returned URL/SHA256
+tasks.register("buildWithGistModels") {
+    dependsOn "publishLanguageModelPackToGist"
+    // Note: URL/SHA256 are printed by publishLanguageModelPackToGist.
+    // For fully automated build, run in two steps or parse the output.
+    doLast {
+        println ""
+        println "Now run the build with the printed values:"
+        println "./gradlew :app:assembleDebug -PexternalLanguageModels=true \\"
+        println "  -PLANGUAGE_MODEL_PACK_URL=\"<printed-url>\" \\"
+        println "  -PLANGUAGE_MODEL_PACK_SHA256=\"<printed-sha256>\""
+    }
+}
+
+def sha256(File file) {
+    def digest = java.security.MessageDigest.getInstance("SHA-256")
+    file.withInputStream { stream ->
+        byte[] buffer = new byte[8192]
+        int read
+        while ((read = stream.read(buffer)) != -1) {
+            digest.update(buffer, 0, read)
+        }
+    }
+    digest.digest().encodeHex().toString()
+}
+
 // Persist version-stamped debug APKs to <repo>/artifacts/ so installs do not dig through build/.
 android.applicationVariants.configureEach { variant ->
     if (variant.buildType.name != 'debug') return

@@ -1,0 +1,156 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java</file>
+  <line>244</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.hooks.NativeSpicyShellViewImpl trackInfoController" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>trackInfoController</highlighted_element>
+  <language>JAVA</language>
+  <offset>39</offset>
+  <length>19</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java</file>
+  <line>259</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.hooks.NativeSpicyShellViewImpl scrollController" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>scrollController</highlighted_element>
+  <language>JAVA</language>
+  <offset>35</offset>
+  <length>16</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java</file>
+  <line>271</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.hooks.NativeSpicyShellViewImpl rowMountController" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>rowMountController</highlighted_element>
+  <language>JAVA</language>
+  <offset>37</offset>
+  <length>18</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java</file>
+  <line>272</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.hooks.NativeSpicyShellViewImpl contentColumn" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>contentColumn</highlighted_element>
+  <language>JAVA</language>
+  <offset>25</offset>
+  <length>13</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java</file>
+  <line>303</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.hooks.NativeSpicyShellViewImpl chromeHeader" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>chromeHeader</highlighted_element>
+  <language>JAVA</language>
+  <offset>22</offset>
+  <length>12</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java</file>
+  <line>304</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.hooks.NativeSpicyShellViewImpl chromeViews" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>chromeViews</highlighted_element>
+  <language>JAVA</language>
+  <offset>52</offset>
+  <length>11</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java</file>
+  <line>366</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.hooks.NativeSpicyShellViewImpl transliterationSession" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>transliterationSession</highlighted_element>
+  <language>JAVA</language>
+  <offset>41</offset>
+  <length>22</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/TrackInfoReadoutController.java</file>
+  <line>227</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.hooks.TrackInfoReadoutController headerRow" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>headerRow</highlighted_element>
+  <language>JAVA</language>
+  <offset>22</offset>
+  <length>9</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/TrackInfoReadoutController.java</file>
+  <line>228</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.hooks.TrackInfoReadoutController headerTitle" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>headerTitle</highlighted_element>
+  <language>JAVA</language>
+  <offset>17</offset>
+  <length>11</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/xposed/XpHooks.java</file>
+  <line>45</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.xposed.XpHooks.XpParam args" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>args</highlighted_element>
+  <language>JAVA</language>
+  <offset>24</offset>
+  <length>4</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/test/java/com/eza/spicyex/xposed/ResolvedSymbolCacheTest.java</file>
+  <line>18</line>
+  <module>Spicy_EX.app.unitTest</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="field" FQNAME="com.eza.spicyex.xposed.ResolvedSymbolCacheTest temporary" />
+  <problem_class id="CanBeFinal" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">선언에 'final' 수정자를 추가할 수 있음</problem_class>
+  <hints />
+  <description>선언에 final 수정자를 추가할 수 있음</description>
+  <highlighted_element>temporary</highlighted_element>
+  <language>JAVA</language>
+  <offset>33</offset>
+  <length>9</length>
+</problem>
+</problems>

@@ -1,0 +1,58 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/beautifullyrics/entities/AmbientArtworkTexture.java</file>
+  <line>57</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.beautifullyrics.entities</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/beautifullyrics/entities/AmbientArtworkTexture.java" />
+  <problem_class id="AndroidLintHalfFloat" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Incorrect Half Float</problem_class>
+  <hints />
+  <description>&lt;html&gt;Half-float type in expression widened to java.nio.ByteBuffer&lt;/html&gt;</description>
+  <highlighted_element>Half.toHalf(rgb[i])</highlighted_element>
+  <language>JAVA</language>
+  <offset>36</offset>
+  <length>19</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/beautifullyrics/entities/AmbientArtworkTexture.java</file>
+  <line>58</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.beautifullyrics.entities</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/beautifullyrics/entities/AmbientArtworkTexture.java" />
+  <problem_class id="AndroidLintHalfFloat" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Incorrect Half Float</problem_class>
+  <hints />
+  <description>&lt;html&gt;Half-float type in expression widened to java.nio.ByteBuffer&lt;/html&gt;</description>
+  <highlighted_element>Half.toHalf(rgb[i+1])</highlighted_element>
+  <language>JAVA</language>
+  <offset>36</offset>
+  <length>21</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/beautifullyrics/entities/AmbientArtworkTexture.java</file>
+  <line>59</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.beautifullyrics.entities</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/beautifullyrics/entities/AmbientArtworkTexture.java" />
+  <problem_class id="AndroidLintHalfFloat" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Incorrect Half Float</problem_class>
+  <hints />
+  <description>&lt;html&gt;Half-float type in expression widened to java.nio.ByteBuffer&lt;/html&gt;</description>
+  <highlighted_element>Half.toHalf(rgb[i+2])</highlighted_element>
+  <language>JAVA</language>
+  <offset>36</offset>
+  <length>21</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/beautifullyrics/entities/AmbientArtworkTexture.java</file>
+  <line>60</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.beautifullyrics.entities</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/beautifullyrics/entities/AmbientArtworkTexture.java" />
+  <problem_class id="AndroidLintHalfFloat" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Incorrect Half Float</problem_class>
+  <hints />
+  <description>&lt;html&gt;Half-float type in expression widened to java.nio.ByteBuffer&lt;/html&gt;</description>
+  <highlighted_element>Half.toHalf(1f)</highlighted_element>
+  <language>JAVA</language>
+  <offset>36</offset>
+  <length>15</length>
+</problem>
+</problems>

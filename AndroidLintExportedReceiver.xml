@@ -1,0 +1,15 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/AndroidManifest.xml</file>
+  <line>42</line>
+  <module>Spicy_EX.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/AndroidManifest.xml" />
+  <problem_class id="AndroidLintExportedReceiver" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Receiver does not require permission</problem_class>
+  <hints />
+  <description>&lt;html&gt;Exported receiver does not require permission&lt;/html&gt;</description>
+  <highlighted_element>receiver</highlighted_element>
+  <language>XML</language>
+  <offset>9</offset>
+  <length>8</length>
+</problem>
+</problems>

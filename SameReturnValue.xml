@@ -1,0 +1,254 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/FeatureAvailability.java</file>
+  <line>18</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.FeatureAvailability boolean appleFontAvailable()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;appleFontAvailable()&lt;/code&gt;가 항상 &lt;code&gt;com.eza.spicyex.BuildConfig.APPLE_FONT_AVAILABLE&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>appleFontAvailable</highlighted_element>
+  <language>JAVA</language>
+  <offset>26</offset>
+  <length>18</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/FeatureAvailability.java</file>
+  <line>22</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.FeatureAvailability boolean connectAvailable()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;connectAvailable()&lt;/code&gt;가 항상 &lt;code&gt;com.eza.spicyex.BuildConfig.CONNECT_AVAILABLE&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>connectAvailable</highlighted_element>
+  <language>JAVA</language>
+  <offset>26</offset>
+  <length>16</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java</file>
+  <line>658</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.hooks.NativeSpicyShellViewImpl int chromeButtonDp()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;chromeButtonDp()&lt;/code&gt;가 항상 &lt;code&gt;44&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>chromeButtonDp</highlighted_element>
+  <language>JAVA</language>
+  <offset>16</offset>
+  <length>14</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/ArtGestureArbiter.java</file>
+  <line>59</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.lyrics.ArtGestureArbiter com.eza.spicyex.lyrics.ArtGestureArbiter.Output onDown(long nowMs)" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;onDown()&lt;/code&gt;가 항상 &lt;code&gt;com.eza.spicyex.lyrics.ArtGestureArbiter.Output.NONE&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>onDown</highlighted_element>
+  <language>JAVA</language>
+  <offset>18</offset>
+  <length>6</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/ArtGestureArbiter.java</file>
+  <line>114</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.lyrics.ArtGestureArbiter com.eza.spicyex.lyrics.ArtGestureArbiter.Output reset()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;reset()&lt;/code&gt;가 항상 &lt;code&gt;com.eza.spicyex.lyrics.ArtGestureArbiter.Output.RESET&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>reset</highlighted_element>
+  <language>JAVA</language>
+  <offset>18</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/DerivedLayerRun.java</file>
+  <line>94</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.lyrics.DerivedLayerRun boolean reject()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;reject()&lt;/code&gt;가 항상 &lt;code&gt;false&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>reject</highlighted_element>
+  <language>JAVA</language>
+  <offset>27</offset>
+  <length>6</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LanguageDetectorManager.java</file>
+  <line>31</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.lyrics.LanguageDetectorManager com.eza.spicyex.lyrics.LanguageDetectorManager shared()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;shared()&lt;/code&gt;가 항상 &lt;code&gt;com.eza.spicyex.lyrics.LanguageDetectorManager.Holder.INSTANCE&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>shared</highlighted_element>
+  <language>JAVA</language>
+  <offset>35</offset>
+  <length>6</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsMeaningLane.java</file>
+  <line>68</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.lyrics.LyricsMeaningLane.MeaningProvider java.lang.String backendId()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;backendId()&lt;/code&gt;의 모든 구현이 항상 &lt;code&gt;google_unofficial&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>backendId</highlighted_element>
+  <language>JAVA</language>
+  <offset>15</offset>
+  <length>9</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsShellSettings.java</file>
+  <line>372</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.lyrics.LyricsShellSettings boolean lineSyncFillWord()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;lineSyncFillWord()&lt;/code&gt;가 항상 &lt;code&gt;false&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>lineSyncFillWord</highlighted_element>
+  <language>JAVA</language>
+  <offset>19</offset>
+  <length>16</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/SpicyKoreanG2P.java</file>
+  <line>293</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.lyrics.SpicyKoreanG2P int ON_M_ONSET()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;ON_M_ONSET()&lt;/code&gt;가 항상 &lt;code&gt;6&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>ON_M_ONSET</highlighted_element>
+  <language>JAVA</language>
+  <offset>23</offset>
+  <length>10</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/test/java/com/eza/spicyex/xposed/ResolvedSymbolCacheTest.java</file>
+  <line>20</line>
+  <module>Spicy_EX.app.unitTest</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.xposed.ResolvedSymbolCacheTest.Fixture java.lang.Object value()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;value()&lt;/code&gt;가 항상 &lt;code&gt;null&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>value</highlighted_element>
+  <language>JAVA</language>
+  <offset>28</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/test/java/com/eza/spicyex/xposed/ResolvedSymbolCacheTest.java</file>
+  <line>22</line>
+  <module>Spicy_EX.app.unitTest</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.xposed.ResolvedSymbolCacheTest.Fixture boolean present()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;present()&lt;/code&gt;가 항상 &lt;code&gt;true&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>present</highlighted_element>
+  <language>JAVA</language>
+  <offset>29</offset>
+  <length>7</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/test/java/com/eza/spicyex/xposed/ResolvedSymbolCacheTest.java</file>
+  <line>26</line>
+  <module>Spicy_EX.app.unitTest</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.xposed.ResolvedSymbolCacheTest.SynchronizedFixture boolean present()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;present()&lt;/code&gt;가 항상 &lt;code&gt;true&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>present</highlighted_element>
+  <language>JAVA</language>
+  <offset>42</offset>
+  <length>7</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/test/java/com/eza/spicyex/xposed/ResolvedSymbolCacheTest.java</file>
+  <line>27</line>
+  <module>Spicy_EX.app.unitTest</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.xposed.ResolvedSymbolCacheTest.SynchronizedFixture java.lang.Object value()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;value()&lt;/code&gt;가 항상 &lt;code&gt;null&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>value</highlighted_element>
+  <language>JAVA</language>
+  <offset>41</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/test/java/com/eza/spicyex/xposed/XpHooksTest.java</file>
+  <line>32</line>
+  <module>Spicy_EX.app.unitTest</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.xposed.XpHooksTest.Fixture java.lang.String greet()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;greet()&lt;/code&gt;가 항상 &lt;code&gt;none&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>greet</highlighted_element>
+  <language>JAVA</language>
+  <offset>15</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/test/java/com/eza/spicyex/xposed/XpHooksTest.java</file>
+  <line>36</line>
+  <module>Spicy_EX.app.unitTest</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.xposed.XpHooksTest.Fixture java.lang.String greet(java.lang.Object name)" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;greet()&lt;/code&gt;가 항상 &lt;code&gt;obj&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>greet</highlighted_element>
+  <language>JAVA</language>
+  <offset>15</offset>
+  <length>5</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/test/java/com/eza/spicyex/xposed/XpHooksTest.java</file>
+  <line>60</line>
+  <module>Spicy_EX.app.unitTest</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.xposed.XpHooksTest io.github.libxposed.api.XposedInterface.Hooker captureHooker(java.util.List&lt;io.github.libxposed.api.XposedInterface.Hooker&gt; captured)" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;captureHooker()&lt;/code&gt;가 항상 &lt;code&gt;null&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>captureHooker</highlighted_element>
+  <language>JAVA</language>
+  <offset>34</offset>
+  <length>13</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/test/java/com/eza/spicyex/xposed/XpReflectTest.java</file>
+  <line>26</line>
+  <module>Spicy_EX.app.unitTest</module>
+  <package>com.eza.spicyex.xposed</package>
+  <entry_point TYPE="method" FQNAME="com.eza.spicyex.xposed.XpReflectTest.Fixture java.lang.String noArgs()" />
+  <problem_class id="SameReturnValue" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">메서드가 항상 동일한 값을 반환함</problem_class>
+  <hints />
+  <description>메서드 &lt;code&gt;noArgs()&lt;/code&gt;가 항상 &lt;code&gt;none&lt;/code&gt;을(를) 반환함</description>
+  <highlighted_element>noArgs</highlighted_element>
+  <language>JAVA</language>
+  <offset>15</offset>
+  <length>6</length>
+</problem>
+</problems>

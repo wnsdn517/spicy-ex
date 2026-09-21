@@ -1,0 +1,16 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeLyricsUtils.java</file>
+  <line>74</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeLyricsUtils.java" />
+  <problem_class id="AndroidLintInternalInsetResource" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Using internal inset dimension resource</problem_class>
+  <hints />
+  <description>&lt;html&gt;Using internal inset dimension resource &lt;code&gt;status_bar_height&lt;/code&gt; is not supported&lt;/html&gt;</description>
+  <highlighted_element>context.getResources().getIdentifier(&quot;status_bar_height&quot;, &quot;dimen&quot;, &quot;android&quot;)</highlighted_element>
+  <language>JAVA</language>
+  <offset>24</offset>
+  <length>77</length>
+</problem>
+</problems>

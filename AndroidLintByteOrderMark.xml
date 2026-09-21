@@ -1,0 +1,16 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsParser.java</file>
+  <line>469</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.lyrics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/lyrics/LyricsParser.java" />
+  <problem_class id="AndroidLintByteOrderMark" severity="ERROR" attribute_key="ERRORS_ATTRIBUTES">Byte order mark inside files</problem_class>
+  <hints />
+  <description>&lt;html&gt;Found byte-order-mark in the middle of a file&lt;/html&gt;</description>
+  <highlighted_element>'﻿'</highlighted_element>
+  <language>JAVA</language>
+  <offset>53</offset>
+  <length>3</length>
+</problem>
+</problems>

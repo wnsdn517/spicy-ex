@@ -1,0 +1,100 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/diagnostics/DiagnosticReportingDialog.java</file>
+  <line>106</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.diagnostics</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/diagnostics/DiagnosticReportingDialog.java" />
+  <problem_class id="AndroidLintSetTextI18n" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">TextView Internationalization</problem_class>
+  <hints />
+  <description>&lt;html&gt;Do not concatenate text displayed with &lt;code&gt;setText&lt;/code&gt;. Use resource string with placeholders.&lt;/html&gt;</description>
+  <highlighted_element>categoryLabels[index] + &quot; ›&quot;</highlighted_element>
+  <language>JAVA</language>
+  <offset>43</offset>
+  <length>29</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/LyricsJumpToCurrentController.java</file>
+  <line>103</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/LyricsJumpToCurrentController.java" />
+  <problem_class id="AndroidLintSetTextI18n" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">TextView Internationalization</problem_class>
+  <hints />
+  <description>&lt;html&gt;String literal in &lt;code&gt;setText&lt;/code&gt; can not be translated. Use Android resources instead.&lt;/html&gt;</description>
+  <highlighted_element>&quot;Follow lyrics&quot;</highlighted_element>
+  <language>JAVA</language>
+  <offset>22</offset>
+  <length>15</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/LyricsLayoutEditController.java</file>
+  <line>2289</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/LyricsLayoutEditController.java" />
+  <problem_class id="AndroidLintSetTextI18n" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">TextView Internationalization</problem_class>
+  <hints />
+  <description>&lt;html&gt;Do not concatenate text displayed with &lt;code&gt;setText&lt;/code&gt;. Use resource string with placeholders.&lt;/html&gt;</description>
+  <highlighted_element>newValue + unit</highlighted_element>
+  <language>JAVA</language>
+  <offset>39</offset>
+  <length>15</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java</file>
+  <line>2084</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java" />
+  <problem_class id="AndroidLintSetTextI18n" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">TextView Internationalization</problem_class>
+  <hints />
+  <description>&lt;html&gt;Do not concatenate text displayed with &lt;code&gt;setText&lt;/code&gt;. Use resource string with placeholders.&lt;/html&gt;</description>
+  <highlighted_element>&quot;Lyrics error: &quot; + safe(error)</highlighted_element>
+  <language>JAVA</language>
+  <offset>23</offset>
+  <length>30</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java</file>
+  <line>2084</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/NativeSpicyShellViewImpl.java" />
+  <problem_class id="AndroidLintSetTextI18n" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">TextView Internationalization</problem_class>
+  <hints />
+  <description>&lt;html&gt;String literal in &lt;code&gt;setText&lt;/code&gt; can not be translated. Use Android resources instead.&lt;/html&gt;</description>
+  <highlighted_element>&quot;Lyrics error: &quot;</highlighted_element>
+  <language>JAVA</language>
+  <offset>23</offset>
+  <length>16</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/SpotifyConnectHook.java</file>
+  <line>233</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.hooks</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/hooks/SpotifyConnectHook.java" />
+  <problem_class id="AndroidLintSetTextI18n" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">TextView Internationalization</problem_class>
+  <hints />
+  <description>&lt;html&gt;String literal in &lt;code&gt;setText&lt;/code&gt; can not be translated. Use Android resources instead.&lt;/html&gt;</description>
+  <highlighted_element>&quot;♫ Login required&quot;</highlighted_element>
+  <language>JAVA</language>
+  <offset>30</offset>
+  <length>18</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/player/WebLoginActivity.java</file>
+  <line>103</line>
+  <module>Spicy_EX.app.main</module>
+  <package>com.eza.spicyex.player</package>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/java/com/eza/spicyex/player/WebLoginActivity.java" />
+  <problem_class id="AndroidLintSetTextI18n" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">TextView Internationalization</problem_class>
+  <hints />
+  <description>&lt;html&gt;String literal in &lt;code&gt;setText&lt;/code&gt; can not be translated. Use Android resources instead.&lt;/html&gt;</description>
+  <highlighted_element>&quot;Signing in\u2026&quot;</highlighted_element>
+  <language>JAVA</language>
+  <offset>24</offset>
+  <length>18</length>
+</problem>
+</problems>

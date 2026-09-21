@@ -1,0 +1,41 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/build.gradle</file>
+  <line>178</line>
+  <module>Spicy_EX.app</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/build.gradle" />
+  <problem_class id="AndroidLintNewerVersionAvailable" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Newer Library Versions Available</problem_class>
+  <hints />
+  <description>&lt;html&gt;A newer version of com.google.code.gson:gson than 2.13.1 is available: 2.14.0&lt;/html&gt;</description>
+  <highlighted_element>'com.google.code.gson:gson:2.13.1'</highlighted_element>
+  <language>Groovy</language>
+  <offset>19</offset>
+  <length>34</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/build.gradle</file>
+  <line>179</line>
+  <module>Spicy_EX.app</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/build.gradle" />
+  <problem_class id="AndroidLintNewerVersionAvailable" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Newer Library Versions Available</problem_class>
+  <hints />
+  <description>&lt;html&gt;A newer version of org.luckypray:dexkit than 2.0.0 is available: 2.2.0&lt;/html&gt;</description>
+  <highlighted_element>'org.luckypray:dexkit:2.0.0'</highlighted_element>
+  <language>Groovy</language>
+  <offset>19</offset>
+  <length>28</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/build.gradle</file>
+  <line>184</line>
+  <module>Spicy_EX.app</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/build.gradle" />
+  <problem_class id="AndroidLintNewerVersionAvailable" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Newer Library Versions Available</problem_class>
+  <hints />
+  <description>&lt;html&gt;A newer version of com.squareup.okhttp3:okhttp than 5.0.0 is available: 5.5.0&lt;/html&gt;</description>
+  <highlighted_element>'com.squareup.okhttp3:okhttp:5.0.0'</highlighted_element>
+  <language>Groovy</language>
+  <offset>19</offset>
+  <length>35</length>
+</problem>
+</problems>

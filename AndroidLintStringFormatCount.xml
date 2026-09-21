@@ -1,0 +1,28 @@
+<problems>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/res/values/strings.xml</file>
+  <line>459</line>
+  <module>Spicy_EX.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/res/values/strings.xml" />
+  <problem_class id="AndroidLintStringFormatCount" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Formatting argument types incomplete or inconsistent</problem_class>
+  <hints />
+  <description>&lt;html&gt;Inconsistent number of arguments in formatting string &lt;code&gt;lyrics_ai_delivery_unknown_inline&lt;/code&gt;; found both 1 here and 0 in values/strings.xml (Conflicting number of arguments (0) here)&lt;/html&gt;</description>
+  <highlighted_element>&lt;string name=&quot;lyrics_ai_delivery_unknown_inline&quot;&gt;Request failed. Tap to review.&lt;/string&gt;</highlighted_element>
+  <language>XML</language>
+  <offset>4</offset>
+  <length>88</length>
+</problem>
+<problem>
+  <file>file://$PROJECT_DIR$/app/src/main/res/values-zh-rCN/strings.xml</file>
+  <line>272</line>
+  <module>Spicy_EX.app.main</module>
+  <entry_point TYPE="file" FQNAME="file://$PROJECT_DIR$/app/src/main/res/values-zh-rCN/strings.xml" />
+  <problem_class id="AndroidLintStringFormatCount" severity="WARNING" attribute_key="WARNING_ATTRIBUTES">Formatting argument types incomplete or inconsistent</problem_class>
+  <hints />
+  <description>&lt;html&gt;Inconsistent number of arguments in formatting string &lt;code&gt;lyrics_ai_delivery_unknown_inline&lt;/code&gt;; found both 1 here and 0 in values/strings.xml&lt;/html&gt;</description>
+  <highlighted_element>&lt;string name=&quot;lyrics_ai_delivery_unknown_inline&quot;&gt;%1$s状态未知。该请求可能已被计费。点按查看。&lt;/string&gt;</highlighted_element>
+  <language>XML</language>
+  <offset>4</offset>
+  <length>82</length>
+</problem>
+</problems>
