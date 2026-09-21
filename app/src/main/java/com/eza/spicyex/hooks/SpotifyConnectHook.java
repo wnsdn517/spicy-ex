@@ -555,7 +555,8 @@ public final class SpotifyConnectHook {
 
     static boolean isMainProcess(Context context) {
         try {
-            String process = Application.getProcessName();
+            String process = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P
+                    ? Application.getProcessName() : "unknown";
             return context.getPackageName().equals(process);
         } catch (Throwable ignored) {
             return false;

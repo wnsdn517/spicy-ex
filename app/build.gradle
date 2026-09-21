@@ -127,6 +127,10 @@ android {
         }
     }
 
+    lint {
+        baseline = file("lint-baseline.xml")
+    }
+
     testOptions {
         unitTests.all {
             if (requestedTestGroup != null) {

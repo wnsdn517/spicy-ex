@@ -5,6 +5,7 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
@@ -102,7 +103,7 @@ public final class LyricsAmbientController {
 
     public void setPlaying(boolean playing) {
         this.playing = playing;
-        if (animatedBackground instanceof AmbientArtworkBackgroundView) {
+        if (animatedBackgroundSupported()) {
             ((AmbientArtworkBackgroundView) animatedBackground).setPlaying(playing);
         }
     }
@@ -154,17 +155,17 @@ public final class LyricsAmbientController {
         if (animatedParent != null && enabled && animatedBackground == null) {
             createAnimatedLayer(animatedParent, forceDark, animated);
         } else if (forceDark != animatedForceDark) {
-            if (animatedBackground instanceof AmbientArtworkBackgroundView) {
+            if (animatedBackgroundSupported()) {
                 ((AmbientArtworkBackgroundView) animatedBackground).setForceDark(forceDark);
             }
             animatedForceDark = forceDark;
         }
-        if (animatedBackground instanceof AmbientArtworkBackgroundView) {
+        if (animatedBackgroundSupported()) {
             ((AmbientArtworkBackgroundView) animatedBackground).setDarkening(backgroundBrightness, extraDarkFilter);
             ((AmbientArtworkBackgroundView) animatedBackground).setRenderScale(readRenderScale());
         }
         if (animatedBackground == null) return; // not attached this session — applies on next open
-        if (animatedBackground instanceof AmbientArtworkBackgroundView) {
+        if (animatedBackgroundSupported()) {
             ((AmbientArtworkBackgroundView) animatedBackground).setMotionEnabled(animated);
         }
         if (enabled && active) {
@@ -217,6 +218,7 @@ public final class LyricsAmbientController {
         // Guarded here as well as at the call sites: a pref persisted on a newer device (backup
         // restore, shared prefs copy) must not resurrect the layer on hardware that cannot run it.
         if (parent == null || !FeatureAvailability.animatedBackgroundAvailable()) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
         try {
             AmbientArtworkBackgroundView background = new AmbientArtworkBackgroundView(activity, forceDark);
             background.setDarkening(backgroundBrightness, extraDarkFilter);
@@ -282,6 +284,11 @@ public final class LyricsAmbientController {
         currentTrackUri = track == null ? "" : safe(track.uri);
         desiredArtImageId = track == null ? "" : safe(track.imageId);
         updateAnimatedBackgroundArt(desiredArtImageId, runningState);
+    }
+
+    private boolean animatedBackgroundSupported() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && animatedBackground instanceof AmbientArtworkBackgroundView;
     }
 
     private void updateAnimatedBackgroundArt(String imageId, RunningState runningState) {
@@ -394,7 +401,7 @@ public final class LyricsAmbientController {
     }
 
     private void applyAnimatedPalette(int[] colors) {
-        if (animatedBackground instanceof AmbientArtworkBackgroundView) {
+        if (animatedBackgroundSupported()) {
             ((AmbientArtworkBackgroundView) animatedBackground).setPaletteColors(colors);
         }
     }
