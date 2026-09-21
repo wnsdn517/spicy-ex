@@ -88,10 +88,10 @@ android {
         buildConfigField "boolean", "APPLE_FONT_AVAILABLE", "true"
         buildConfigField "boolean", "CONNECT_AVAILABLE", "true"
         def modelPackUrl = providers.gradleProperty("LANGUAGE_MODEL_PACK_URL")
-            .orElse("")
+            .orElse("https://github.com/wnsdn517/spicy-ex/releases/download/v1/spicyex-language-models-v1.zip")
             .get()
         def modelPackSha256 = providers.gradleProperty("LANGUAGE_MODEL_PACK_SHA256")
-            .orElse("")
+            .orElse("https://github.com/wnsdn517/spicy-ex/releases/download/v1/spicyex-language-models-v1.zip")
             .get()
         def externalLanguageModels = providers.gradleProperty("externalLanguageModels")
             .map { it.toBoolean() }

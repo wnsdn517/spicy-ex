@@ -73,7 +73,8 @@ public final class LanguageModelPack {
     }
 
     public static void requestDownload() {
-        if (appContext == null || BuildConfig.LANGUAGE_MODEL_PACK_URL.isEmpty()) return;
+        if (appContext == null) { transientStatus = new DownloadStatus(Phase.ERROR, 0, "NO_CONTEXT"); return; }
+        if (BuildConfig.LANGUAGE_MODEL_PACK_URL.isEmpty()) { transientStatus = new DownloadStatus(Phase.ERROR, 0, "NO_DOWNLOAD_URL"); return; }
         if (isReady()) return;
         transientStatus = new DownloadStatus(Phase.DOWNLOADING, 0, "");
         prefetch();
@@ -115,6 +116,7 @@ public final class LanguageModelPack {
                 downloadAndInstall();
             } catch (Throwable failure) {
                 transientStatus = new DownloadStatus(Phase.ERROR, 0, describe(failure));
+            } finally {
                 downloadStarted = false;
             }
         });
