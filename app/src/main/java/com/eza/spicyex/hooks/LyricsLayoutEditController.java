@@ -1147,8 +1147,13 @@ final class LyricsLayoutEditController {
          *  refreshArtwork()/refreshTrackText()) rather than a cached rect, so it never goes stale
          *  after a position/size change. */
         private boolean withinCapturedFrame(float rawX, float rawY) {
+            // The editor's lyrics touch plane can cover the whole focus area. Keep real chrome
+            // controls (settings long-press, liked songs, translation and reading buttons)
+            // outside that plane so their click and long-click gestures reach the source views.
+            View chrome = chromeClusterSupplier == null ? null : chromeClusterSupplier.get();
             return hitsView(artCapture, rawX, rawY) || hitsView(artHandle, rawX, rawY)
-                    || hitsView(trackTextCapture, rawX, rawY);
+                    || hitsView(trackTextCapture, rawX, rawY)
+                    || hitsView(chrome, rawX, rawY);
         }
 
         private static boolean hitsView(View view, float rawX, float rawY) {
