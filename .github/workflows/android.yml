@@ -32,7 +32,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platforms;android-34 build-tools;34.0.0 platform-tools ndk;26.3.11579264'
+          packages: 'cmdline-tools;latest platform-tools platforms;android-35 build-tools;35.0.0 ndk;26.3.11579264'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -40,14 +40,16 @@ jobs:
       - name: Build Full Debug
         run: ./gradlew :app:assembleFullDebug --no-daemon
 
-      - name: Build Lite Debug
-        run: ./gradlew :app:assembleLiteDebug --no-daemon
-
       - name: Run Full Unit Tests
         run: ./gradlew :app:testFullDebugUnitTest --no-daemon
 
-      - name: Run Lite Unit Tests
-        run: ./gradlew :app:testLiteDebugUnitTest --no-daemon
+      - name: Compress debug APK with zstd
+        run: |
+          mkdir -p app/build/outputs/apk/debug-zstd
+          for apk in app/build/outputs/apk/full/debug/*.apk; do
+            out="app/build/outputs/apk/debug-zstd/$(basename "$apk").zst"
+            zstd -T0 -19 -f "$apk" -o "$out"
+          done
 
       - name: Upload Full APK
         uses: actions/upload-artifact@v4
@@ -57,13 +59,13 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Upload Lite APK
+      - name: Upload compressed debug APKs
         uses: actions/upload-artifact@v4
         with:
-          name: SpicyEX-lite-debug
-          path: app/build/outputs/apk/lite/debug/*.apk
+          name: SpicyEX-debug-zstd
+          path: app/build/outputs/apk/debug-zstd/*.zst
           retention-days: 7
-          if-no-files-found: error
+          if-no-files-found: ignore
 
       - name: Upload Test Reports
         if: always()
@@ -92,16 +94,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platforms;android-34 build-tools;34.0.0 platform-tools'
+          packages: 'cmdline-tools;latest platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Run Full Lint
         run: ./gradlew :app:lintFullDebug --no-daemon
-
-      - name: Run Lite Lint
-        run: ./gradlew :app:lintLiteDebug --no-daemon
 
       - name: Upload Lint Reports
         if: always()
@@ -141,7 +140,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platforms;android-34 build-tools;34.0.0 platform-tools ndk;26.3.11579264'
+          packages: 'cmdline-tools;latest platform-tools platforms;android-35 build-tools;35.0.0 ndk;26.3.11579264'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -149,13 +148,18 @@ jobs:
       - name: Build Full Release
         run: ./gradlew :app:assembleFullRelease --no-daemon
 
-      - name: Build Lite Release
-        run: ./gradlew :app:assembleLiteRelease --no-daemon
+      - name: Compress release APK with zstd
+        run: |
+          mkdir -p app/build/outputs/apk/release-zstd
+          for apk in app/build/outputs/apk/full/release/*.apk; do
+            out="app/build/outputs/apk/release-zstd/$(basename "$apk").zst"
+            zstd -T0 -19 -f "$apk" -o "$out"
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             app/build/outputs/apk/full/release/*.apk
-            app/build/outputs/apk/lite/release/*.apk
+            app/build/outputs/apk/release-zstd/*.zst
           generate_release_notes: true
