@@ -712,9 +712,14 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     }
 
     private void refreshLanguageModelDownloadStatus() {
-        if (!panelAttached || LanguageModelPack.status().phase != LanguageModelPack.Phase.DOWNLOADING) return;
+        if (!panelAttached) return;
+        LanguageModelPack.DownloadStatus status = LanguageModelPack.status();
+        // Rebuild once more after the worker switches to READY or ERROR; otherwise the polling
+        // loop would stop before the terminal state became visible in the panel.
         rebuildSection(Settings.TRANSLITERATION);
-        uiHandler.postDelayed(this::refreshLanguageModelDownloadStatus, 500);
+        if (status.phase == LanguageModelPack.Phase.DOWNLOADING) {
+            uiHandler.postDelayed(this::refreshLanguageModelDownloadStatus, 500);
+        }
     }
 
     private void downloadLanguageModelsRow(LinearLayout content) {
