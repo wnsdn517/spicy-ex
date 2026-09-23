@@ -43,6 +43,12 @@ import java.util.function.Supplier;
  * the real screen underneath updates the moment a value changes.
  */
 final class LyricsLayoutEditController {
+    static final String OVERLAY_TAG = "spicyex.layout-editor-overlay";
+
+    interface EditorHandle {
+        /** @return true when the editor consumed the back action. */
+        boolean onBackPressed();
+    }
     private static final int HANDLE_SIZE_DP = 22;
     /** Extra grab margin around the corner grip's drawn bracket. */
     private static final int HANDLE_TOUCH_PAD_DP = 10;
@@ -99,9 +105,11 @@ final class LyricsLayoutEditController {
         private Supplier<ViewGroup> mountedRowsHostSupplier;
         private Supplier<View> trackTextFrameSupplier;
         private Supplier<View> chromeClusterSupplier;
+        private Supplier<View> backButtonSupplier;
         private boolean landscape;
         private Runnable applyPreferences;
         private Runnable onChromeReveal;
+        private Runnable onClosed;
         private Runnable enableDemoData;
         private Runnable disableDemoData;
         private EditableChip skipChip;
@@ -114,23 +122,30 @@ final class LyricsLayoutEditController {
         Request mountedRowsHostSupplier(Supplier<ViewGroup> value) { this.mountedRowsHostSupplier = value; return this; }
         Request trackTextFrameSupplier(Supplier<View> value) { this.trackTextFrameSupplier = value; return this; }
         Request chromeClusterSupplier(Supplier<View> value) { this.chromeClusterSupplier = value; return this; }
+        Request backButtonSupplier(Supplier<View> value) { this.backButtonSupplier = value; return this; }
         Request landscape(boolean value) { this.landscape = value; return this; }
         Request applyPreferences(Runnable value) { this.applyPreferences = value; return this; }
         Request onChromeReveal(Runnable value) { this.onChromeReveal = value; return this; }
+        Request onClosed(Runnable value) { this.onClosed = value; return this; }
         Request enableDemoData(Runnable value) { this.enableDemoData = value; return this; }
         Request disableDemoData(Runnable value) { this.disableDemoData = value; return this; }
         Request skipChip(EditableChip value) { this.skipChip = value; return this; }
         Request followChip(EditableChip value) { this.followChip = value; return this; }
 
-        void show() {
-            if (activity == null || shellRoot == null) return;
-            new Session(this).start();
+        EditorHandle show() {
+            if (activity == null || shellRoot == null) return null;
+            // A screen rebuild can leave the previous session's view attached for one traversal.
+            // Never stack a second full-screen touch layer on top of it.
+            if (shellRoot.findViewWithTag(OVERLAY_TAG) != null) return null;
+            Session session = new Session(this);
+            session.start();
+            return session;
         }
     }
 
     /** One editor invocation's mutable state - a plain instance instead of a pile of one-element
      *  arrays now that there's real state (selected element, snapshot, current drag) to carry. */
-    private static final class Session {
+    private static final class Session implements EditorHandle {
         private static final Settings.Setting<?>[] TOUCHED_SETTINGS = {
                 Settings.TRACK_INFO_POSITION, Settings.TRACK_INFO_ART_RADIUS,
                 Settings.TRACK_INFO_ART_SIZE, Settings.TRACK_INFO_ART_SIZE_CUSTOM_DP,
@@ -153,7 +168,9 @@ final class LyricsLayoutEditController {
                 Settings.TRACK_INFO_BACKGROUND, Settings.TRACK_INFO_TEXT_OVERFLOW,
                 Settings.WORD_BOUNCE, Settings.WORD_BOUNCE_STYLE,
                 Settings.ENABLE_GLOW_BLUR, Settings.LINE_SYNC_FILL,
-                Settings.ANIMATION_STYLE, Settings.APPLE_CASCADE_SPEED
+                Settings.ANIMATION_STYLE, Settings.LOAD_LIFT_ANIMATION,
+                Settings.APPLE_CASCADE_SPEED, Settings.APPLE_SPRING_STRENGTH,
+                Settings.NATIVE_SPICY_ROMANIZATION, Settings.NATIVE_SPICY_TRANSLATION
         };
 
         /** Which on-screen thing is selected. Artwork and its title/artist text used to be one
@@ -169,11 +186,15 @@ final class LyricsLayoutEditController {
         private final Supplier<ViewGroup> mountedRowsHostSupplier;
         private final Supplier<View> trackTextFrameSupplier;
         private final Supplier<View> chromeClusterSupplier;
+        private final Supplier<View> backButtonSupplier;
         private final SettingsStore store;
         private final SettingsWriter writer;
         private final SettingsUiStrings strings;
+        private final java.util.IdentityHashMap<Settings.Setting<?>, Object> initialSettings =
+                new java.util.IdentityHashMap<>();
         private final Runnable applyPreferences;
         private final Runnable onChromeReveal;
+        private final Runnable onClosed;
         private final Runnable enableDemoData;
         private final Runnable disableDemoData;
         private final EditableChip skipChip;
@@ -185,18 +206,17 @@ final class LyricsLayoutEditController {
         private final FrameLayout skipLayer;
         private final FrameLayout followLayer;
         private final FrameLayout dockLayer;
+        private final FrameLayout backLayer;
         private final LinearLayout optionsCard;
         private final MaxHeightScrollView optionsScroll;
         private final LinearLayout panelContainer;
 
         private Element selected = Element.ARTWORK;
-        /** Explicit top margin (px) the options panel currently sits at, once the user has
-         *  dragged it - null means "still at its default docked-bottom position", the common
-         *  case that needs no persisted number at all. Session-local only, not a setting. */
-        private Integer panelTopMargin;
+        /** Fixed measured height of the bottom sheet. Session-local only, not a setting. */
         private Integer panelContainerHeight;
         private boolean panelVisible;
-        private boolean panelUserPositioned;
+        /** Current bottom-sheet offset. 0 is fully expanded; positive values slide it down. */
+        private float sheetOffset;
         private View artCapture;
         private View artHandle;
         private View trackTextCapture;
@@ -205,6 +225,7 @@ final class LyricsLayoutEditController {
         private View skipCapture;
         private View followCapture;
         private View dockCapture;
+        private View backCapture;
         private boolean demoActive;
         /** Outline -> real view it is tracing. Re-synced every frame by {@link #syncCaptures()}. */
         private final java.util.List<CaptureBinding> captureBindings = new java.util.ArrayList<>();
@@ -342,8 +363,10 @@ final class LyricsLayoutEditController {
             this.mountedRowsHostSupplier = request.mountedRowsHostSupplier;
             this.trackTextFrameSupplier = request.trackTextFrameSupplier;
             this.chromeClusterSupplier = request.chromeClusterSupplier;
+            this.backButtonSupplier = request.backButtonSupplier;
             this.applyPreferences = request.applyPreferences;
             this.onChromeReveal = request.onChromeReveal;
+            this.onClosed = request.onClosed;
             this.enableDemoData = request.enableDemoData;
             this.disableDemoData = request.disableDemoData;
             this.skipChip = request.skipChip;
@@ -351,16 +374,21 @@ final class LyricsLayoutEditController {
             this.store = new SettingsStore(activity);
             this.writer = new SettingsWriter(store);
             this.strings = UiLanguage.strings(activity, store.get(Settings.UI_LANGUAGE));
+            for (Settings.Setting<?> setting : TOUCHED_SETTINGS) {
+                initialSettings.put(setting, store.get(setting));
+            }
             this.overlay = new FrameLayout(activity);
             this.artLayer = new FrameLayout(activity);
             this.trackTextLayer = new FrameLayout(activity);
             this.skipLayer = new FrameLayout(activity);
             this.followLayer = new FrameLayout(activity);
             this.dockLayer = new FrameLayout(activity);
+            this.backLayer = new FrameLayout(activity);
             this.optionsCard = new LinearLayout(activity);
-            this.optionsScroll = new MaxHeightScrollView(activity);
+            this.optionsScroll = new SheetScrollView(activity);
             this.panelContainer = new LinearLayout(activity);
             this.panelContainer.setOrientation(LinearLayout.VERTICAL);
+            this.overlay.setTag(OVERLAY_TAG);
         }
 
         /** Writes through the settings store, then forces the real shell to re-apply - bypassing
@@ -459,6 +487,9 @@ final class LyricsLayoutEditController {
             dockLayer.setClipChildren(false);
             overlay.addView(dockLayer, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            backLayer.setClipChildren(false);
+            overlay.addView(backLayer, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
             // Auto-preview: opening the editor with nothing actually playing left it showing an
             // empty/error state, so every element had to be selected blind. Full only - the demo's
@@ -499,16 +530,18 @@ final class LyricsLayoutEditController {
 
             panelContainer.removeAllViews();
             panelContainer.addView(panelDragHandle(), panelDragHandleLp());
+            // The old fixed-height options + bottom action row reserved a second empty region
+            // below short panels. The sheet now wraps its actual scroll content; editor actions
+            // live in the top chrome instead, so there is no artificial lower blank area.
             panelContainer.addView(optionsScroll, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-            panelContainer.addView(actionIconsRow(), new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             overlay.addView(panelContainer, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             applyPanelLayout();
             panelVisible = false;
-            panelContainer.setTranslationY(dp(40));
+            sheetOffset = 0f;
+            panelContainer.setTranslationY(0f);
             panelContainer.setVisibility(View.INVISIBLE);
 
             refreshArtwork();
@@ -530,22 +563,21 @@ final class LyricsLayoutEditController {
             refreshSkipChip();
             refreshFollowChip();
             refreshDock();
+            refreshBackButton();
             afterNextLayout(() -> {
                 refreshSkipChip();
                 refreshFollowChip();
                 refreshDock();
-                if (panelContainerHeight == null && overlay.getHeight() > 0) {
-                    panelContainerHeight = clamp(Math.round(overlay.getHeight() * DEFAULT_PANEL_HEIGHT_FRACTION),
-                            dp(200), overlay.getHeight() - dp(PANEL_MIN_TOP_DP));
-                    applyPanelLayout();
-                }
+                refreshBackButton();
+                panelContainerHeight = null;
+                applyPanelLayout();
             });
             startCaptureSync();
         }
 
         private void close() {
             stopCaptureSync();
-            if (demoActive && disableDemoData != null) {
+            if (disableDemoData != null) {
                 demoActive = false;
                 disableDemoData.run();
             }
@@ -553,10 +585,32 @@ final class LyricsLayoutEditController {
             if (followChip != null && followChip.restoreVisibility != null) followChip.restoreVisibility.run();
             ViewGroup parent = (ViewGroup) overlay.getParent();
             if (parent != null) parent.removeView(overlay);
+            if (onClosed != null) onClosed.run();
             // The overlay's own scrim sat over the real chrome row the whole time it was open;
             // make sure it (and the settings cog on it) is actually visible again afterward
             // rather than relying on whatever auto-hide state it happened to be in already.
             if (onChromeReveal != null) onChromeReveal.run();
+        }
+
+        /** X means cancel: restore the snapshot captured when this editor session opened, then
+         * close after the live shell has re-applied those values. */
+        private void cancel() {
+            for (Settings.Setting<?> setting : TOUCHED_SETTINGS) {
+                restoreTyped(writer, setting, initialSettings.get(setting));
+            }
+            if (applyPreferences != null) applyPreferences.run();
+            close();
+        }
+
+        @Override
+        public boolean onBackPressed() {
+            if (overlay.getParent() == null) return false;
+            if (panelVisible || panelContainer.getVisibility() == View.VISIBLE) {
+                hidePanelSheet(true);
+            } else {
+                close();
+            }
+            return true;
         }
 
         // -- top bar --------------------------------------------------------
@@ -708,11 +762,15 @@ final class LyricsLayoutEditController {
             artLayer.removeAllViews();
             dropBindingsIn(artLayer);
             View frame = artFrameSupplier == null ? null : artFrameSupplier.get();
-            if (frame == null || frame.getWidth() <= 0 || frame.getHeight() <= 0) {
+            if (frame == null || frame.getVisibility() != View.VISIBLE
+                    || frame.getWidth() <= 0 || frame.getHeight() <= 0) {
                 artCapture = null;
                 artHandle = null;
                 int sizePx = dp(safeGet(Settings.TRACK_INFO_ART_SIZE_CUSTOM_DP));
-                int[] pos = new int[] { shellRoot.getWidth() / 2 - sizePx / 2, Math.max(dp(90), shellRoot.getHeight() / 2 - sizePx / 2) };
+                // Editor preview is intentionally top-mounted. It remains selectable even when
+                // the saved track-info mode is Off; changing the mode in the sheet still writes
+                // the user's real preference, while this virtual frame never disappears.
+                int[] pos = new int[] { dp(16), dp(78) };
                 View capture = new View(activity);
                 GradientDrawable outline = new GradientDrawable();
                 outline.setStroke(dp(2), ACCENT_COLOR);
@@ -724,7 +782,9 @@ final class LyricsLayoutEditController {
                 capture.setOnClickListener(v -> selectElement(Element.ARTWORK));
                 artLayer.addView(capture, lp);
                 artCapture = capture;
-                bindCapture(capture, () -> null);
+                // This is an editor-only virtual target for TRACK_INFO_POSITION=Off. Do not bind
+                // it to a null source: capture sync quite correctly hides null-source bindings,
+                // which used to make Artwork impossible to select in the Off state.
                 paintCapture(artCapture, selected == Element.ARTWORK);
                 return;
             }
@@ -936,7 +996,24 @@ final class LyricsLayoutEditController {
             dropBindingsIn(trackTextLayer);
             View frame = trackTextFrameSupplier == null ? null : trackTextFrameSupplier.get();
             if (frame == null || frame.getWidth() <= 0 || frame.getHeight() <= 0) {
-                trackTextCapture = null;
+                // Keep a second selectable frame under the editor-only artwork preview when the
+                // saved mode is Off. The real readout is intentionally not made visible merely
+                // to support hit testing.
+                int width = Math.max(dp(150), shellRoot.getWidth() - dp(32));
+                int height = dp(64);
+                View capture = new View(activity);
+                GradientDrawable outline = new GradientDrawable();
+                outline.setStroke(dp(2), ACCENT_COLOR);
+                outline.setCornerRadius(dp(10));
+                capture.setBackground(outline);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        width, height, Gravity.TOP | Gravity.START);
+                lp.leftMargin = dp(16);
+                lp.topMargin = dp(78) + dp(safeGet(Settings.TRACK_INFO_ART_SIZE_CUSTOM_DP)) + dp(10);
+                capture.setOnClickListener(v -> selectElement(Element.TRACK_TEXT));
+                trackTextLayer.addView(capture, lp);
+                trackTextCapture = capture;
+                paintCapture(trackTextCapture, selected == Element.TRACK_TEXT);
                 return;
             }
             int[] pos = relativePosition(frame, shellRoot);
@@ -949,7 +1026,7 @@ final class LyricsLayoutEditController {
                     frame.getWidth(), frame.getHeight(), Gravity.TOP | Gravity.START);
             lp.leftMargin = pos[0];
             lp.topMargin = pos[1];
-            capture.setOnClickListener(v -> selectElement(Element.ARTWORK));
+            capture.setOnClickListener(v -> selectElement(Element.TRACK_TEXT));
             trackTextLayer.addView(capture, lp);
             trackTextCapture = capture;
             bindCapture(capture, trackTextFrameSupplier);
@@ -993,7 +1070,8 @@ final class LyricsLayoutEditController {
             // mounted line, hugging just its text content, rather than a single box covering the
             // whole lyrics column including the blank centering padding above/below it. Not
             // clickable, so it never steals the touches `layer` handles underneath it.
-            RowOutlinesView outlines = new RowOutlinesView(activity, mountedRowsHostSupplier);
+            RowOutlinesView outlines = new RowOutlinesView(activity, mountedRowsHostSupplier,
+                    artFrameSupplier, trackTextFrameSupplier, chromeClusterSupplier);
             FrameLayout.LayoutParams outlinesLp = new FrameLayout.LayoutParams(
                     Math.max(0, focusArea.getWidth()), Math.max(0, focusArea.getHeight()),
                     Gravity.TOP | Gravity.START);
@@ -1150,10 +1228,13 @@ final class LyricsLayoutEditController {
             // The editor's lyrics touch plane can cover the whole focus area. Keep real chrome
             // controls (settings long-press, liked songs, translation and reading buttons)
             // outside that plane so their click and long-click gestures reach the source views.
+            // The sheet is another real interactive child below this touch plane; excluding its
+            // current bounds is what lets the grabber and every option row receive the gesture.
             View chrome = chromeClusterSupplier == null ? null : chromeClusterSupplier.get();
             return hitsView(artCapture, rawX, rawY) || hitsView(artHandle, rawX, rawY)
                     || hitsView(trackTextCapture, rawX, rawY)
-                    || hitsView(chrome, rawX, rawY);
+                    || hitsView(chrome, rawX, rawY)
+                    || hitsView(panelContainer, rawX, rawY);
         }
 
         private static boolean hitsView(View view, float rawX, float rawY) {
@@ -1266,13 +1347,35 @@ final class LyricsLayoutEditController {
          *  (barring the fullscreen auto-hide timer, which onChromeReveal keeps at bay for the
          *  duration of the edit), so no force-visible step is needed here. */
         private void refreshDock() {
-            // The chrome buttons must remain interactive while the layout editor is open.
-            // A full-screen overlay capture here would sit above the real settings/like/
-            // translation buttons and swallow their clicks.
-            if (dockCapture != null) {
-                dockLayer.removeView(dockCapture);
-                dockCapture = null;
-            }
+            dockCapture = refreshChipCapture(dockLayer, dockCapture,
+                    chromeClusterSupplier, Element.DOCK);
+        }
+
+        /** Captures the real top-left Back control while editing, so it closes the editor (or
+         *  its open sheet) instead of finishing Spotify's tab through the shell callback. */
+        private void refreshBackButton() {
+            backLayer.removeAllViews();
+            dropBindingsIn(backLayer);
+            View source = backButtonSupplier == null ? null : backButtonSupplier.get();
+            int buttonSize = source != null && source.getHeight() > 0 ? source.getHeight() : dp(44);
+            int[] pos = source != null && source.getWidth() > 0 && source.getHeight() > 0
+                    ? relativePosition(source, shellRoot) : new int[]{dp(8), dp(8)};
+
+            ImageView cancel = iconButton(ActionIconDrawable.Kind.CLOSE, 0xE6FFFFFF,
+                    s("cancel", "Cancel"), this::cancel);
+            ImageView save = iconButton(ActionIconDrawable.Kind.CHECK, ACCENT_COLOR,
+                    s("save", "Save"), this::close);
+            backLayer.addView(cancel, editorActionLp(pos[0], pos[1], buttonSize));
+            backLayer.addView(save, editorActionLp(pos[0] + buttonSize + dp(6), pos[1], buttonSize));
+            backCapture = cancel;
+        }
+
+        private FrameLayout.LayoutParams editorActionLp(int left, int top, int size) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size,
+                    Gravity.TOP | Gravity.START);
+            lp.leftMargin = left;
+            lp.topMargin = top;
+            return lp;
         }
 
         private View refreshChipCapture(FrameLayout layer, View existing, Supplier<View> supplier,
@@ -1357,74 +1460,49 @@ final class LyricsLayoutEditController {
             });
         }
 
-        /** Moves the panel to the opposite vertical half of the screen from the selected
-         *  element's own real on-screen capture when it's actually covering it - checked by real
-         *  geometry once both have settled, rather than a fixed per-element rule, so it keeps
-         *  working as position settings change what floats where. Lyrics text/Background have no
-         *  single capture rect to check against (they cover most of the screen by nature - there's
-         *  no edge that would ever clear them), so they're skipped; a single move attempt, not a
-         *  retry loop, so an element that overlaps everywhere (e.g. the focus line dragged to
-         *  mid-screen) settles on the moved position rather than oscillating forever. */
+        /** The sheet owns the bottom edge. It is allowed to cover the selected element: selecting
+         *  that element is what opened the sheet, and moving the sheet around made its position
+         *  unpredictable while editing. */
         private void avoidPanelOverlap() {
             if (!panelVisible || panelContainer.getVisibility() != View.VISIBLE) return;
-            // The selected element is allowed to sit behind the sheet: selecting it is exactly
-            // what opened the sheet. Only floating chrome must stay visible beside its boundary.
-            if (panelUserPositioned) return;
-            View[] candidates = {skipCapture, followCapture, dockCapture};
-            View overlapping = null;
-            Rect panelRect = screenRect(panelContainer);
-            for (View candidate : candidates) {
-                if (candidate == null || candidate.getWidth() <= 0 || candidate.getHeight() <= 0) continue;
-                if (Rect.intersects(screenRect(candidate), panelRect)) {
-                    overlapping = candidate;
-                    break;
-                }
-            }
-            if (overlapping == null) {
-                if (panelTopMargin != null) {
-                    panelTopMargin = null;
-                    applyPanelLayout();
-                }
-                return;
-            }
-            Rect captureRect = screenRect(overlapping);
-            Rect overlayRect = screenRect(overlay);
-            boolean captureInUpperHalf = overlay.getHeight() <= 0
-                    || (captureRect.centerY() - overlayRect.top) < overlay.getHeight() / 2f;
-            // The capture sits in the upper half - dock the panel to the bottom to clear it, and
-            // vice versa; a plain top/bottom flip, mirroring what a two-position dock used to do.
-            panelTopMargin = captureInUpperHalf ? null : dp(PANEL_MIN_TOP_DP);
-            applyPanelLayout();
+            setSheetOffset(sheetOffset, false);
         }
 
         private void showPanelSheet(boolean animate) {
-            if (!panelVisible && !panelUserPositioned) panelTopMargin = null;
             panelVisible = true;
             panelContainer.animate().cancel();
             panelContainer.setVisibility(View.VISIBLE);
             panelContainer.setAlpha(1f);
+            final float hidden = sheetHiddenOffset();
             if (animate) {
-                panelContainer.setTranslationY(Math.max(dp(40), panelContainer.getHeight()));
-                panelContainer.animate().translationY(0f).setDuration(220L).start();
+                if (panelContainer.getTranslationY() <= 0f) panelContainer.setTranslationY(hidden);
+                sheetOffset = panelContainer.getTranslationY();
+                panelContainer.animate().translationY(0f).setDuration(260L)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f))
+                        .withEndAction(() -> sheetOffset = 0f).start();
             } else {
-                panelContainer.setTranslationY(0f);
+                setSheetOffset(0f, false);
             }
-            panelContainer.post(this::avoidPanelOverlap);
+            panelContainer.post(() -> setSheetOffset(0f, false));
         }
 
         private void hidePanelSheet(boolean animate) {
             panelVisible = false;
             panelContainer.animate().cancel();
+            final float hidden = sheetHiddenOffset();
             if (!animate) {
                 panelContainer.setVisibility(View.INVISIBLE);
                 panelContainer.setAlpha(1f);
+                sheetOffset = hidden;
                 panelContainer.setTranslationY(0f);
                 return;
             }
-            float distance = Math.max(dp(40), panelContainer.getHeight());
-            panelContainer.animate().translationY(distance).setDuration(200L).withEndAction(() -> {
+            panelContainer.animate().translationY(hidden).setDuration(220L)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f))
+                    .withEndAction(() -> {
                 panelContainer.setVisibility(View.INVISIBLE);
                 panelContainer.setAlpha(1f);
+                sheetOffset = hidden;
                 panelContainer.setTranslationY(0f);
             }).start();
         }
@@ -1474,6 +1552,7 @@ final class LyricsLayoutEditController {
             refreshSkipChip();
             refreshFollowChip();
             refreshDock();
+            refreshBackButton();
         }
 
         /** Recolors a capture's outline stroke: {@link #ACCENT_COLOR} when it is the current
@@ -1662,6 +1741,26 @@ final class LyricsLayoutEditController {
                         new String[]{"Top to bottom", "Left to right (block)", "Left to right (sentence)"},
                         () -> selectElement(Element.TEXT)), matchWrap(0));
             }
+
+            beginGroup(strings.setting(Settings.ANIMATION_STYLE));
+            addOption(chipRow(Settings.ANIMATION_STYLE,
+                    new String[]{"Gradient wash", "Spotlight", "Apple Music"},
+                    () -> selectElement(Element.TEXT)), matchWrap(8));
+            addOption(toggleRow(Settings.LOAD_LIFT_ANIMATION,
+                    strings.setting(Settings.LOAD_LIFT_ANIMATION), null), matchWrap(12));
+            if (isAppleStyle()) {
+                addOption(text(strings.setting(Settings.APPLE_CASCADE_SPEED),
+                        12, GROUP_TITLE_COLOR, true), matchWrap(8));
+                addOption(dragRow(50, 200, store.get(Settings.APPLE_CASCADE_SPEED), "%",
+                        value -> writer.put(Settings.APPLE_CASCADE_SPEED, value)), matchWrap(12));
+                addOption(text(strings.setting(Settings.APPLE_SPRING_STRENGTH),
+                        12, GROUP_TITLE_COLOR, true), matchWrap(8));
+                addOption(dragRow(Settings.APPLE_SPRING_STRENGTH.minValue,
+                        Settings.APPLE_SPRING_STRENGTH.maxValue,
+                        store.get(Settings.APPLE_SPRING_STRENGTH), "%",
+                        value -> writer.put(Settings.APPLE_SPRING_STRENGTH, value)), matchWrap(12));
+            }
+            endGroup();
         }
 
         private void addSectionLabel(Settings.Setting<?> setting, int bottomDp) {
@@ -1900,30 +1999,7 @@ final class LyricsLayoutEditController {
                     value -> writer.put(Settings.EXTRA_DARK_BACKGROUND, value)),
                     matchWrap(12));
 
-            addDivider();
-            addSectionLabel(Settings.ANIMATION_STYLE, 10);
-            addOption(chipRow(Settings.ANIMATION_STYLE,
-                    new String[]{"Gradient wash", "Spotlight", "Apple Music"},
-                    () -> selectElement(Element.BACKGROUND)), matchWrap(8));
-
-            addOption(toggleRow(Settings.LOAD_LIFT_ANIMATION,
-                    strings.setting(Settings.LOAD_LIFT_ANIMATION), null), matchWrap(12));
-
-            addDivider();
-            addSectionLabel(Settings.APPLE_CASCADE_SPEED, 10);
-            addOption(dragRow(
-                    50, 200,
-                    store.get(Settings.APPLE_CASCADE_SPEED), "%",
-                    value -> writer.put(Settings.APPLE_CASCADE_SPEED, value)),
-                    matchWrap(12));
-
-            addSectionLabel(Settings.APPLE_SPRING_STRENGTH, 10);
-            addOption(dragRow(
-                    Settings.APPLE_SPRING_STRENGTH.minValue, Settings.APPLE_SPRING_STRENGTH.maxValue,
-                    store.get(Settings.APPLE_SPRING_STRENGTH), "%",
-                    value -> writer.put(Settings.APPLE_SPRING_STRENGTH, value)),
-                    matchWrap(12));
-
+            endGroup();
         }
 
         private void buildSkipOptions() {
@@ -1984,6 +2060,13 @@ final class LyricsLayoutEditController {
         }
 
         private void buildDockOptions() {
+            beginGroup("Top bar controls");
+            addOption(toggleRow(Settings.NATIVE_SPICY_ROMANIZATION,
+                    strings.setting(Settings.NATIVE_SPICY_ROMANIZATION), null), matchWrap(10));
+            addOption(toggleRow(Settings.NATIVE_SPICY_TRANSLATION,
+                    strings.setting(Settings.NATIVE_SPICY_TRANSLATION), null), matchWrap(12));
+            endGroup();
+
             beginGroup(strings.setting(Settings.LIKED_SONGS_BUTTON));
             addOption(chipRow(Settings.LIKED_SONGS_BUTTON,
                     new String[]{"Off", "Heart", "Star"},
@@ -2031,9 +2114,8 @@ final class LyricsLayoutEditController {
             return lp;
         }
 
-        /** A small grip bar at the top of the options card. Drags the panel straight up/down by
-         *  the finger's own vertical delta, clamped to stay on screen - no side-docking, no
-         *  snap-to-edge: wherever it's released is where it stays. */
+        /** Apple-style grabber: the sheet follows the finger, then snaps to expanded, peek, or
+         *  dismissed instead of retaining an arbitrary top margin. */
         private View panelDragHandle() {
             View handle = new View(activity);
             GradientDrawable bg = new GradientDrawable();
@@ -2047,13 +2129,13 @@ final class LyricsLayoutEditController {
         private void installPanelDrag(View handle) {
             int slopPx = dp(8);
             float[] startRawY = new float[1];
-            int[] startTopMargin = new int[1];
+            float[] startOffset = new float[1];
             boolean[] dragging = new boolean[1];
             handle.setOnTouchListener((v, event) -> {
                 switch (event.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
                         startRawY[0] = event.getRawY();
-                        startTopMargin[0] = panelContainer.getTop();
+                        startOffset[0] = sheetOffset;
                         dragging[0] = false;
                         if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
                         return true;
@@ -2061,9 +2143,7 @@ final class LyricsLayoutEditController {
                         float dy = event.getRawY() - startRawY[0];
                         if (!dragging[0] && Math.abs(dy) > slopPx) dragging[0] = true;
                         if (dragging[0]) {
-                            panelUserPositioned = true;
-                            panelTopMargin = clampPanelTopMargin(Math.round(startTopMargin[0] + dy));
-                            applyPanelLayout();
+                            setSheetOffset(startOffset[0] + dy, false);
                         }
                         return true;
                     }
@@ -2080,28 +2160,96 @@ final class LyricsLayoutEditController {
             });
         }
 
-        private void closeOrShrinkPanel(float startRawY, float currentRawY) {
-            float dy = currentRawY - startRawY;
-            if (dy > dp(48)) {
-                hidePanelSheet(true);
-            } else if (dy < -dp(48)) {
-                showPanelSheet(true);
+        /** Lets a downward swipe that starts on the options themselves pull the sheet with the
+         *  finger once the list is already at its top, matching the native Apple sheet gesture. */
+        private final class SheetScrollView extends MaxHeightScrollView {
+            private float downY;
+            private float lastY;
+            private boolean sheetDragging;
+
+            SheetScrollView(Activity activity) { super(activity); }
+
+            @Override
+            public boolean onInterceptTouchEvent(MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downY = lastY = event.getRawY();
+                        sheetDragging = false;
+                        break;
+                    case MotionEvent.ACTION_MOVE:
+                        float dy = event.getRawY() - downY;
+                        if (!sheetDragging && dy > dp(8) && getScrollY() <= 0) {
+                            sheetDragging = true;
+                            requestDisallowInterceptTouchEvent(true);
+                            return true;
+                        }
+                        break;
+                    case MotionEvent.ACTION_CANCEL:
+                    case MotionEvent.ACTION_UP:
+                        sheetDragging = false;
+                        break;
+                }
+                return super.onInterceptTouchEvent(event);
+            }
+
+            @Override
+            public boolean onTouchEvent(MotionEvent event) {
+                if (sheetDragging) {
+                    float y = event.getRawY();
+                    if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                        setSheetOffset(sheetOffset + y - lastY, false);
+                        lastY = y;
+                        return true;
+                    }
+                    if (event.getActionMasked() == MotionEvent.ACTION_UP
+                            || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                        closeOrShrinkPanel(downY, y);
+                        sheetDragging = false;
+                        return true;
+                    }
+                    return true;
+                }
+                return super.onTouchEvent(event);
             }
         }
 
-        private int clampPanelTopMargin(int desired) {
-            int min = dp(PANEL_MIN_TOP_DP);
-            int max = Math.max(min,
-                    overlay.getHeight() - panelContainer.getHeight() - dp(PANEL_BOTTOM_MARGIN_DP));
-            return clamp(desired, min, max);
+        private void closeOrShrinkPanel(float startRawY, float currentRawY) {
+            float dy = currentRawY - startRawY;
+            if (sheetOffset >= sheetPeekOffset() + dp(36) || dy > dp(72)) {
+                hidePanelSheet(true);
+            } else if (dy > dp(28)) {
+                snapSheetTo(sheetPeekOffset());
+            } else {
+                snapSheetTo(0f);
+            }
         }
 
-        /** Rebuilds the options panel's own LayoutParams - full width, docked to the bottom by
-         *  default ({@link #panelTopMargin} null) or pinned at an explicit top margin once the
-         *  user has dragged it. Only affects this panel's own dimensions - never focusArea/
-         *  artFrameSupplier geometry - so this is a plain local view-tree change with no put()/
-         *  afterNextLayout plumbing needed, same category as the resize-drag's live geometry
-         *  writes. */
+        private float sheetHiddenOffset() {
+            return Math.max(dp(120), panelContainer.getHeight());
+        }
+
+        private float sheetPeekOffset() {
+            return Math.max(0f, sheetHiddenOffset() - dp(104));
+        }
+
+        private void setSheetOffset(float offset, boolean animate) {
+            float clamped = Math.max(0f, Math.min(sheetHiddenOffset(), offset));
+            sheetOffset = clamped;
+            if (animate) {
+                panelContainer.animate().cancel();
+                panelContainer.animate().translationY(clamped).setDuration(220L)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
+            } else {
+                panelContainer.setTranslationY(clamped);
+            }
+        }
+
+        private void snapSheetTo(float offset) {
+            setSheetOffset(offset, true);
+        }
+
+        /** Keeps the sheet anchored to the bottom. Its vertical position is exclusively owned by
+         *  translationY, which makes layout, drag, and show/hide animations share one state. */
         private void applyPanelLayout() {
             ViewGroup.LayoutParams raw = panelContainer.getLayoutParams();
             FrameLayout.LayoutParams lp = raw instanceof FrameLayout.LayoutParams
@@ -2112,16 +2260,11 @@ final class LyricsLayoutEditController {
             lp.height = panelContainerHeight != null ? panelContainerHeight : ViewGroup.LayoutParams.WRAP_CONTENT;
             lp.leftMargin = dp(PANEL_SIDE_MARGIN_DP);
             lp.rightMargin = dp(PANEL_SIDE_MARGIN_DP);
-            if (panelTopMargin != null) {
-                lp.gravity = Gravity.TOP;
-                lp.topMargin = panelTopMargin;
-                lp.bottomMargin = 0;
-            } else {
-                lp.gravity = Gravity.BOTTOM;
-                lp.topMargin = 0;
-                lp.bottomMargin = dp(PANEL_BOTTOM_MARGIN_DP);
-            }
+            lp.gravity = Gravity.BOTTOM;
+            lp.topMargin = 0;
+            lp.bottomMargin = dp(PANEL_BOTTOM_MARGIN_DP);
             panelContainer.setLayoutParams(lp);
+            if (panelVisible) panelContainer.post(() -> setSheetOffset(sheetOffset, false));
         }
 
         // -- shared row builders ------------------------------------------------
@@ -2540,7 +2683,7 @@ final class LyricsLayoutEditController {
      *  entire available height before Android ever has reason to let it scroll, which in
      *  landscape's shorter screen means the options card sitting under (and blocking) the top
      *  bar rather than leaving room below it. */
-    private static final class MaxHeightScrollView extends android.widget.ScrollView {
+    private static class MaxHeightScrollView extends android.widget.ScrollView {
         private static final float MAX_HEIGHT_FRACTION = 0.6f;
 
         MaxHeightScrollView(Activity activity) {
@@ -2670,14 +2813,22 @@ final class LyricsLayoutEditController {
      *  it's a handful of stroked rounded-rects, not a real layout pass. */
     private static final class RowOutlinesView extends View {
         private final Supplier<ViewGroup> mountedRowsHostSupplier;
+        private final Supplier<View> artSupplier;
+        private final Supplier<View> trackTextSupplier;
+        private final Supplier<View> chromeSupplier;
         private final android.graphics.Paint paint =
                 new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
         private final android.graphics.RectF rect = new android.graphics.RectF();
         private boolean isSelected;
 
-        RowOutlinesView(Activity activity, Supplier<ViewGroup> mountedRowsHostSupplier) {
+        RowOutlinesView(Activity activity, Supplier<ViewGroup> mountedRowsHostSupplier,
+                        Supplier<View> artSupplier, Supplier<View> trackTextSupplier,
+                        Supplier<View> chromeSupplier) {
             super(activity);
             this.mountedRowsHostSupplier = mountedRowsHostSupplier;
+            this.artSupplier = artSupplier;
+            this.trackTextSupplier = trackTextSupplier;
+            this.chromeSupplier = chromeSupplier;
             paint.setStyle(android.graphics.Paint.Style.STROKE);
             paint.setStrokeWidth(dp(2));
             setWillNotDraw(false);
@@ -2716,11 +2867,32 @@ final class LyricsLayoutEditController {
                     float right = rowLoc[0] - myLoc[0] + row.getWidth() - row.getPaddingRight();
                     float bottom = rowLoc[1] - myLoc[1] + row.getHeight() - row.getPaddingBottom();
                     if (right <= left || bottom <= top) continue;
+                    if (intersectsLiveControl(rowLoc[0] + row.getPaddingLeft(),
+                            rowLoc[1] + row.getPaddingTop(),
+                            rowLoc[0] + row.getWidth() - row.getPaddingRight(),
+                            rowLoc[1] + row.getHeight() - row.getPaddingBottom())) continue;
                     rect.set(left, top, right, bottom);
                     canvas.drawRoundRect(rect, dp(8), dp(8), paint);
                 }
             }
             postInvalidateOnAnimation();
+        }
+
+        private boolean intersectsLiveControl(int left, int top, int right, int bottom) {
+            return intersects(left, top, right, bottom, artSupplier == null ? null : artSupplier.get())
+                    || intersects(left, top, right, bottom,
+                    trackTextSupplier == null ? null : trackTextSupplier.get())
+                    || intersects(left, top, right, bottom,
+                    chromeSupplier == null ? null : chromeSupplier.get());
+        }
+
+        private static boolean intersects(int left, int top, int right, int bottom, View other) {
+            if (other == null || other.getVisibility() != View.VISIBLE
+                    || other.getWidth() <= 0 || other.getHeight() <= 0) return false;
+            int[] loc = new int[2];
+            other.getLocationOnScreen(loc);
+            return left < loc[0] + other.getWidth() && right > loc[0]
+                    && top < loc[1] + other.getHeight() && bottom > loc[1];
         }
     }
 

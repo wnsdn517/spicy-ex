@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/env bash
 # Build the debug APK and install it to the connected device in one step, with clean output.
 #
 # Usage: scripts/build-install.sh [--no-install] [--test] [--serial SERIAL] [--install-sdk]
@@ -14,10 +14,26 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Termux ships ARM64 adb/aapt2, while the command-line SDK usually contains x86-64 host
+# binaries. Prefer the native Termux tools when available so root-enabled phone builds do not
+# fail with an ELF/shell syntax error.
+if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/adb" ]; then
+  PATH="$PREFIX/bin:$PATH"
+  export PATH
+fi
+
 DO_INSTALL=1
 RUN_TESTS=0
 INSTALL_SDK=0
 ADB_SERIAL="${ANDROID_SERIAL:-}"
+GRADLE_ARGS=()
+if [ "$(uname -m 2>/dev/null || true)" = "aarch64" ] && command -v aapt2 >/dev/null 2>&1; then
+  GRADLE_ARGS+=("-Pandroid.aapt2FromMavenOverride=$(command -v aapt2)")
+  GRADLE_ARGS+=("-PSPICY_COMPILE_SDK=${SPICY_COMPILE_SDK:-34}")
+  # The phone build must remain usable even before GitHub model-pack download succeeds.  Keep
+  # the normal desktop/release default unchanged, but embed the dictionaries in Termux builds.
+  GRADLE_ARGS+=("-PexternalLanguageModels=${SPICY_EXTERNAL_MODELS:-false}")
+fi
 while [ "$#" -gt 0 ]; do
   arg="$1"
   case "$arg" in
@@ -94,7 +110,7 @@ if [ -z "$SDK_DIR" ] && [ -f "$ROOT_DIR/local.properties" ]; then
   SDK_DIR="$(printf '%b' "$SDK_DIR")"
 fi
 if [ -z "$SDK_DIR" ]; then
-  for candidate in "$HOME/Android/Sdk" "$HOME/Android/sdk" /usr/lib/android-sdk /opt/android-sdk; do
+  for candidate in "$HOME/Android" "$HOME/Android/Sdk" "$HOME/Android/sdk" /usr/lib/android-sdk /opt/android-sdk; do
     if [ -f "$candidate/platforms/android-35/android.jar" ]; then
       SDK_DIR="$candidate"
       break
@@ -102,7 +118,7 @@ if [ -z "$SDK_DIR" ]; then
   done
 fi
 if [ -z "$SDK_DIR" ]; then
-  for candidate in "$HOME/Android/Sdk" "$HOME/Android/sdk" /usr/lib/android-sdk /opt/android-sdk; do
+  for candidate in "$HOME/Android" "$HOME/Android/Sdk" "$HOME/Android/sdk" /usr/lib/android-sdk /opt/android-sdk; do
     if [ -d "$candidate" ]; then
       SDK_DIR="$candidate"
       break
@@ -188,13 +204,18 @@ fi
 export ANDROID_SDK_ROOT="$SDK_DIR"
 
 ADB=()
+USE_ROOT_INSTALL=0
 if [ "$DO_INSTALL" -eq 1 ]; then
-  command -v adb >/dev/null 2>&1 || fail_check "adb was not found on PATH. Use --no-install to build without a device."
+  command -v adb >/dev/null 2>&1 || true
   if [ -n "$ADB_SERIAL" ]; then
     ADB=(-s "$ADB_SERIAL")
   fi
-  if ! adb "${ADB[@]}" get-state >/dev/null 2>&1; then
-    fail_check "No usable adb device/emulator was found. Connect one, set ANDROID_SERIAL, or use --no-install."
+  if command -v adb >/dev/null 2>&1 && adb "${ADB[@]}" get-state >/dev/null 2>&1; then
+    :
+  elif command -v su >/dev/null 2>&1 && su -c 'id -u' 2>/dev/null | grep -qx 0; then
+    USE_ROOT_INSTALL=1
+  else
+    fail_check "No usable adb device and root pm install is unavailable. Connect one, set ANDROID_SERIAL, or use --no-install."
   fi
 fi
 
@@ -204,7 +225,7 @@ if [ "$RUN_TESTS" -eq 1 ]; then
   TEST_TASK=":app:testDebugUnitTest"
   echo "==> Running debug unit tests ($TEST_TASK)"
   LOG="$(mktemp)"
-  if ! bash ./gradlew "$TEST_TASK" --console=plain >"$LOG" 2>&1; then
+  if ! bash ./gradlew "$TEST_TASK" "${GRADLE_ARGS[@]}" --console=plain >"$LOG" 2>&1; then
     echo "TESTS FAILED. Last 60 lines:" >&2
     tail -60 "$LOG" >&2
     rm -f "$LOG"
@@ -220,7 +241,7 @@ APK="app/build/outputs/apk/debug/app-debug.apk"
 
 echo "==> Building debug APK ($TASK)"
 LOG="$(mktemp)"
-if ! bash ./gradlew "$TASK" --console=plain >"$LOG" 2>&1; then
+if ! bash ./gradlew "$TASK" "${GRADLE_ARGS[@]}" --console=plain >"$LOG" 2>&1; then
   echo "BUILD FAILED. Last 60 lines:" >&2
   tail -60 "$LOG" >&2
   rm -f "$LOG"
@@ -238,16 +259,85 @@ fi
 
 echo "==> Installing to device"
 INSTALL_LOG="$(mktemp)"
-if ! adb "${ADB[@]}" install -r "$APK" >"$INSTALL_LOG" 2>&1; then
+if [ "$USE_ROOT_INSTALL" -eq 1 ]; then
+  if ! su -c "pm install -r --user 0 '$ROOT_DIR/$APK'" >"$INSTALL_LOG" 2>&1; then
+    echo "ROOT INSTALL FAILED:" >&2
+    cat "$INSTALL_LOG" >&2
+    rm -f "$INSTALL_LOG"
+    exit 1
+  fi
+  # Clone/work-profile Spotify installations need the same module package visible in that user.
+  su -c 'pm install-existing --user 11 com.eza.spicyex' >>"$INSTALL_LOG" 2>&1 || true
+else
+  if ! adb "${ADB[@]}" install -r "$APK" >"$INSTALL_LOG" 2>&1; then
   echo "INSTALL FAILED:" >&2
+  cat "$INSTALL_LOG" >&2
+  rm -f "$INSTALL_LOG"
+    exit 1
+  fi
+fi
+if [ "$USE_ROOT_INSTALL" -eq 1 ] || grep -q "^Success" "$INSTALL_LOG"; then
+  echo "==> Installed"
+else
+  echo "INSTALL did not report Success:" >&2
   cat "$INSTALL_LOG" >&2
   rm -f "$INSTALL_LOG"
   exit 1
 fi
-grep -q "^Success" "$INSTALL_LOG" && echo "==> Installed" || { echo "INSTALL did not report Success:" >&2; cat "$INSTALL_LOG" >&2; rm -f "$INSTALL_LOG"; exit 1; }
 rm -f "$INSTALL_LOG"
 
+# External model packs are intentionally kept out of the APK.  On a rooted phone, install the
+# exact pack produced from this checkout into Spotify's sandbox as part of the same operation;
+# otherwise the UI can report a successful APK install while the reading engine has no dictionaries
+# to open.  SPICY_EXTERNAL_MODELS=true keeps the old download-only behavior for release builds.
+if [ "$USE_ROOT_INSTALL" -eq 1 ] && [ "${SPICY_EXTERNAL_MODELS:-false}" != "true" ]; then
+  MODEL_TASK=":app:packageLanguageModelPack"
+  MODEL_LOG="$(mktemp)"
+  echo "==> Packaging language models ($MODEL_TASK)"
+  if ! bash ./gradlew "$MODEL_TASK" "${GRADLE_ARGS[@]}" --console=plain >"$MODEL_LOG" 2>&1; then
+    echo "LANGUAGE MODEL PACK FAILED. Last 60 lines:" >&2
+    tail -60 "$MODEL_LOG" >&2
+    rm -f "$MODEL_LOG"
+    exit 1
+  fi
+  rm -f "$MODEL_LOG"
+  MODEL_ZIP="app/build/language-models/spicyex-language-models-v1.zip"
+  [ -f "$MODEL_ZIP" ] || fail_check "Gradle completed but the language model pack was not produced: $MODEL_ZIP"
+  MODEL_TMP="$(mktemp -d)"
+  unzip -q -o "$MODEL_ZIP" -d "$MODEL_TMP"
+  MODEL_FILES=(
+    jmdict/JmdictFurigana.txt.gz
+    jmdict/JmdictPreferredReadings.txt.gz
+    tika/langdetect-20260320.bin
+    kuromoji/characterDefinitions.bin
+    kuromoji/connectionCosts.bin
+    kuromoji/doubleArrayTrie.bin
+    kuromoji/tokenInfoDictionary.bin
+    kuromoji/tokenInfoFeaturesMap.bin
+    kuromoji/tokenInfoPartOfSpeechMap.bin
+    kuromoji/tokenInfoTargetMap.bin
+    kuromoji/unknownDictionary.bin
+  )
+  for model_file in "${MODEL_FILES[@]}"; do
+    [ -s "$MODEL_TMP/$model_file" ] || fail_check "Language model pack is missing or empty: $model_file"
+  done
+  if ! su -c "mkdir -p /data/user/0/com.spotify.music/files/language-models-v1.partial && rm -rf /data/user/0/com.spotify.music/files/language-models-v1.partial/* && cp -R '$MODEL_TMP'/. /data/user/0/com.spotify.music/files/language-models-v1.partial/ && touch /data/user/0/com.spotify.music/files/language-models-v1.partial/.ready && rm -rf /data/user/0/com.spotify.music/files/language-models-v1 && mv /data/user/0/com.spotify.music/files/language-models-v1.partial /data/user/0/com.spotify.music/files/language-models-v1"; then
+    rm -rf "$MODEL_TMP"
+    fail_check "Could not install language models into Spotify's sandbox."
+  fi
+  SPOTIFY_OWNER="$(su -c 'stat -c %u:%g /data/user/0/com.spotify.music 2>/dev/null' || true)"
+  if [ -n "$SPOTIFY_OWNER" ]; then
+    su -c "chown -R '$SPOTIFY_OWNER' /data/user/0/com.spotify.music/files/language-models-v1"
+  fi
+  rm -rf "$MODEL_TMP"
+  echo "==> Language models installed into Spotify user 0"
+fi
+
 echo "==> Force-stopping Spotify so the module reloads fresh"
-adb "${ADB[@]}" shell am force-stop com.spotify.music || echo "WARNING: force-stop failed (non-fatal)" >&2
+if [ "$USE_ROOT_INSTALL" -eq 1 ]; then
+  su -c 'am force-stop com.spotify.music' || echo "WARNING: force-stop failed (non-fatal)" >&2
+else
+  adb "${ADB[@]}" shell am force-stop com.spotify.music || echo "WARNING: force-stop failed (non-fatal)" >&2
+fi
 
 echo "==> Done."

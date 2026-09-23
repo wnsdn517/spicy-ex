@@ -65,6 +65,10 @@ public final class LanguageModelPack {
 
     public static void setReadyListener(Runnable listener) {
         readyListener = listener;
+        // A screen can be created after the settings download has completed. In that case the
+        // one-shot download callback already happened, but the newly mounted document still
+        // needs a chance to reprocess against the installed resources.
+        if (listener != null && isReady()) listener.run();
     }
 
     public static void clearTransientState() {

@@ -245,6 +245,8 @@ final class TrackInfoReadoutController {
     private SpotifyTrack lastTrack;
     private boolean artworkEnabled;
     private String lastMode;
+    /** The layout editor always needs a real, selectable preview even when the saved mode is Off. */
+    private boolean editorPreviewTop;
     /** Current readout art/scrim corner radius (dp); -1 forces the first applyArtRadius() to act. */
     private int artRadiusDp = -1;
     /** Panel media controls mode (Off | Single tap | Double tap), shared with the panel art. */
@@ -585,6 +587,7 @@ final class TrackInfoReadoutController {
      *  topBox itself goes GONE there, so that case is checked by mode rather than box
      *  visibility. Used by the layout editor to anchor its selection overlay on the real view. */
     View currentArtFrame() {
+        if (editorPreviewTop) return topArtFrame;
         if ("Header".equals(lastMode)) return topArtFrame;
         if (sideBox.getVisibility() == View.VISIBLE) return sideArtFrame;
         if (topBox.getVisibility() == View.VISIBLE) return topArtFrame;
@@ -596,6 +599,7 @@ final class TrackInfoReadoutController {
      *  {@link #currentArtFrame()} - used by the layout editor to give the text its own selection
      *  outline, separate from the artwork it used to be bundled with. */
     View currentTextFrame() {
+        if (editorPreviewTop) return topText;
         if ("Header".equals(lastMode)) return topText;
         if (sideBox.getVisibility() == View.VISIBLE) return sideText;
         if (topBox.getVisibility() == View.VISIBLE) return topText;
@@ -639,6 +643,14 @@ final class TrackInfoReadoutController {
         } catch (Throwable ignored) {
             return "Off";
         }
+    }
+
+    /** Temporarily renders the top arrangement for the layout editor without changing the saved
+     *  TRACK_INFO_POSITION preference. This also makes Off mode selectable in the editor. */
+    void setEditorPreview(boolean enabled) {
+        if (editorPreviewTop == enabled) return;
+        editorPreviewTop = enabled;
+        setMode(enabled ? "Top" : currentMode());
     }
 
     /**
@@ -757,6 +769,7 @@ final class TrackInfoReadoutController {
 
     private void setMode(String mode) {
         if (mode == null) mode = "Off";
+        if (editorPreviewTop) mode = "Top";
         // Two-column owns landscape art itself; every overlay stands down while engaged.
         boolean side = !twoColumn && sideModeEngaged(landscape, aspect, mode);
         boolean header = !twoColumn && !side && "Header".equals(mode);

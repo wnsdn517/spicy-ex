@@ -229,6 +229,14 @@ final class LyricsJumpToCurrentController {
         progressDrawable.fadeOut();
     }
 
+    /** Quickly but smoothly returns the countdown fill to empty when the lyric list is touched. */
+    void resetProgress() {
+        if (config != null && config.get(Settings.FOLLOW_CHIP_PROGRESS) && !"Icon".equals(style)) {
+            if (pill.getBackground() != progressDrawable) pill.setBackground(progressDrawable);
+            progressDrawable.reset();
+        }
+    }
+
     private static final class PillProgressDrawable extends Drawable {
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -261,6 +269,36 @@ final class LyricsJumpToCurrentController {
             animator.addUpdateListener(a -> {
                 progressAlpha = (Float) a.getAnimatedValue();
                 invalidateSelf();
+            });
+            animator.start();
+        }
+
+        void reset() {
+            if (progressFadeAnimator != null) {
+                progressFadeAnimator.cancel();
+                progressFadeAnimator = null;
+            }
+            if (progress <= 0.001f) {
+                progressAlpha = 1f;
+                invalidateSelf();
+                return;
+            }
+            ValueAnimator animator = ValueAnimator.ofFloat(progress, 0f);
+            progressFadeAnimator = animator;
+            animator.setDuration(150L);
+            animator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f));
+            animator.addUpdateListener(a -> {
+                progress = (Float) a.getAnimatedValue();
+                progressAlpha = 1f;
+                invalidateSelf();
+            });
+            animator.addListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator animation) {
+                    if (progressFadeAnimator == animation) progressFadeAnimator = null;
+                    progress = 0f;
+                    progressAlpha = 1f;
+                    invalidateSelf();
+                }
             });
             animator.start();
         }

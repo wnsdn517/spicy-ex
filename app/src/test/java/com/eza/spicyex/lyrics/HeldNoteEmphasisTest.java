@@ -103,9 +103,9 @@ public class HeldNoteEmphasisTest {
         float plain = LyricsAnimationApplier.wordMotionScale(false, true, false, 0.5f, false, 0f);
         float swollen = LyricsAnimationApplier.wordMotionScale(false, true, false, 0.5f, false, 1f);
         assertTrue(swollen > plain);
-        // Apple lift leaves scale alone except on a held note, which is where Apple does grow it.
+        // Apple lift is vertical-only; held-note enlargement belongs to non-Apple letter motion.
         assertEquals(1f, LyricsAnimationApplier.wordMotionScale(true, true, false, 0.5f, false, 0f), 0.0001f);
-        assertTrue(LyricsAnimationApplier.wordMotionScale(true, true, false, 0.5f, false, 1f) > 1f);
+        assertEquals(1f, LyricsAnimationApplier.wordMotionScale(true, true, false, 0.5f, false, 1f), 0.0001f);
     }
 
     private static AppliedLine line(long[][] spans) {

@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace 'com.eza.spicyex'
-    compileSdk 35
+    compileSdk providers.gradleProperty("SPICY_COMPILE_SDK").orElse("35").get().toInteger()
 
     // Keep focused JVM runs discoverable without moving the existing JUnit4 classes. Groups are
     // intentionally additive: the narrower lyrics-ai and lyrics-session groups sit inside the
@@ -91,7 +91,7 @@ android {
             .orElse("https://github.com/wnsdn517/spicy-ex/releases/download/v1/spicyex-language-models-v1.zip")
             .get()
         def modelPackSha256 = providers.gradleProperty("LANGUAGE_MODEL_PACK_SHA256")
-.orElse("")
+            .orElse("")
             .get()
         def externalLanguageModels = providers.gradleProperty("externalLanguageModels")
             .map { it.toBoolean() }
@@ -105,6 +105,14 @@ android {
     buildFeatures {
         aidl true
         buildConfig true
+    }
+
+    // The bridge contract is kept as Java source so ARM64 Termux builds do not require the
+    // host-only Android SDK aidl executable.
+    sourceSets {
+        main {
+            aidl.srcDirs = []
+        }
     }
 
     signingConfigs {
