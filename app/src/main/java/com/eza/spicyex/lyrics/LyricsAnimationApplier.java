@@ -121,6 +121,11 @@ public final class LyricsAnimationApplier {
                             ? 1f : wordMotionScale(
                             liftMotion, motionActive, positionMs >= groupEndMs, motionProgress,
                             strongWordPop, emphasis);
+                    // Apple lift is deliberately a word-level vertical motion only. Scaling and
+                    // letter-local enlargement belong to the other animation styles' letter
+                    // animator; applying them here deforms the whole word as one block.
+                    float targetScaleX = targetScale;
+                    float targetScaleY = targetScale;
                     float targetY = (grouped && individualWordMotion) || letterUnitMotion || appleLetterDriven
                             ? 0f : wordMotionY(
                             liftMotion, motionActive, positionMs >= groupEndMs, motionProgress,
@@ -130,9 +135,12 @@ public final class LyricsAnimationApplier {
                     float y = LyricsSyllableViewState.stepWordY(
                             motionOwner, targetY, deltaSeconds, directMotion);
                     LyricsSyllableViewState.updateTextPivot(
-                            motionOwner, grouped ? null : focus);
+                            motionOwner, grouped ? null : focus,
+                            grouped ? motionProgress : focusProgress);
+                    float scaleRatio = Math.max(0.001f, targetScale);
                     LyricsSyllableViewState.applyWordFrame(
-                            motionOwner, sink, scale, y, basePx);
+                            motionOwner, sink, scale * targetScaleX / scaleRatio,
+                            scale * targetScaleY / scaleRatio, y, basePx);
                     if (grouped) {
                         for (int wordIndex = groupStart; wordIndex <= groupEnd; wordIndex++) {
                             SyllableSegment segment = line.words.get(wordIndex);
@@ -149,14 +157,22 @@ public final class LyricsAnimationApplier {
                                     localSung, localProgress);
                             float localScale = LyricsSyllableViewState.stepLocalWordScale(
                                     segment, localScaleTarget, deltaSeconds, directMotion);
+                            float localScaleX = localScale;
+                            float localScaleY = localScale;
                             float localY = LyricsSyllableViewState.stepLocalWordY(
                                     segment, groupedLocalY(
                                             individualWordMotion && !localLetterUnits,
                                             liftMotion, appleLift, localActive,
                                             localSung, localProgress),
                                     deltaSeconds, directMotion);
+                            View localView = LyricsSyllableViewState.wordView(segment);
+                            if (localView != null && localView.getWidth() > 0) {
+                                localView.setPivotX(localView.getWidth()
+                                        * (localActive ? clamp01(localProgress) : 0.5f));
+                                localView.setPivotY(localView.getHeight());
+                            }
                             LyricsSyllableViewState.applyLocalWordFrame(segment, sink,
-                                    localScale, localScale, localY, basePx);
+                                    localScaleX, localScaleY, localY, basePx);
                         }
                     }
                 }
@@ -261,6 +277,8 @@ public final class LyricsAnimationApplier {
                             false, letterEmphasis)
                     : (letterEmphasis > 0f && active
                             ? LyricAnimations.emphasisScale(letterTimeScale, letterEmphasis) : 1f);
+            float targetLetterScaleX = targetLetterScale;
+            float targetLetterScaleY = targetLetterScale;
             float ownLetterY = letterUnitMotion
                     ? wordMotionY(liftMotion, motionActive, motionSung, motionProgress, appleLift,
                             letterEmphasis)
@@ -287,8 +305,11 @@ public final class LyricsAnimationApplier {
             float letterY = LyricsSyllableViewState.stepLetterY(letter, targetLetterY, deltaSeconds, directMotion);
             float letterGlow = LyricsSyllableViewState.stepLetterGlow(letter, targetLetterGlow, deltaSeconds);
             if (letter.view != null) letter.view.setGradientBandWidth(band);
-            LyricsSyllableViewState.applyLetterFrame(letter, sink, letterScale, letterY, basePx,
-                    letterGradient, letterGlow, targetLetterBrightness);
+            float letterRatio = Math.max(0.001f, targetLetterScale);
+            LyricsSyllableViewState.applyLetterFrame(letter, sink,
+                    letterScale * targetLetterScaleX / letterRatio,
+                    letterScale * targetLetterScaleY / letterRatio,
+                    letterY, basePx, letterGradient, letterGlow, targetLetterBrightness);
         }
     }
 
@@ -332,9 +353,9 @@ public final class LyricsAnimationApplier {
     static float wordMotionScale(boolean liftMotion, boolean active, boolean sung, float progress,
                                   boolean strong, float emphasis) {
         if (liftMotion) {
-            // Apple lift owns vertical motion and leaves scale alone - except for a held note,
-            // which is the one place Apple does grow the word.
-            return active && emphasis > 0f ? LyricAnimations.emphasisScale(progress, emphasis) : 1f;
+            // Apple lift owns vertical motion. Never scale the whole timed word here; enlargement
+            // is reserved for the non-Apple letter-unit animator below.
+            return 1f;
         }
         if (!active) return sung ? 1f : 0.95f;
         float base = strong ? LyricAnimations.wordScaleSplineStrong(progress)

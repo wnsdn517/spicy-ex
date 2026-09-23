@@ -52,6 +52,7 @@ public final class LanguageModelPack {
     private static final ExecutorService DOWNLOADS = Executors.newSingleThreadExecutor();
     private static volatile Context appContext;
     private static volatile boolean downloadStarted;
+    private static volatile Runnable readyListener;
     private static volatile DownloadStatus transientStatus = new DownloadStatus(Phase.IDLE, 0, "");
 
     private LanguageModelPack() {
@@ -60,6 +61,14 @@ public final class LanguageModelPack {
     public static void attachContext(Context context) {
         if (context == null) return;
         appContext = context.getApplicationContext();
+    }
+
+    public static void setReadyListener(Runnable listener) {
+        readyListener = listener;
+        // A screen can be created after the settings download has completed. In that case the
+        // one-shot download callback already happened, but the newly mounted document still
+        // needs a chance to reprocess against the installed resources.
+        if (listener != null && isReady()) listener.run();
     }
 
     public static void clearTransientState() {
@@ -73,7 +82,8 @@ public final class LanguageModelPack {
     }
 
     public static void requestDownload() {
-        if (appContext == null || BuildConfig.LANGUAGE_MODEL_PACK_URL.isEmpty()) return;
+        if (appContext == null) { transientStatus = new DownloadStatus(Phase.ERROR, 0, "NO_CONTEXT"); return; }
+        if (BuildConfig.LANGUAGE_MODEL_PACK_URL.isEmpty()) { transientStatus = new DownloadStatus(Phase.ERROR, 0, "NO_DOWNLOAD_URL"); return; }
         if (isReady()) return;
         transientStatus = new DownloadStatus(Phase.DOWNLOADING, 0, "");
         prefetch();
@@ -115,6 +125,7 @@ public final class LanguageModelPack {
                 downloadAndInstall();
             } catch (Throwable failure) {
                 transientStatus = new DownloadStatus(Phase.ERROR, 0, describe(failure));
+            } finally {
                 downloadStarted = false;
             }
         });
@@ -182,6 +193,8 @@ public final class LanguageModelPack {
         downloadStarted = false;
         JapaneseReadingEngine.shared().trimMemory();
         LanguageDetectorManager.shared().trimMemory();
+        Runnable listener = readyListener;
+        if (listener != null) listener.run();
     }
 
     private static void unzip(File archive, File destination) throws IOException {

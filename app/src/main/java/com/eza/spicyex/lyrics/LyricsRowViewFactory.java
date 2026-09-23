@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import com.eza.spicyex.lyrics.reading.ReadingModels.TimedReadingUnit;
+import com.eza.spicyex.lyrics.reading.ReadingModels.ReadingUnit;
+import com.eza.spicyex.lyrics.reading.CodePointRanges;
 import static com.eza.spicyex.lyrics.LyricUtils.isBlank;
 
 /** Builds mounted Android views for applied lyric rows. */
@@ -146,7 +148,12 @@ public final class LyricsRowViewFactory {
                 && exactTimedReading
                 && (showJapaneseRomaji || showChineseRomaji || showGenericRomaji);
         // Ruby groups remain visual-only; timed provider children keep their existing word path.
-        boolean useSyllableWords = !indicLine && (hasRealTimedWords || (hasSyllableWords
+        // A ruby run can span two timed words. Per-word slicing rejects that run on both sides,
+        // silently producing no furigana, so keep such lines in one TextView.
+        boolean rubyRequiresLineLayout = showJapaneseFurigana
+                && FuriganaText.hasRubyCrossingWordBoundaries(line);
+        boolean useSyllableWords = !indicLine && !rubyRequiresLineLayout
+                && (hasRealTimedWords || (hasSyllableWords
                 && (options.wordLevelFill || options.lineLevelFillSentence || showJapaneseFurigana || showAlignedRomaji)));
         // Gradient direction is a document-level choice. Do not switch one row to horizontal
         // merely because that row has timed syllables; mixed rows otherwise render with different
@@ -530,10 +537,44 @@ public final class LyricsRowViewFactory {
                                     RomanizedWordProvider romanizedWordProvider) {
         TimedTextLookup planned = timedTextForSpan(timedBySpanId, spanId(seg, wordIndex));
         if (planned.found) return planned.text;
+        // A line-fallback plan (or an older cached plan) can legitimately have no timingRefs,
+        // and provider adapters can rewrite span IDs while preserving canonical ranges. Resolve
+        // that case by source range before falling back to the legacy provider callback; otherwise
+        // the whole pronunciation either disappears or gets assigned to the first word.
+        String ranged = plannedReadingForSegment(line, seg, wordIndex);
+        if (!isBlank(ranged)) return ranged;
         if (seg != null && !isBlank(seg.romanizedText)) return seg.romanizedText;
         return romanizedWordProvider == null ? ""
                 : LyricUtils.safe(romanizedWordProvider.romanizedText(
                 line, seg, options == null ? "" : options.documentText));
+    }
+
+    private static String plannedReadingForSegment(AppliedLine line, SyllableSegment segment,
+                                                   int fallbackIndex) {
+        if (line == null || line.readingRenderPlan == null || segment == null
+                || line.readingRenderPlan.readingUnits == null) return "";
+        int start = segment.canonicalStartCp;
+        int end = segment.canonicalEndCp;
+        if (start < 0 || end <= start) {
+            int[] range = FuriganaText.wordRange(line, segment, fallbackIndex, 0);
+            start = CodePointRanges.utf16IndexToCodePointOffset(line.text, range[0]);
+            end = CodePointRanges.utf16IndexToCodePointOffset(line.text, range[1]);
+        }
+        StringBuilder out = new StringBuilder();
+        for (ReadingUnit unit : line.readingRenderPlan.readingUnits) {
+            if (unit == null || unit.canonicalRange == null || isBlank(unit.text)) continue;
+            int unitStart = unit.canonicalRange.startCp;
+            int unitEnd = unit.canonicalRange.endCp;
+            boolean overlaps = unitEnd > start && unitStart < end;
+            // A line-level fallback belongs to the first source span only; attaching it to every
+            // word is the old "all pronunciation in one word" failure in reverse.
+            boolean wholeLineFallback = line.words != null && line.words.size() > 1
+                    && unitStart == 0 && unitEnd >= CodePointRanges.length(line.text);
+            if (!overlaps || wholeLineFallback) continue;
+            if (out.length() > 0 && !Character.isWhitespace(out.charAt(out.length() - 1))) out.append(' ');
+            out.append(unit.text);
+        }
+        return out.toString();
     }
 
     private static List<String> romanizedWordTexts(
@@ -708,8 +749,16 @@ public final class LyricsRowViewFactory {
             // timing atom intact, but let the glyphs wrap inside its bounded view instead of
             // drawing one long line beyond the screen.
             word.setMaxWidth(Math.max(1, Math.round(contentWidthPx)));
+            word.setMinWidth(0);
+            word.setHorizontallyScrolling(false);
+            word.setEllipsize(null);
             word.setMaxLines(Integer.MAX_VALUE);
             applyAdaptiveWrapping(word, true, true);
+            // Keep one timed segment, but let Android split its glyphs across measured lines.
+            // This prevents a long CJK segment from expanding past the viewport during scale.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                word.setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY);
+            }
         } else {
             word.setMaxLines(1);
         }
@@ -753,7 +802,9 @@ private void buildLineLevelMain(LinearLayout row, AppliedLine line, boolean show
         int color = line.bgLine ? Color.rgb(170, 170, 170) : Color.WHITE;
 
         // Extract mini lyric from parentheses
-        String[] textParts = extractMainAndMiniText(line.text);
+        String[] textParts = showJapaneseFurigana
+                ? new String[]{LyricUtils.safe(line.text), ""}
+                : extractMainAndMiniText(line.text);
         String mainTextStr = textParts[0];
         String miniTextStr = textParts[1];
 
@@ -799,12 +850,15 @@ private void buildLineLevelMain(LinearLayout row, AppliedLine line, boolean show
             mini.setSelfGlow(true);
             mini.setIncludeFontPadding(true);
             mini.setGravity(line.oppositeAligned ? Gravity.END : Gravity.START);
-            mini.setMaxLines(1);
+            // Background lines projected into the compact card are newline-separated mini rows.
+            // Keep them vertical instead of allowing the TextView to collapse the projection
+            // into one horizontal line.
+            mini.setMaxLines(Math.max(1, Math.min(3, miniTextStr.split("\\n", -1).length)));
             mini.setVerticalGradient(lineLevelFillTopDown);
 
             // Add mini lyric below main with small top margin
             LinearLayout.LayoutParams miniLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             miniLp.topMargin = dp(2);
             textContainer.addView(mini, miniLp);
 
@@ -822,27 +876,14 @@ private void buildLineLevelMain(LinearLayout row, AppliedLine line, boolean show
             return new String[]{"", ""};
         }
 
-        // Extract content between parentheses or quotes
-        int parenStart = text.indexOf('(');
-        int parenEnd = text.lastIndexOf(')');
-        int quoteStart = text.indexOf('"');
-        int quoteEnd = text.lastIndexOf('"');
-
-        // Check for parentheses first
-        if (parenStart >= 0 && parenEnd > parenStart) {
-            String miniText = text.substring(parenStart + 1, parenEnd).trim();
-            String mainText = text.substring(0, parenStart) + text.substring(parenEnd + 1);
-            return new String[]{mainText.trim(), miniText};
+        int newline = text.indexOf('\n');
+        if (newline >= 0) {
+            return new String[]{text.substring(0, newline).trim(),
+                    text.substring(newline + 1).trim()};
         }
 
-        // Check for double quotes (but only if they form a pair and aren't at start/end for Korean quotes)
-        if (quoteStart >= 0 && quoteEnd > quoteStart && quoteStart > 0 && quoteEnd < text.length() - 1) {
-            String miniText = text.substring(quoteStart + 1, quoteEnd).trim();
-            String mainText = text.substring(0, quoteStart) + text.substring(quoteEnd + 1);
-            return new String[]{mainText.trim(), miniText};
-        }
-
-        // No parentheses or valid quote pair found
+        // Parentheses and quotation marks are lyric content, not mini-row delimiters. Only the
+        // explicit projection newline creates a compact-card mini row.
         return new String[]{text, ""};
     }
 

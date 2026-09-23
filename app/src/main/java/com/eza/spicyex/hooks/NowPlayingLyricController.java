@@ -700,7 +700,7 @@ final class NowPlayingLyricController {
 
     private static void appendMiniPart(StringBuilder target, String value) {
         if (isBlank(value)) return;
-        if (target.length() > 0) target.append(' ');
+        if (target.length() > 0) target.append('\n');
         target.append(value);
     }
 

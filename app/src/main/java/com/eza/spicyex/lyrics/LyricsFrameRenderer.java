@@ -176,6 +176,18 @@ public final class LyricsFrameRenderer {
                         line, lineGradient, appleLineDocument ? 0f : lineGlow,
                         lineState.brightnessTarget,
                         config.appleDimPassed && lineState.active ? 64f : Float.NaN);
+            } else if (line.words != null && !line.words.isEmpty()) {
+                View wordContainer = LyricsSyllableViewState.parentView(line.words.get(0));
+                if (wordContainer != null) {
+                    float lineScaleTarget = lineLevelBounceEnabled(config, line)
+                            ? lineState.scaleTarget : 1f;
+                    float scale = LyricsAnimationApplier.stepLineScale(line, lineScaleTarget, deltaSeconds);
+                    if (wordContainer.getWidth() > 0 && wordContainer.getHeight() > 0) {
+                        wordContainer.setPivotX(line.oppositeAligned ? wordContainer.getWidth() : 0f);
+                        wordContainer.setPivotY(wordContainer.getHeight() * 0.5f);
+                    }
+                    styleBatcher.applyScaleIfChanged(wordContainer, scale, scale);
+                }
             }
             if (line.dotLine) {
                 if (lineState.active) {
@@ -303,6 +315,7 @@ public final class LyricsFrameRenderer {
     }
 
     private boolean lineLevelBounceEnabled(LyricsRenderConfig config, AppliedLine line) {
+        if (config != null && config.appleStyle) return true;
         return config != null && config.wordBounceEnabled
                 && "All synced rows".equals(config.wordBounceScope);
     }

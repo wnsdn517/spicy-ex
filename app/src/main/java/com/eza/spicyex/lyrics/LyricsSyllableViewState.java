@@ -245,13 +245,26 @@ public final class LyricsSyllableViewState {
     }
 
     public static void updateTextPivot(SyllableSegment segment, SyllableSegment focusSegment) {
+        updateTextPivot(segment, focusSegment, 0.5f);
+    }
+
+    /**
+     * Places the transform origin at the currently sung position inside the active word. This
+     * keeps Apple's lift anchored to the karaoke edge instead of scaling the whole word around
+     * its centre (which looks like a generic pop and makes the progress feel disconnected).
+     */
+    public static void updateTextPivot(SyllableSegment segment, SyllableSegment focusSegment,
+                                       float focusProgress) {
         View motion = motionView(segment);
         if (segment == null || !state(segment).motionOwner || motion == null
                 || motion.getHeight() <= 0) return;
         View focus = focusSegment == null ? null : state(focusSegment).view;
         float requestedPivot = motion.getWidth() / 2f;
         if (focus != null && focus != motion && focus.getWidth() > 0) {
-            requestedPivot = offsetWithin(focus, motion) + focus.getWidth() / 2f;
+            requestedPivot = offsetWithin(focus, motion)
+                    + focus.getWidth() * Math.max(0f, Math.min(1f, focusProgress));
+        } else if (focus == motion && motion.getWidth() > 0) {
+            requestedPivot = motion.getWidth() * Math.max(0f, Math.min(1f, focusProgress));
         }
         float pivotX = horizontalMotionPivot(motion.getLeft(), motion.getRight(),
                 motion.getWidth(), motion.getParent() instanceof View
@@ -279,10 +292,15 @@ public final class LyricsSyllableViewState {
     }
 
     public static void applyWordFrame(SyllableSegment segment, LyricsAnimationApplier.StyleSink sink,
-                                      float scale, float y, float basePx) {
+                                       float scale, float y, float basePx) {
+        applyWordFrame(segment, sink, scale, scale, y, basePx);
+    }
+
+    public static void applyWordFrame(SyllableSegment segment, LyricsAnimationApplier.StyleSink sink,
+                                       float scaleX, float scaleY, float y, float basePx) {
         View motion = motionView(segment);
         if (segment == null || !state(segment).motionOwner || motion == null || sink == null) return;
-        sink.applyScale(motion, scale, scale);
+        sink.applyScale(motion, scaleX, scaleY);
         sink.applyTranslationY(motion, basePx * y);
         sink.applyAlpha(motion, 1.0f);
     }
@@ -371,14 +389,20 @@ public final class LyricsSyllableViewState {
 
     public static void applyLetterFrame(AnimatedLetterState letter, LyricsAnimationApplier.StyleSink sink,
                                         float scale, float y, float basePx, float gradient, float glow) {
-        applyLetterFrame(letter, sink, scale, y, basePx, gradient, glow, 1f);
+        applyLetterFrame(letter, sink, scale, scale, y, basePx, gradient, glow, 1f);
     }
 
     public static void applyLetterFrame(AnimatedLetterState letter, LyricsAnimationApplier.StyleSink sink,
                                         float scale, float y, float basePx, float gradient, float glow,
                                         float brightness) {
+        applyLetterFrame(letter, sink, scale, scale, y, basePx, gradient, glow, brightness);
+    }
+
+    public static void applyLetterFrame(AnimatedLetterState letter, LyricsAnimationApplier.StyleSink sink,
+                                        float scaleX, float scaleY, float y, float basePx,
+                                        float gradient, float glow, float brightness) {
         if (letter == null || letter.view == null || sink == null) return;
-        sink.applyScale(letter.view, scale, scale);
+        sink.applyScale(letter.view, scaleX, scaleY);
         sink.applyTranslationY(letter.view, basePx * y * 2f);
         sink.applyAlpha(letter.view, 1.0f);
         letter.view.setBrightnessMultiplier(brightness);

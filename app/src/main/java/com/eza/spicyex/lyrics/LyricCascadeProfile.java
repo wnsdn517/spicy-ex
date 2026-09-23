@@ -37,7 +37,7 @@ public final class LyricCascadeProfile {
      * rest start gives, and the whole cascade read as snapping rather than travelling. The wave is
      * carried by the stagger and the per-row spring instead; this only tilts it.
      */
-    private static final float LEAD_LAUNCH_PER_PX = 2.0f;
+    private static final float LEAD_LAUNCH_PER_PX = 2.6f;
     /** Speed away from rest given to the furthest rows - the visible sag behind the wave. Less
      *  sensitive than the lead: it starts the row slowly by definition, since it works against the
      *  spring rather than with it. */
@@ -51,7 +51,7 @@ public final class LyricCascadeProfile {
     /** How much slower the furthest rows are than the focused one. */
     private static final float FAR_FREQUENCY_DROP = 0.18f;
     /** How much more damped - so less lively - the furthest rows are. */
-    private static final float FAR_DAMPING_GAIN = 0.10f;
+    private static final float FAR_DAMPING_GAIN = 0.08f;
 
     public final float delaySeconds;
     public final float frequencyHz;

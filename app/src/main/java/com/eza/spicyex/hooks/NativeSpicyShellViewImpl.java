@@ -171,7 +171,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     /** Used for a hop of roughly one row; blended toward the frequency above as the jump grows
      *  (see scrollSpringFrequency). A line-to-line advance has to keep up with the song. */
     private static final float SCROLL_SPRING_NEAR_FREQUENCY_HZ = 1.55f;
-    private static final float SCROLL_SPRING_DAMPING = 0.97f;
+    private static final float SCROLL_SPRING_DAMPING = 0.76f;
     // Returning to the playing line after reading ahead. Livelier than an ordinary advance on
     // purpose: this one is a deliberate request, and Apple answers it with motion that clearly
     // travels rather than a polite ease. Lower damping leaves a touch of overshoot at the end.
@@ -302,6 +302,11 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private final boolean twoColumn;
     private ViewGroup chromeHeader;
     private LyricsShellChromeController.ChromeViews chromeViews;
+    private LyricsLayoutEditController.EditorHandle layoutEditorHandle;
+    private boolean chromeLayoutApplied;
+    private boolean chromeLayoutTop;
+    private boolean chromeLayoutLandscape;
+    private int chromeLayoutSize = -1;
     private final Runnable hideChromeRunnable = this::hideChrome;
     private boolean scrollInProgress;
     private boolean scrollSettleScheduled;
@@ -404,10 +409,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         if (skipGapController != null) skipGapController.onPreferenceChanged();
         applyColumnArtRadius();
         if (chromeViews != null) {
-            LyricsShellChromeController.applyTopMode(chromeViews, isTopReadout(),
-                    chromeButtonDp(), isLandscape());
             LyricsShellChromeController.applyClusterPosition(chromeViews,
                     "Left".equals(config.get(Settings.CHROME_CLUSTER_POSITION)));
+            chromeLayoutApplied = false;
+            refreshChromeClusterSpacing();
             applyBackVisibility();
         }
         revealChrome();
@@ -509,7 +514,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 () -> jumpToCurrentController == null ? null : jumpToCurrentController.view(),
                 () -> { if (jumpToCurrentController != null) jumpToCurrentController.showForEditing(); },
                 () -> { if (jumpToCurrentController != null) jumpToCurrentController.restoreAfterEditing(); });
-        new LyricsLayoutEditController.Request()
+        if (trackInfoController != null) trackInfoController.setEditorPreview(true);
+        layoutEditorHandle = new LyricsLayoutEditController.Request()
                 .activity(activity)
                 .shellRoot(this)
                 .artFrameSupplier(() -> twoColumn && columnArtFrame != null
@@ -520,14 +526,28 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 .focusArea(lyricsFrame)
                 .mountedRowsHostSupplier(() -> mountedRowsHost)
                 .chromeClusterSupplier(() -> chromeViews == null ? null : chromeViews.configCluster)
+                .backButtonSupplier(() -> chromeViews == null ? null : chromeViews.back)
                 .landscape(isLandscape())
                 .applyPreferences(this::refreshPreferences)
                 .onChromeReveal(this::revealChrome)
+                .onClosed(() -> layoutEditorHandle = null)
                 .enableDemoData(this::enableDemoMode)
                 .disableDemoData(this::disableDemoMode)
                 .skipChip(skipChip)
                 .followChip(followChip)
                 .show();
+        if (layoutEditorHandle == null && trackInfoController != null) {
+            trackInfoController.setEditorPreview(false);
+        }
+    }
+
+    private boolean consumeLayoutEditorBack() {
+        LyricsLayoutEditController.EditorHandle editor = layoutEditorHandle;
+        if (editor == null || !editor.onBackPressed()) {
+            layoutEditorHandle = null;
+            return false;
+        }
+        return true;
     }
 
     /** Layout editor's Demo toggle: swaps in a synthetic track/artwork/lyrics document so the
@@ -537,6 +557,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private void enableDemoMode() {
         if (demoModeActive) return;
         demoModeActive = true;
+        if (trackInfoController != null) trackInfoController.setEditorPreview(true);
         if (demoTrack == null) demoTrack = DemoLyricsContent.demoTrack();
         if (demoArtBitmap == null) demoArtBitmap = DemoLyricsContent.demoArtBitmap();
         document = DemoLyricsContent.demoDocument();
@@ -562,11 +583,15 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     /** Reverts everything {@link #enableDemoMode} touched; the next real per-frame update (now
      *  unfrozen) repaints title/artwork/lyrics from the real track normally. */
     private void disableDemoMode() {
-        if (!demoModeActive) return;
+        if (!demoModeActive) {
+            if (trackInfoController != null) trackInfoController.setEditorPreview(false);
+            return;
+        }
         demoModeActive = false;
         skipGapController.hide();
         jumpToCurrentController.restoreAfterEditing();
         if (trackInfoController != null) trackInfoController.clearDemoArt();
+        if (trackInfoController != null) trackInfoController.setEditorPreview(false);
         if (twoColumn && columnArt != null) {
             clearColumnArtwork();
             columnArt.setVisibility(GONE);
@@ -778,12 +803,21 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 this::enterLayoutEditMode, this::resyncLyricsTiming, TAG);
         this.emptyStateController = new LyricsShellEmptyStateController(activity, config, textFactory);
         this.shellLifecycle = new LyricsShellLifecycle(activity, () -> {
+            if (consumeLayoutEditorBack()) return;
             host.markExplicitLyricsExit(activity);
             activity.finish();
         });
         SharedPreferences prefs = activity.getSharedPreferences("SpotifyPlus", Context.MODE_PRIVATE);
         preferences = prefs;
         renderConfig = LyricsRenderConfig.read(activity, config);
+        // SettingsStore normally attaches this context when the settings panel is opened, but
+        // lyrics can be mounted first (or restored from a warm Spotify process). Attach it here as
+        // well so post-install model packs are visible to the tokenizer/detector on every entry
+        // path, not only after the user has visited Settings.
+        com.eza.spicyex.lyrics.LanguageModelPack.attachContext(activity);
+        com.eza.spicyex.lyrics.SpicyJapaneseChineseProcessor.attachContext(activity);
+        com.eza.spicyex.lyrics.LanguageModelPack.setReadyListener(
+                () -> handler.post(this::reprocessForInstalledLanguageModels));
         autoResumeFollow = config.get(Settings.AUTO_RESUME_FOLLOW);
         slideAnimationEnabled = readSlideEnabled();
         com.eza.spicyex.lyrics.FuriganaText.applySettings(
@@ -1007,6 +1041,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 isTopReadout(),
                 "Left".equals(config.get(Settings.CHROME_CLUSTER_POSITION)),
                 () -> {
+                    if (consumeLayoutEditorBack()) return;
                     host.markExplicitLyricsExit(activity);
                     activity.finish();
                 },
@@ -1031,7 +1066,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         updateToggleVisuals();
                     renderDocument();
                 },
-                () -> settingsDialogController.show(),
+                () -> {
+                    XpLog.log(TAG + " settings click callback");
+                    settingsDialogController.show();
+                },
                 com.eza.spicyex.ui.ActionIconDrawable.likedSongsKind(likedMode),
                 this::onLikeTapped);
         chromeHeader = chrome.header;
@@ -1042,6 +1080,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         likeButton = chrome.likeButton;
         if (chrome.settingsButton != null) {
             chrome.settingsButton.setOnLongClickListener(v -> {
+                XpLog.log(TAG + " settings long-click callback -> layout editor");
                 enterLayoutEditMode();
                 return true;
             });
@@ -1223,7 +1262,12 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // siblings of chromeHeader on this same shellRoot, so in Top position they paint (and
         // steal touches) over the roman/translate/like/settings cluster wherever the two
         // overlap. The chrome row must stay the topmost child so those buttons stay reachable.
-        chromeHeader.bringToFront();
+        // While the layout editor is open, its dock capture deliberately sits above this header
+        // so the real settings/reading actions cannot fire while selecting the grouped Dock
+        // element. Outside the editor, keep the header above readout overlays as usual.
+        if (findViewWithTag(LyricsLayoutEditController.OVERLAY_TAG) == null) {
+            chromeHeader.bringToFront();
+        }
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         scrollLp.topMargin = 0;
         rowContainer().addView(lyricsFrame, scrollLp);
@@ -1322,6 +1366,15 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     void stop() {
         dbgEnter("NativeSpicyShellView.stop");
         running = false;
+        // The layout editor is an in-shell full-screen touch layer. It normally removes itself
+        // through Save/Cancel, but a lyrics screen teardown can bypass that path. Remove any
+        // stale instance before this shell is reused so it can never intercept the next screen's
+        // settings/reading touches.
+        View staleLayoutEditor = findViewWithTag(LyricsLayoutEditController.OVERLAY_TAG);
+        if (staleLayoutEditor != null && staleLayoutEditor.getParent() instanceof ViewGroup) {
+            ((ViewGroup) staleLayoutEditor.getParent()).removeView(staleLayoutEditor);
+        }
+        layoutEditorHandle = null;
         seekWatchUntilMs = -1L;
         refreshAudioListening();
         showStatusBar();
@@ -1369,6 +1422,11 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private void revealChrome() {
         if (chromeHeader == null) return;
         handler.removeCallbacks(hideChromeRunnable);
+        // Track/art readout overlays can be reattached after the header (preference changes,
+        // rotation, and layout-editor entry all do this). Restore the real chrome's z-order at
+        // the same moment as its visibility so the first DOWN reaches the settings button and
+        // Android can observe its long-press sequence.
+        chromeHeader.bringToFront();
         chromeHeader.setVisibility(View.VISIBLE);
         if (chromeHeader.getAlpha() < 0.99f && !chromeRevealAnimating) {
             chromeRevealAnimating = true;
@@ -1871,7 +1929,14 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
 
     private String japaneseReadingMode() {
         if (demoModeActive) return "furigana_romaji";
-        return transliterationSession == null ? "" : transliterationSession.japaneseReadingMode();
+        String mode = transliterationSession == null ? "" : transliterationSession.japaneseReadingMode();
+        // The session can briefly be created before the preference snapshot is available (and
+        // older sessions may retain an empty mode after a model reload). Do not let that transient
+        // state suppress ruby while the render config already has a valid Japanese mode.
+        if (mode == null || mode.trim().isEmpty()) {
+            mode = renderConfig == null ? "" : renderConfig.defaultJapaneseReadingMode;
+        }
+        return mode == null ? "" : mode;
     }
 
     private String chineseMode() {
@@ -2779,16 +2844,17 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             // as choppy/disjointed rather than smooth, and at this distance the cascade alone was
             // already the "spring" motion, not something that also needed a scroll under it.
             // Hand the cascade the delta the ScrollView ACTUALLY moved, not the requested one:
-            // scrollTo() clamps at the ends of the song, and compensating for a movement that was
-            // clamped away would slide every row by a phantom offset on the first and last lines.
             returnToCurrentPending = false;
             pendingArrivalCascade = false;
             scrollSpring = null;
             clearScrollSubpixel();
+            // Prime the row offsets before moving the ScrollView. Applying the compensation after
+            // scrollTo() leaves one traversal frame where the column has jumped and the rows have
+            // not caught up yet, which is the visible Apple-slide twitch at each lyric boundary.
+            startRowCascade(target - oldScroll);
             applyingLyricScroll = true;
             lyricsScroll.scrollTo(0, target);
             applyingLyricScroll = false;
-            startRowCascade(lyricsScroll.getScrollY() - oldScroll);
             return;
         }
         // Everything else - the Apple slide turned off, or a jump too far for the cascade to
@@ -2873,10 +2939,9 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private float elasticDamping(float baseDamping) {
         float strengthPct = config != null ? (float) config.get(Settings.APPLE_SPRING_STRENGTH) : 100f;
         // Strength > 100% reduces damping for more bounce; < 100% increases it toward 1.0 (dead).
-        // Widened range (0.35x multiplier) for a much more dramatic feel when set to high strength.
         float elasticity = (strengthPct - 100f) / 100f;
-        float adjusted = baseDamping - elasticity * 0.35f;
-        return Math.max(0.55f, Math.min(1f, adjusted));
+        float adjusted = baseDamping - elasticity * 0.25f;
+        return Math.max(0.45f, Math.min(0.95f, adjusted));
     }
 
     /** Compensates for the "slower" feel of low-damping bouncy springs by slightly raising 
@@ -3010,10 +3075,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // simulated time per real frame - double speed on a 120Hz panel (snap, then twitch) and
         // half speed on a phone dropping frames (sluggish stutter). With the delta fixed at the
         // source, the spring can be tuned for how it should look rather than around that.
-        float baseFrequency = (apple ? (landscape ? 1.72f : 1.85f) : ROW_CASCADE_FREQUENCY_HZ)
+        float baseFrequency = (apple ? (landscape ? 1.88f : 2.05f) : ROW_CASCADE_FREQUENCY_HZ)
                 * speedMul * elasticFrequencyMultiplier();
         float baseDamping = apple
-                ? elasticDamping(landscape ? 0.78f : 0.74f)
+                ? elasticDamping(landscape ? 0.74f : 0.70f)
                 : ROW_CASCADE_DAMPING;
         for (int i : rowMountController.mountedIndices()) {
             if (i < 0 || i >= document.appliedLines.size()) continue;
@@ -3953,6 +4018,39 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         try {
+            if (ev != null && chromeViews != null && chromeViews.settingsButton != null
+                    && (ev.getActionMasked() == MotionEvent.ACTION_DOWN
+                    || ev.getActionMasked() == MotionEvent.ACTION_UP
+                    || ev.getActionMasked() == MotionEvent.ACTION_CANCEL)) {
+                View settings = chromeViews.settingsButton;
+                int[] location = new int[2];
+                settings.getLocationOnScreen(location);
+                float x = ev.getRawX();
+                float y = ev.getRawY();
+                boolean inside = x >= location[0] && x < location[0] + settings.getWidth()
+                        && y >= location[1] && y < location[1] + settings.getHeight();
+                if (inside) {
+                    String top = "none";
+                    for (int i = getChildCount() - 1; i >= 0; i--) {
+                        View child = getChildAt(i);
+                        if (child == null || child.getVisibility() != View.VISIBLE
+                                || child.getAlpha() <= 0.01f) continue;
+                        int[] childLocation = new int[2];
+                        child.getLocationOnScreen(childLocation);
+                        if (x >= childLocation[0] && x < childLocation[0] + child.getWidth()
+                                && y >= childLocation[1] && y < childLocation[1] + child.getHeight()) {
+                            top = child.getClass().getSimpleName() + "#" + i
+                                    + (child.getTag() == null ? "" : " tag=" + child.getTag());
+                            break;
+                        }
+                    }
+                    XpLog.log(TAG + " settings touch action=" + ev.getActionMasked()
+                            + " inside=true top=" + top
+                            + " editor=" + (findViewWithTag(LyricsLayoutEditController.OVERLAY_TAG) != null)
+                            + " buttonVisible=" + settings.getVisibility()
+                            + " buttonEnabled=" + settings.isEnabled());
+                }
+            }
             if (ev != null && ev.getActionMasked() == MotionEvent.ACTION_DOWN
                     && trackInfoController != null
                     && !trackInfoController.containsArtTouch(ev.getRawX(), ev.getRawY())) {
@@ -3969,9 +4067,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // mid-scroll fade-out reads as the chip being unexpectedly yanked away from its current
         // place instead of a deliberate follow reset.
         boolean show = document != null && followState.activeIndex() >= 0
-                && followState.isHoldingNow() && !followState.isTouching();
-        boolean chipAlreadyVisible = jumpToCurrentController.isVisible();
-        boolean shouldShow = show && (!scrollInProgress || chipAlreadyVisible);
+                && followState.isHoldingNow();
+        boolean shouldShow = show;
 
         jumpToCurrentController.update(shouldShow);
 
@@ -3980,7 +4077,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                     : config.get(Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS);
             jumpToCurrentController.setProgress(followState.autoResumeProgress(delaySeconds * 1000L));
         } else if (shouldShow) {
-            jumpToCurrentController.setProgress(0f);
+            jumpToCurrentController.fadeProgress();
         }
     }
     
@@ -4117,6 +4214,24 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             updateToggleVisuals();
             renderDocument();
         }
+    }
+
+    /**
+     * A downloaded language pack changes the tokenizer and dictionary underneath an already
+     * mounted document. A plain redraw used to reuse its old, often empty, Sound projection, so
+     * installing the pack looked successful in Settings while furigana/reading never appeared
+     * until the next track or a manual toggle. Invalidate only the local Sound projection and run
+     * the normal serialized local pipeline again; translations and canonical lyrics stay intact.
+     */
+    private void reprocessForInstalledLanguageModels() {
+        if (!running || document == null || document.lines == null || document.lines.isEmpty()) return;
+        if (!showRomanization()) {
+            // The pack supplies data, not an implicit visibility preference.
+            updateToggleVisuals();
+            return;
+        }
+        LyricsDocumentProcessor.resetSoundLayer(activity.getApplicationContext(), document);
+        reprocessLocalModeOnly("language models installed");
     }
 
     private void reprocessTranslationForConfig(String reason) {
@@ -4297,6 +4412,24 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         refreshLikedButton(track);
     }
 
+    private void refreshChromeClusterSpacing() {
+        if (chromeViews == null) return;
+        boolean top = isTopReadout();
+        boolean landscape = isLandscape();
+        int size = chromeButtonDp();
+        // applyTopMode reorders children with remove/add. Repeating that on every vsync changes
+        // the View touch target between DOWN and UP, which cancels ordinary clicks and long
+        // presses intermittently. Rebuild only when the actual chrome layout inputs changed.
+        if (chromeLayoutApplied && chromeLayoutTop == top
+                && chromeLayoutLandscape == landscape && chromeLayoutSize == size) return;
+        LyricsShellChromeController.applyTopMode(chromeViews, top, size, landscape);
+        chromeLayoutApplied = true;
+        chromeLayoutTop = top;
+        chromeLayoutLandscape = landscape;
+        chromeLayoutSize = size;
+    }
+
+
     private void refreshLikedButton(SpotifyTrack track) {
         if (likeButton == null) return;
         com.eza.spicyex.ui.ActionIconDrawable.Kind kind =
@@ -4304,13 +4437,21 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // An ad (or any non-song, e.g. a podcast episode) can never be saved - showing the button
         // there just invites a tap that does nothing but pop the "unavailable" toast.
         if (kind == null || (track != null && !SpotifyCollectionAction.isSong(track))) {
-            likeButton.setVisibility(View.GONE);
+            if (likeButton.getVisibility() != View.GONE) {
+                likeButton.setVisibility(View.GONE);
+                chromeLayoutApplied = false;
+            }
+            refreshChromeClusterSpacing();
             lastLikedSaved = null;
             lastLikedKind = null;
             pendingLikedUri = "";
             return;
         }
-        likeButton.setVisibility(View.VISIBLE);
+        if (likeButton.getVisibility() != View.VISIBLE) {
+            likeButton.setVisibility(View.VISIBLE);
+            chromeLayoutApplied = false;
+        }
+        refreshChromeClusterSpacing();
         boolean saved = track != null && track.saved;
         if (track != null && !pendingLikedUri.isEmpty()) {
             if (!pendingLikedUri.equals(safe(track.uri))) {

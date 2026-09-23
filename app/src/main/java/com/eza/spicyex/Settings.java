@@ -594,7 +594,7 @@ public final class Settings {
     );
 
     public static final IntegerSetting EXTRA_DARK_BACKGROUND = intSetting(
-            "lyric_extra_dark_background", INTERNAL, "Darken background", 35, 0, 100, 5
+            "lyric_extra_dark_background", INTERNAL, "Force dark background", 35, 0, 100, 5
     );
 
     // Only meaningful when BACKGROUND_STYLE is ANIMATED_TEXTURE - the AGSL noise shader renders
