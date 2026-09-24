@@ -560,7 +560,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     /** Back closes the lyric share sheet first, like any other sheet over the lyrics. */
     private boolean consumeShareSheetBack() {
         if (shareCardController == null || !shareCardController.isShowing()) return false;
-        shareCardController.dismiss();
+        // The line picker first, then the sheet.
+        if (!shareCardController.closePickerIfOpen()) shareCardController.dismiss();
         return true;
     }
 
