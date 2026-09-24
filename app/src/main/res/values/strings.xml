@@ -203,7 +203,10 @@
     <string name="share_close">Close</string>
     <string name="share_design_label">Design</string>
     <string name="share_backdrop_label">Background</string>
-    <string name="share_to">Share to</string>
+    <string name="share_text_label">Text</string>
+    <string name="share_text_align">Align</string>
+    <string name="share_text_position">Position</string>
+    <string name="share_text_auto">Design default</string>
     <string name="share_instagram_story">Instagram Stories</string>
     <string name="share_facebook_story">Facebook Stories</string>
     <string name="share_copy_link">Copy link</string>

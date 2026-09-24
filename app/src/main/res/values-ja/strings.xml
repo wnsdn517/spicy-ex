@@ -188,7 +188,10 @@
     <string name="share_close">閉じる</string>
     <string name="share_design_label">デザイン</string>
     <string name="share_backdrop_label">背景</string>
-    <string name="share_to">共有先</string>
+    <string name="share_text_label">テキスト</string>
+    <string name="share_text_align">配置</string>
+    <string name="share_text_position">位置</string>
+    <string name="share_text_auto">デザインの既定</string>
     <string name="share_instagram_story">Instagram ストーリーズ</string>
     <string name="share_facebook_story">Facebook ストーリーズ</string>
     <string name="share_copy_link">リンクをコピー</string>

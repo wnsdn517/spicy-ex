@@ -190,7 +190,10 @@
     <string name="share_close">닫기</string>
     <string name="share_design_label">디자인</string>
     <string name="share_backdrop_label">배경</string>
-    <string name="share_to">공유 대상</string>
+    <string name="share_text_label">텍스트</string>
+    <string name="share_text_align">정렬</string>
+    <string name="share_text_position">위치</string>
+    <string name="share_text_auto">디자인 기본값</string>
     <string name="share_instagram_story">인스타그램 스토리</string>
     <string name="share_facebook_story">페이스북 스토리</string>
     <string name="share_copy_link">링크 복사</string>

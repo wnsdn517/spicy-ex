@@ -104,6 +104,16 @@ final class LyricsShareCardController {
     private enum Transition { SLIDE_LEFT, SLIDE_RIGHT, SLIDE_UP, SLIDE_DOWN, FADE, TEXT }
 
     private static final ExecutorService RENDER = Executors.newSingleThreadExecutor();
+    private static final ExecutorService THUMBS = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(() -> {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+            runnable.run();
+        }, "SpicyExShareThumbs");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static final String PREF_ALIGN = "share_card_text_align";
+    private static final String PREF_POS = "share_card_text_pos";
     private static final java.util.Map<String, Bitmap> ARTIST_IMAGES = new java.util.LinkedHashMap<>();
     /** Spotify Code images by "uri|dark" - bars white on black, or black on white for paper. */
     private static final java.util.Map<String, Bitmap> SPOTIFY_CODES = new java.util.LinkedHashMap<>();
@@ -150,6 +160,12 @@ final class LyricsShareCardController {
     private TextView translationChip;
     /** Top bar: the current design's name. */
     private TextView designLabel;
+    private TextView designCounter;
+    private final List<TextView> tabChips = new ArrayList<>();
+    private final List<ImageView> alignButtons = new ArrayList<>();
+    private final List<ImageView> posButtons = new ArrayList<>();
+    private View alignGroup;
+    private TextView autoChip;
     // Design strip: a small live render of every design, the current one ringed.
     private HorizontalScrollView designStrip;
     private final List<ImageView> designThumbs = new ArrayList<>();
@@ -166,6 +182,7 @@ final class LyricsShareCardController {
     private Design design;
     private Backdrop backdrop;
     private boolean spotifyCode;
+    private TextStyle textStyle;
     private int generation;
     private BackgroundSnapshot backgroundSnapshot;
     /** The lyrics background frozen when the sheet opened; the "lyrics background" backdrop. */
@@ -183,6 +200,8 @@ final class LyricsShareCardController {
         this.design = enumOr(Design.class, prefs.getString(PREF_DESIGN, null), Design.GLASS);
         this.backdrop = enumOr(Backdrop.class, prefs.getString(PREF_BACKDROP, null), Backdrop.BLUR);
         this.spotifyCode = prefs.getBoolean(PREF_CODE, false);
+        this.textStyle = new TextStyle(enumOr(TextAlign.class, prefs.getString(PREF_ALIGN, null), TextAlign.AUTO),
+                enumOr(TextPos.class, prefs.getString(PREF_POS, null), TextPos.AUTO));
     }
 
     /** Long-pressed a real lyric line: quote it, with its translation underneath if present. */
@@ -281,17 +300,170 @@ final class LyricsShareCardController {
      */
     private void flyQuoteIn(View row) {
         try {
+            if (flyWordsIn(row)) return;
+        } catch (Throwable error) {
+            XpLog.log(TAG + " word fly-in skipped: " + error);
+        }
+        flySnapshotIn(row);
+    }
+
+    /** True while the pressed lyric's words are in flight: the card's own text waits for them. */
+    private boolean quoteFlying;
+
+    /**
+     * Word by word: each word of the pressed line leaves its place in the lyric list and lands on
+     * its own place in the card - its own line and x there, not the line's - growing or shrinking
+     * to the card's type size and turning the card's text colour on the way, a beat after the
+     * word before it. When the last one lands the card's text takes over under them.
+     *
+     * @return false when the row's text cannot be mapped onto the card's (the snapshot flies).
+     */
+    private boolean flyWordsIn(View row) {
+        if (!(overlay instanceof ViewGroup) || cardHost == null || cardHost.getWidth() <= 0) return false;
+        TextView text = firstText(row);
+        if (text == null || text.getTextSize() <= 0f || text.getLayout() == null) return false;
+        List<String> quotes = collectQuotes(startIndex, endIndex);
+        if (quotes.isEmpty()) return false;
+        String quote = quotes.get(0);
+        String source = text.getText().toString();
+        int base = source.indexOf(quote);
+        if (base < 0) return false;
+        TextBox box = lyricBox(design, textStyle, spotifyCode && cachedCode(track, onPaper(design)) != null);
+        Fitted fitted = layoutLyrics(quotes, collectTranslations(startIndex, endIndex), box, false);
+        if (fitted.main.size() != quotes.size()) return false;
+        StaticLayout target = fitted.main.get(0);
+        android.text.Layout from = text.getLayout();
+
+        float cardScale = cardHost.getWidth() / (float) W;
+        float quoteTop = quoteTop(design, textStyle, box, fitted.height);
+        // The row may be scaled (the active line is drawn larger): its size on screen, not its own.
+        float scaleOnScreen = 1f;
+        for (View v = text; v != null && v != root; v = v.getParent() instanceof View ? (View) v.getParent() : null) {
+            scaleOnScreen *= v.getScaleX();
+        }
+        float sourceScale = scaleOnScreen;
+        float sourceSize = text.getTextSize();
+        float targetScale = target.getPaint().getTextSize() * cardScale / sourceSize;
+        int sourceColor = text.getCurrentTextColor();
+        int targetColor = box.color;
+
+        int[] overlayLoc = new int[2];
+        int[] textLoc = new int[2];
+        int[] cardLoc = new int[2];
+        overlay.getLocationOnScreen(overlayLoc);
+        text.getLocationOnScreen(textLoc);
+        cardHost.getLocationOnScreen(cardLoc);
+        // The card is still rising into place; aim for where it comes to rest.
+        View carousel = (View) cardHost.getParent();
+        float settle = carousel == null ? 0f : carousel.getTranslationY();
+
+        java.text.BreakIterator words = java.text.BreakIterator.getWordInstance();
+        words.setText(quote);
+        List<TextView> ghosts = new ArrayList<>();
+        List<float[]> paths = new ArrayList<>();
+        ViewGroup host = (ViewGroup) overlay;
+        TextPaint measure = new TextPaint(text.getPaint());
+        float ascent = -measure.getFontMetrics().ascent;
+        for (int start = words.first(), end = words.next(); end != java.text.BreakIterator.DONE;
+             start = end, end = words.next()) {
+            String word = quote.substring(start, end);
+            if (word.trim().isEmpty()) continue;
+            int srcLine = from.getLineForOffset(base + start);
+            float sx = textLoc[0] - overlayLoc[0]
+                    + (text.getTotalPaddingLeft() + from.getPrimaryHorizontal(base + start)) * sourceScale;
+            float sBaseline = textLoc[1] - overlayLoc[1]
+                    + (text.getTotalPaddingTop() + from.getLineBaseline(srcLine)) * sourceScale;
+            int dstLine = target.getLineForOffset(start);
+            float tx = cardLoc[0] - overlayLoc[0] + (box.left + target.getPrimaryHorizontal(start)) * cardScale;
+            float tBaseline = cardLoc[1] - settle - overlayLoc[1]
+                    + (quoteTop + target.getLineBaseline(dstLine)) * cardScale;
+
+            TextView ghost = new TextView(activity);
+            ghost.setText(word);
+            ghost.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sourceSize);
+            ghost.setTypeface(text.getTypeface());
+            ghost.setLetterSpacing(text.getLetterSpacing());
+            ghost.setTextColor(sourceColor);
+            ghost.setIncludeFontPadding(false);
+            ghost.setPadding(0, 0, 0, 0);
+            ghost.setSingleLine(true);
+            ghost.setPivotX(0f);
+            ghost.setPivotY(0f);
+            ghost.setElevation(dp(70));
+            host.addView(ghost, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            ghosts.add(ghost);
+            paths.add(new float[]{sx, sBaseline, tx, tBaseline});
+        }
+        if (ghosts.isEmpty()) return false;
+
+        quoteFlying = true;
+        if (currentTextLayer != null) currentTextLayer.setAlpha(0f);
+        cardHost.setAlpha(0f);
+        cardHost.animate().alpha(1f).setStartDelay(200).setDuration(360)
+                .setInterpolator(new PathInterpolator(0.3f, 0f, 0.2f, 1f)).start();
+
+        int n = ghosts.size();
+        long stagger = n <= 1 ? 0 : Math.min(34L, 380L / (n - 1));
+        long flight = 620L;
+        long total = flight + stagger * (n - 1);
+        PathInterpolator along = new PathInterpolator(0.3f, 0f, 0.1f, 1f);
+        PathInterpolator down = new PathInterpolator(0.45f, 0f, 0.15f, 1f);
+        android.animation.ArgbEvaluator argb = new android.animation.ArgbEvaluator();
+        float hop = dp(14);
+        android.animation.ValueAnimator animator = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        animator.setDuration(total);
+        animator.setInterpolator(null);
+        animator.addUpdateListener(a -> {
+            float elapsed = a.getAnimatedFraction() * total;
+            for (int i = 0; i < n; i++) {
+                float t = Math.max(0f, Math.min(1f, (elapsed - i * stagger) / flight));
+                float[] p = paths.get(i);
+                float ex = along.getInterpolation(t);
+                float ey = down.getInterpolation(t);
+                float scale = sourceScale + (targetScale - sourceScale) * ex;
+                // A slight arc: x leads, y follows, with a small lift mid-way.
+                float baseline = p[1] + (p[3] - p[1]) * ey - hop * (float) Math.sin(Math.PI * t);
+                TextView g = ghosts.get(i);
+                g.setScaleX(scale);
+                g.setScaleY(scale);
+                g.setX(p[0] + (p[2] - p[0]) * ex);
+                g.setY(baseline - ascent * scale);
+                g.setTextColor((Integer) argb.evaluate(ex, sourceColor, targetColor));
+            }
+        });
+        animator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                quoteFlying = false;
+                if (currentTextLayer != null) {
+                    currentTextLayer.animate().alpha(1f).setDuration(160).start();
+                }
+                for (TextView g : ghosts) {
+                    g.animate().alpha(0f).setDuration(200).withEndAction(() -> {
+                        if (g.getParent() instanceof ViewGroup) ((ViewGroup) g.getParent()).removeView(g);
+                    }).start();
+                }
+            }
+        });
+        animator.start();
+        return true;
+    }
+
+    /** The whole row as one image - when its words cannot be matched to the card's. */
+    private void flySnapshotIn(View row) {
+        try {
             if (!(overlay instanceof ViewGroup) || cardHost == null || cardHost.getWidth() <= 0
                     || row.getWidth() <= 0 || row.getHeight() <= 0) return;
             TextView text = firstText(row);
             if (text == null || text.getTextSize() <= 0f) return;
             List<String> quotes = collectQuotes(startIndex, endIndex);
             if (quotes.isEmpty()) return;
-            TextBox box = textBox(design, true);
+            TextBox box = lyricBox(design, textStyle, spotifyCode && cachedCode(track, onPaper(design)) != null);
             Fitted fitted = layoutLyrics(quotes, collectTranslations(startIndex, endIndex), box, false);
             if (fitted.main.isEmpty()) return;
             float cardScale = cardHost.getWidth() / (float) W;
-            float quoteTop = quoteTop(design, box, fitted.height);
+            float quoteTop = quoteTop(design, textStyle, box, fitted.height);
             float ghostScale = fitted.main.get(0).getPaint().getTextSize() * cardScale / text.getTextSize();
 
             Bitmap snapshot = Bitmap.createBitmap(row.getWidth(), row.getHeight(), Bitmap.Config.ARGB_8888);
@@ -435,6 +607,11 @@ final class LyricsShareCardController {
         designStrip = null;
         designLabel = null;
         translationChip = null;
+        designCounter = null;
+        autoChip = null;
+        alignGroup = null;
+        alignButtons.clear();
+        posButtons.clear();
         peekPrev = null;
         peekNext = null;
         currentTextLayer = null;
@@ -446,9 +623,27 @@ final class LyricsShareCardController {
 
     private View buildPreview() {
         FrameLayout scrim = new FrameLayout(activity);
-        scrim.setBackgroundColor(Color.argb(220, 0, 0, 0));
+        scrim.setBackgroundColor(Color.BLACK);
         scrim.setAlpha(0f);
         scrim.setOnClickListener(v -> dismiss());
+
+        // The song's artwork, blurred and dimmed, fills the sheet behind everything.
+        if (artwork != null) {
+            ImageView ambience = new ImageView(activity);
+            ambience.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            ambience.setImageBitmap(cachedBlur(artwork));
+            ColorMatrix saturate = new ColorMatrix();
+            saturate.setSaturation(1.4f);
+            ambience.setColorFilter(new ColorMatrixColorFilter(saturate));
+            scrim.addView(ambience, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        View shade = new View(activity);
+        shade.setBackground(new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{Color.argb(150, 0, 0, 0), Color.argb(120, 0, 0, 0), Color.argb(215, 0, 0, 0)}));
+        scrim.addView(shade, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         android.util.DisplayMetrics metrics = activity.getResources().getDisplayMetrics();
         int screenW = root.getWidth() > 0 ? root.getWidth() : metrics.widthPixels;
@@ -469,34 +664,34 @@ final class LyricsShareCardController {
 
         LinearLayout page = new LinearLayout(activity);
         page.setOrientation(landscape ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
-        page.setPadding(insetLeft, insetTop, landscape ? insetRight : 0, landscape ? insetBottom : 0);
+        page.setPadding(insetLeft, insetTop, insetRight, insetBottom);
 
-        int panelW = landscape ? Math.min(dp(400), Math.round(screenW * 0.46f)) : screenW;
-        View panel = buildPanel(landscape, landscape ? 0 : insetBottom);
+        int panelW = landscape ? Math.min(dp(400), Math.round(screenW * 0.46f)) : screenW - insetLeft - insetRight;
+        View panel = buildPanel(landscape);
         int panelH = 0;
         if (!landscape) {
-            panel.measure(View.MeasureSpec.makeMeasureSpec(panelW, View.MeasureSpec.EXACTLY),
+            panel.measure(View.MeasureSpec.makeMeasureSpec(panelW - dp(24), View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-            panelH = panel.getMeasuredHeight();
+            panelH = panel.getMeasuredHeight() + dp(12);
         }
 
         LinearLayout stageColumn = new LinearLayout(activity);
         stageColumn.setOrientation(LinearLayout.VERTICAL);
         // Not clickable: taps around the card fall through to the scrim and close the sheet.
         stageColumn.addView(topBar(), new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(60)));
 
         // As large as the room between the top bar and the controls allows.
         int availW = landscape ? screenW - panelW - insetLeft - insetRight : screenW;
-        int availH = screenH - insetTop - insetBottom - dp(56 + 34 + 12) - panelH;
-        int cardWidthPx = Math.round(Math.min(availW * (landscape ? 0.84f : 0.80f),
+        int availH = screenH - insetTop - insetBottom - dp(60 + 30 + 12) - panelH;
+        int cardWidthPx = Math.round(Math.min(availW * (landscape ? 0.84f : 0.82f),
                 Math.max(dp(160), availH) * (float) W / H));
         int cardHeightPx = cardWidthPx * H / W;
 
         FrameLayout stage = new FrameLayout(activity);
         FrameLayout carousel = new FrameLayout(activity);
         carousel.setClipChildren(false);
-        float peekOffset = cardWidthPx + dp(14);
+        float peekOffset = cardWidthPx + dp(16);
         peekPrev = peekView(-peekOffset);
         peekNext = peekView(peekOffset);
         peekPrev.setOnClickListener(v -> stepDesign(-1));
@@ -505,7 +700,7 @@ final class LyricsShareCardController {
         carousel.addView(peekNext, new FrameLayout.LayoutParams(cardWidthPx, cardHeightPx, Gravity.CENTER));
         cardHost = new FrameLayout(activity);
         cardHost.setClipChildren(true);
-        cardHost.setElevation(dp(8));
+        cardHost.setElevation(dp(18));
         cardHost.setOutlineProvider(new android.view.ViewOutlineProvider() {
             @Override
             public void getOutline(View view, android.graphics.Outline outline) {
@@ -522,28 +717,33 @@ final class LyricsShareCardController {
         installPreviewGestures(cardHost);
 
         hint = new TextView(activity);
-        hint.setTextColor(Color.argb(140, 255, 255, 255));
+        hint.setTextColor(Color.argb(130, 255, 255, 255));
         hint.setTextSize(12);
         hint.setGravity(Gravity.CENTER);
         hint.setText(s("hint", "Swipe up to add lyrics · Tap to toggle translation"));
-        hint.setVisibility(document == null ? View.GONE : View.VISIBLE);
+        hint.setVisibility(document == null ? View.INVISIBLE : View.VISIBLE);
         LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         hintLp.topMargin = dp(8);
-        hintLp.bottomMargin = dp(12);
+        hintLp.bottomMargin = dp(8);
         stageColumn.addView(hint, hintLp);
 
         if (landscape) {
             page.addView(stageColumn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
-            page.addView(panel, new LinearLayout.LayoutParams(panelW, ViewGroup.LayoutParams.MATCH_PARENT));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(panelW, ViewGroup.LayoutParams.MATCH_PARENT);
+            lp.setMargins(0, dp(12), dp(12), dp(12));
+            page.addView(panel, lp);
         } else {
             page.addView(stageColumn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-            page.addView(panel, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(dp(12), 0, dp(12), dp(12));
+            page.addView(panel, lp);
         }
         scrim.addView(page, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         updateDesignChrome(false);
+        updateTextControls();
 
         // The card rises into place (the quote fly-in aims for where it comes to rest) while the
         // controls slide in from their edge.
@@ -556,125 +756,115 @@ final class LyricsShareCardController {
             scrim.animate().alpha(1f).setDuration(220).start();
             carousel.animate().translationY(0f).setDuration(420).setInterpolator(ease).start();
             panel.animate().translationX(0f).translationY(0f).alpha(1f).setStartDelay(60)
-                    .setDuration(420).setInterpolator(ease).start();
+                    .setDuration(460).setInterpolator(ease).start();
         });
         return scrim;
     }
 
-    /** Close on the left, the current design's name in the middle. */
+    /** Close on the left; the current design's name and its place among them in the middle. */
     private View topBar() {
         FrameLayout bar = new FrameLayout(activity);
-        TextView close = new TextView(activity);
-        close.setText("✕");
-        close.setTextSize(15);
-        close.setTextColor(Color.WHITE);
-        close.setGravity(Gravity.CENTER);
+        ImageView close = iconButton(LineIcon.Kind.CLOSE, dp(40));
         close.setContentDescription(s("close", "Close"));
-        android.graphics.drawable.GradientDrawable circle = new android.graphics.drawable.GradientDrawable();
-        circle.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-        circle.setColor(Color.argb(46, 255, 255, 255));
-        close.setBackground(circle);
         close.setOnClickListener(v -> dismiss());
         FrameLayout.LayoutParams closeLp = new FrameLayout.LayoutParams(dp(40), dp(40),
                 Gravity.START | Gravity.CENTER_VERTICAL);
-        closeLp.leftMargin = dp(14);
+        closeLp.leftMargin = dp(16);
         bar.addView(close, closeLp);
 
+        LinearLayout title = new LinearLayout(activity);
+        title.setOrientation(LinearLayout.VERTICAL);
+        title.setGravity(Gravity.CENTER_HORIZONTAL);
         designLabel = new TextView(activity);
         designLabel.setTextColor(Color.WHITE);
         designLabel.setTextSize(16);
-        designLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        designLabel.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         designLabel.setGravity(Gravity.CENTER);
-        bar.addView(designLabel, new FrameLayout.LayoutParams(
+        title.addView(designLabel);
+        designCounter = new TextView(activity);
+        designCounter.setTextColor(Color.argb(140, 255, 255, 255));
+        designCounter.setTextSize(11);
+        designCounter.setGravity(Gravity.CENTER);
+        title.addView(designCounter);
+        bar.addView(title, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         return bar;
     }
 
+    /** A round glass button holding a line icon. */
+    private ImageView iconButton(LineIcon.Kind kind, int size) {
+        ImageView button = new ImageView(activity);
+        button.setImageDrawable(new LineIcon(kind, Color.WHITE));
+        int pad = Math.round(size * 0.27f);
+        button.setPadding(pad, pad, pad, pad);
+        button.setBackground(glass(size / 2f, 34, 26));
+        return button;
+    }
+
+    /** Frosted fill with a hairline edge, the look of the whole sheet's controls. */
+    private android.graphics.drawable.GradientDrawable glass(float radius, int fillAlpha, int edgeAlpha) {
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setCornerRadius(radius);
+        bg.setColor(Color.argb(fillAlpha, 255, 255, 255));
+        if (edgeAlpha > 0) bg.setStroke(Math.max(1, dp(1) / 2 + 1), Color.argb(edgeAlpha, 255, 255, 255));
+        return bg;
+    }
+
     /**
-     * The controls sheet: every design as a live thumbnail, the backdrop as a segmented control
-     * with the Spotify Code and translation toggles beside it, then Save and Share.
+     * The floating controls: tabs for Design (live thumbnails), Background (backdrop, Spotify
+     * Code, translation) and Text (alignment and position), above the share targets.
      */
-    private View buildPanel(boolean landscape, int bottomInset) {
+    private View buildPanel(boolean landscape) {
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(0, dp(landscape ? 18 : 10), 0, dp(18) + bottomInset);
-        if (!landscape) {
-            View grabber = new View(activity);
-            android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
-            g.setColor(Color.argb(70, 255, 255, 255));
-            g.setCornerRadius(dp(2));
-            grabber.setBackground(g);
-            LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(dp(36), dp(4));
-            glp.gravity = Gravity.CENTER_HORIZONTAL;
-            glp.bottomMargin = dp(6);
-            content.addView(grabber, glp);
-        }
+        content.setPadding(0, dp(12), 0, dp(14));
 
-        content.addView(sectionLabel(s("design_label", "Design")));
-        designStrip = new HorizontalScrollView(activity);
-        designStrip.setHorizontalScrollBarEnabled(false);
-        LinearLayout strip = new LinearLayout(activity);
-        strip.setPadding(dp(14), 0, dp(14), 0);
-        designThumbs.clear();
-        designFrames.clear();
-        designNames.clear();
-        for (Design d : Design.values()) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            if (d.ordinal() > 0) lp.leftMargin = dp(8);
-            strip.addView(designItem(d), lp);
+        String[] tabs = {s("design_label", "Design"), s("backdrop_label", "Background"), s("text_label", "Text")};
+        FrameLayout pages = new FrameLayout(activity);
+        View[] pageViews = {designPage(), backgroundPage(), textPage()};
+        for (int i = 0; i < pageViews.length; i++) {
+            pageViews[i].setVisibility(i == 0 ? View.VISIBLE : View.GONE);
+            pages.addView(pageViews[i], new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
         }
-        designStrip.addView(strip);
-        content.addView(designStrip);
-
-        content.addView(sectionLabel(s("backdrop_label", "Background")));
-        HorizontalScrollView optionsScroll = new HorizontalScrollView(activity);
-        optionsScroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout options = new LinearLayout(activity);
-        options.setGravity(Gravity.CENTER_VERTICAL);
-        options.setPadding(dp(16), 0, dp(16), 0);
-        String[] backdropLabels = {s("backdrop_blur", "Blurred artwork"), s("backdrop_lyrics", "Lyrics background"),
-                s("backdrop_artist", "Artist photo")};
-        options.addView(segmented(backdropLabels, backdropChips, backdrop.ordinal(), index -> {
-            Backdrop next = Backdrop.values()[index];
-            if (next == backdrop) return;
-            backdrop = next;
-            prefs.edit().putString(PREF_BACKDROP, backdrop.name()).apply();
-            render(Transition.FADE);
-            renderThumbs();
-            if (backdrop == Backdrop.ARTIST && artistImage == null) fetchArtistImage();
-        }));
-        codeChip = toggleChip(s("spotify_code", "Spotify Code"), spotifyCode);
-        codeChip.setOnClickListener(v -> {
-            spotifyCode = !spotifyCode;
-            prefs.edit().putBoolean(PREF_CODE, spotifyCode).apply();
-            styleToggle(codeChip, spotifyCode);
-            trimSelectionToFit();
-            render(Transition.FADE);
-            if (spotifyCode) fetchSpotifyCode();
+        LinearLayout tabRow = segmented(tabs, tabChips, 0, index -> {
+            for (int i = 0; i < pageViews.length; i++) {
+                View pageView = pageViews[i];
+                if (i == index) {
+                    pageView.setAlpha(0f);
+                    pageView.setVisibility(View.VISIBLE);
+                    pageView.animate().alpha(1f).setDuration(180).start();
+                } else {
+                    pageView.setVisibility(View.GONE);
+                }
+            }
         });
-        LinearLayout.LayoutParams toggleLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        toggleLp.leftMargin = dp(10);
-        options.addView(codeChip, toggleLp);
-        if (hasAnyTranslation()) {
-            translationChip = toggleChip(s("translation", "Translation"), showTranslation);
-            translationChip.setOnClickListener(v -> toggleTranslation());
-            LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            trLp.leftMargin = dp(6);
-            options.addView(translationChip, trLp);
+        for (TextView tab : tabChips) {
+            tab.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         }
-        optionsScroll.addView(options);
-        content.addView(optionsScroll);
+        LinearLayout.LayoutParams tabLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tabLp.setMargins(dp(12), 0, dp(12), 0);
+        content.addView(tabRow, tabLp);
+        // One height for every tab, so switching never moves the card.
+        LinearLayout.LayoutParams pagesLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(108));
+        pagesLp.topMargin = dp(6);
+        content.addView(pages, pagesLp);
+
+        View divider = new View(activity);
+        divider.setBackgroundColor(Color.argb(26, 255, 255, 255));
+        LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1) / 2 + 1));
+        divLp.setMargins(dp(16), dp(4), dp(16), dp(12));
+        content.addView(divider, divLp);
 
         // Share targets, as in Spotify's own sheet: the story apps that are installed (with their
         // own icons), then copy link, save and the system sheet.
-        content.addView(sectionLabel(s("share_to", "Share to")));
         HorizontalScrollView targetsScroll = new HorizontalScrollView(activity);
         targetsScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout targets = new LinearLayout(activity);
-        targets.setPadding(dp(12), 0, dp(12), 0);
+        targets.setPadding(dp(8), 0, dp(8), 0);
         if (canShareTo(StoryTarget.INSTAGRAM)) {
             targets.addView(shareTarget(appIcon(StoryTarget.INSTAGRAM.pkg), null,
                     s("instagram_story", "Instagram Stories"), v -> shareToStory(StoryTarget.INSTAGRAM)));
@@ -684,28 +874,26 @@ final class LyricsShareCardController {
                     s("facebook_story", "Facebook Stories"), v -> shareToStory(StoryTarget.FACEBOOK)));
         }
         if (!isBlank(webLink(track))) {
-            targets.addView(shareTarget(null, "🔗", s("copy_link", "Copy link"), v -> copyLink()));
+            targets.addView(shareTarget(null, LineIcon.Kind.LINK, s("copy_link", "Copy link"), v -> copyLink()));
         }
-        targets.addView(shareTarget(null, "↓", s("save", "Save"), v -> saveOnly()));
-        targets.addView(shareTarget(null, "•••", s("more", "More"), v -> {
+        targets.addView(shareTarget(null, LineIcon.Kind.DOWNLOAD, s("save", "Save"), v -> saveOnly()));
+        targets.addView(shareTarget(null, LineIcon.Kind.MORE, s("more", "More"), v -> {
             shareCard();
             dismiss();
         }));
         targetsScroll.addView(targets);
         content.addView(targetsScroll);
 
-        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-        bg.setColor(Color.argb(242, 24, 24, 27));
-        float r = dp(26);
-        bg.setCornerRadii(landscape ? new float[]{r, r, 0, 0, 0, 0, r, r}
-                : new float[]{r, r, r, r, 0, 0, 0, 0});
-        // Taps on the sheet stay on it instead of closing everything.
+        android.graphics.drawable.GradientDrawable bg = glass(dp(28), 0, 30);
+        bg.setColor(Color.argb(150, 20, 20, 24));
+        // Taps on the panel stay on it instead of closing everything.
         if (landscape) {
             android.widget.ScrollView scroll = new android.widget.ScrollView(activity);
             scroll.setFillViewport(true);
             scroll.setVerticalScrollBarEnabled(false);
             scroll.setBackground(bg);
             scroll.setClickable(true);
+            scroll.setClipToOutline(true);
             content.setGravity(Gravity.CENTER_VERTICAL);
             scroll.addView(content, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -716,31 +904,193 @@ final class LyricsShareCardController {
         return content;
     }
 
-    private TextView sectionLabel(String text) {
-        TextView label = new TextView(activity);
-        label.setText(text);
-        label.setTextSize(11);
-        label.setTypeface(Typeface.DEFAULT_BOLD);
-        label.setLetterSpacing(0.08f);
-        label.setTextColor(Color.argb(130, 255, 255, 255));
-        label.setPadding(dp(20), dp(12), dp(20), dp(8));
-        return label;
+    private View designPage() {
+        designStrip = new HorizontalScrollView(activity);
+        designStrip.setHorizontalScrollBarEnabled(false);
+        LinearLayout strip = new LinearLayout(activity);
+        strip.setGravity(Gravity.CENTER_VERTICAL);
+        strip.setPadding(dp(10), 0, dp(10), 0);
+        designThumbs.clear();
+        designFrames.clear();
+        designNames.clear();
+        for (Design d : Design.values()) {
+            strip.addView(designItem(d));
+        }
+        designStrip.addView(strip);
+        return designStrip;
+    }
+
+    private View backgroundPage() {
+        LinearLayout page = new LinearLayout(activity);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setGravity(Gravity.CENTER_HORIZONTAL);
+        String[] backdropLabels = {s("backdrop_blur", "Blurred artwork"), s("backdrop_lyrics", "Lyrics background"),
+                s("backdrop_artist", "Artist photo")};
+        LinearLayout backdrops = segmented(backdropLabels, backdropChips, backdrop.ordinal(), index -> {
+            Backdrop next = Backdrop.values()[index];
+            if (next == backdrop) return;
+            backdrop = next;
+            prefs.edit().putString(PREF_BACKDROP, backdrop.name()).apply();
+            render(Transition.FADE);
+            renderThumbs();
+            if (backdrop == Backdrop.ARTIST && artistImage == null) fetchArtistImage();
+        });
+        page.addView(centredScroll(backdrops));
+
+        LinearLayout toggles = new LinearLayout(activity);
+        toggles.setGravity(Gravity.CENTER);
+        codeChip = toggleChip(LineIcon.Kind.CODE, s("spotify_code", "Spotify Code"), spotifyCode);
+        codeChip.setOnClickListener(v -> {
+            spotifyCode = !spotifyCode;
+            prefs.edit().putBoolean(PREF_CODE, spotifyCode).apply();
+            styleToggle(codeChip, spotifyCode);
+            trimSelectionToFit();
+            render(Transition.FADE);
+            if (spotifyCode) fetchSpotifyCode();
+        });
+        toggles.addView(codeChip);
+        if (hasAnyTranslation()) {
+            translationChip = toggleChip(LineIcon.Kind.GLOBE, s("translation", "Translation"), showTranslation);
+            translationChip.setOnClickListener(v -> toggleTranslation());
+            LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            trLp.leftMargin = dp(8);
+            toggles.addView(translationChip, trLp);
+        }
+        LinearLayout.LayoutParams togglesLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        togglesLp.topMargin = dp(10);
+        page.addView(toggles, togglesLp);
+        return page;
+    }
+
+    /** Alignment (start / centre / end) and position (top / middle / bottom) of the lyric. */
+    private View textPage() {
+        LinearLayout page = new LinearLayout(activity);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout row = new LinearLayout(activity);
+        row.setGravity(Gravity.CENTER);
+        alignGroup = iconSegmented(new LineIcon.Kind[]{LineIcon.Kind.ALIGN_START, LineIcon.Kind.ALIGN_CENTER,
+                LineIcon.Kind.ALIGN_END}, alignButtons, index -> setTextStyle(
+                new TextStyle(TextAlign.values()[index + 1], textStyle.pos)));
+        row.addView(labelled(s("text_align", "Align"), alignGroup));
+        View posGroup = iconSegmented(new LineIcon.Kind[]{LineIcon.Kind.POS_TOP, LineIcon.Kind.POS_MIDDLE,
+                LineIcon.Kind.POS_BOTTOM}, posButtons, index -> setTextStyle(
+                new TextStyle(textStyle.align, TextPos.values()[index + 1])));
+        LinearLayout.LayoutParams posLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        posLp.leftMargin = dp(18);
+        row.addView(labelled(s("text_position", "Position"), posGroup), posLp);
+        page.addView(row);
+
+        autoChip = new TextView(activity);
+        autoChip.setText(s("text_auto", "Design default"));
+        autoChip.setTextSize(12);
+        autoChip.setGravity(Gravity.CENTER);
+        autoChip.setPadding(dp(14), dp(6), dp(14), dp(6));
+        autoChip.setOnClickListener(v -> setTextStyle(new TextStyle(TextAlign.AUTO, TextPos.AUTO)));
+        LinearLayout.LayoutParams autoLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        autoLp.topMargin = dp(10);
+        page.addView(autoChip, autoLp);
+        return page;
+    }
+
+    private View labelled(String label, View control) {
+        LinearLayout column = new LinearLayout(activity);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        TextView text = new TextView(activity);
+        text.setText(label);
+        text.setTextSize(11);
+        text.setTextColor(Color.argb(130, 255, 255, 255));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(6);
+        column.addView(text, lp);
+        column.addView(control);
+        return column;
+    }
+
+    private HorizontalScrollView centredScroll(View child) {
+        HorizontalScrollView scroll = new HorizontalScrollView(activity);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setFillViewport(true);
+        LinearLayout inner = new LinearLayout(activity);
+        inner.setGravity(Gravity.CENTER_HORIZONTAL);
+        inner.setPadding(dp(12), 0, dp(12), 0);
+        inner.addView(child);
+        scroll.addView(inner, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return scroll;
+    }
+
+    private void setTextStyle(TextStyle style) {
+        textStyle = style;
+        prefs.edit().putString(PREF_ALIGN, style.align.name()).putString(PREF_POS, style.pos.name()).apply();
+        updateTextControls();
+        // The card stays; its lines glide to the new alignment and position.
+        render(Transition.TEXT);
+        renderThumbs();
+    }
+
+    /** The alignment and position the current design actually uses, highlighted. */
+    private void updateTextControls() {
+        if (alignButtons.isEmpty() || posButtons.isEmpty()) return;
+        TextAlign align = textStyle.align;
+        if (align == TextAlign.AUTO) {
+            Layout.Alignment own = textBox(design, true).align;
+            align = own == Layout.Alignment.ALIGN_CENTER ? TextAlign.CENTER
+                    : own == Layout.Alignment.ALIGN_OPPOSITE ? TextAlign.END : TextAlign.START;
+        }
+        TextPos pos = textStyle.pos;
+        if (pos == TextPos.AUTO) pos = design == Design.POSTER ? TextPos.BOTTOM : TextPos.MIDDLE;
+        for (int i = 0; i < alignButtons.size(); i++) styleIconSegment(alignButtons.get(i), i == align.ordinal() - 1);
+        for (int i = 0; i < posButtons.size(); i++) styleIconSegment(posButtons.get(i), i == pos.ordinal() - 1);
+        if (autoChip != null) {
+            boolean auto = textStyle.align == TextAlign.AUTO && textStyle.pos == TextPos.AUTO;
+            autoChip.setBackground(auto ? glass(dp(16), 60, 0) : glass(dp(16), 0, 60));
+            autoChip.setTextColor(auto ? Color.WHITE : Color.argb(190, 255, 255, 255));
+        }
+    }
+
+    private LinearLayout iconSegmented(LineIcon.Kind[] kinds, List<ImageView> buttons, IndexListener listener) {
+        LinearLayout group = new LinearLayout(activity);
+        group.setPadding(dp(3), dp(3), dp(3), dp(3));
+        group.setBackground(glass(dp(20), 30, 0));
+        buttons.clear();
+        for (int i = 0; i < kinds.length; i++) {
+            ImageView button = new ImageView(activity);
+            button.setImageDrawable(new LineIcon(kinds[i], Color.WHITE));
+            button.setPadding(dp(10), dp(7), dp(10), dp(7));
+            final int index = i;
+            button.setOnClickListener(v -> listener.onPick(index));
+            buttons.add(button);
+            group.addView(button, new LinearLayout.LayoutParams(dp(44), dp(34)));
+        }
+        return group;
+    }
+
+    private void styleIconSegment(ImageView button, boolean selected) {
+        button.setBackground(selected ? glass(dp(17), 255, 0) : null);
+        if (button.getDrawable() instanceof LineIcon) {
+            ((LineIcon) button.getDrawable()).setColor(selected ? Color.BLACK : Color.argb(210, 255, 255, 255));
+        }
     }
 
     private View designItem(Design d) {
         LinearLayout item = new LinearLayout(activity);
         item.setOrientation(LinearLayout.VERTICAL);
         item.setGravity(Gravity.CENTER_HORIZONTAL);
+        item.setPadding(dp(4), 0, dp(4), 0);
         FrameLayout frame = new FrameLayout(activity);
         frame.setPadding(dp(3), dp(3), dp(3), dp(3));
         ImageView thumb = new ImageView(activity);
         thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        android.graphics.drawable.GradientDrawable placeholder = new android.graphics.drawable.GradientDrawable();
-        placeholder.setColor(Color.argb(36, 255, 255, 255));
-        placeholder.setCornerRadius(dp(8));
-        thumb.setBackground(placeholder);
+        thumb.setBackground(glass(dp(9), 30, 0));
         thumb.setClipToOutline(true);
-        frame.addView(thumb, new FrameLayout.LayoutParams(dp(58), dp(72)));
+        frame.addView(thumb, new FrameLayout.LayoutParams(dp(56), dp(70)));
         item.addView(frame);
         TextView name = new TextView(activity);
         name.setText(designName(d));
@@ -749,7 +1099,7 @@ final class LyricsShareCardController {
         name.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        nameLp.topMargin = dp(4);
+        nameLp.topMargin = dp(5);
         item.addView(name, nameLp);
         item.setOnClickListener(v -> selectDesign(d));
         designThumbs.add(thumb);
@@ -766,20 +1116,27 @@ final class LyricsShareCardController {
     /** Title, ring on the current thumbnail, and the strip scrolled to show it. */
     private void updateDesignChrome(boolean animate) {
         if (designLabel != null) designLabel.setText(designName(design));
+        if (designCounter != null) {
+            designCounter.setText((design.ordinal() + 1) + " / " + Design.values().length);
+        }
         for (int i = 0; i < designFrames.size(); i++) {
             boolean selected = i == design.ordinal();
+            View frame = designFrames.get(i);
             if (selected) {
                 android.graphics.drawable.GradientDrawable ring = new android.graphics.drawable.GradientDrawable();
-                ring.setCornerRadius(dp(11));
+                ring.setCornerRadius(dp(12));
                 ring.setStroke(dp(2), Color.WHITE);
-                designFrames.get(i).setBackground(ring);
+                frame.setBackground(ring);
             } else {
-                designFrames.get(i).setBackground(null);
+                frame.setBackground(null);
             }
+            frame.animate().scaleX(selected ? 1f : 0.92f).scaleY(selected ? 1f : 0.92f)
+                    .alpha(selected ? 1f : 0.72f).setDuration(animate ? 200 : 0).start();
             TextView name = designNames.get(i);
-            name.setTextColor(selected ? Color.WHITE : Color.argb(140, 255, 255, 255));
+            name.setTextColor(selected ? Color.WHITE : Color.argb(130, 255, 255, 255));
             name.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
         }
+        updateTextControls();
         HorizontalScrollView strip = designStrip;
         int index = design.ordinal();
         if (strip == null || index >= designFrames.size()) return;
@@ -801,21 +1158,23 @@ final class LyricsShareCardController {
         int token = ++thumbGeneration;
         List<String> quotes = collectQuotes(startIndex, endIndex);
         List<String> translations = collectTranslations(startIndex, endIndex);
+        TextStyle style = textStyle;
         Backdrop b = backdrop;
         Bitmap art = artwork;
         Bitmap artist = artistImage;
         Bitmap lyricsBg = lyricsBackground;
         SpotifyTrack t = track;
-        RENDER.execute(() -> {
+        float scale = Math.min(1f, dp(72) * 2f / H);
+        // Their own low-priority thread: the card and its neighbours never queue behind them.
+        THUMBS.execute(() -> {
             for (Design d : Design.values()) {
                 if (token != thumbGeneration) return;
                 Bitmap small;
                 try {
-                    Bitmap full = renderCard(d, b, null, art, artist, lyricsBg, quotes, translations,
-                            safe(t.title), safe(t.artist));
-                    small = Bitmap.createScaledBitmap(full, W / 6, H / 6, true);
-                    if (small != full) full.recycle();
+                    small = renderCardScaled(d, style, b, art, artist, lyricsBg, quotes, translations,
+                            safe(t.title), safe(t.artist), scale);
                 } catch (Throwable error) {
+                    XpLog.log(TAG + " thumbnail " + d + " failed: " + error);
                     continue;
                 }
                 int index = d.ordinal();
@@ -851,10 +1210,7 @@ final class LyricsShareCardController {
                                    IndexListener listener) {
         LinearLayout group = new LinearLayout(activity);
         group.setPadding(dp(3), dp(3), dp(3), dp(3));
-        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-        bg.setColor(Color.argb(34, 255, 255, 255));
-        bg.setCornerRadius(dp(20));
-        group.setBackground(bg);
+        group.setBackground(glass(dp(20), 30, 0));
         segments.clear();
         for (int i = 0; i < labels.length; i++) {
             TextView segment = new TextView(activity);
@@ -876,42 +1232,34 @@ final class LyricsShareCardController {
     }
 
     private void styleSegment(TextView segment, boolean selected) {
-        if (selected) {
-            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-            bg.setCornerRadius(dp(17));
-            bg.setColor(Color.WHITE);
-            segment.setBackground(bg);
-        } else {
-            segment.setBackground(null);
-        }
-        segment.setTextColor(selected ? Color.BLACK : Color.argb(210, 255, 255, 255));
+        segment.setBackground(selected ? glass(dp(17), 255, 0) : null);
+        segment.setTextColor(selected ? Color.BLACK : Color.argb(200, 255, 255, 255));
         segment.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
     }
 
-    private TextView toggleChip(String label, boolean on) {
+    private TextView toggleChip(LineIcon.Kind icon, String label, boolean on) {
         TextView chip = new TextView(activity);
-        chip.setTag(label);
+        chip.setText(label);
+        chip.setTag(icon);
         chip.setTextSize(13);
         chip.setSingleLine(true);
-        chip.setGravity(Gravity.CENTER);
-        chip.setPadding(dp(14), dp(10), dp(14), dp(10));
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(dp(12), dp(8), dp(14), dp(8));
+        chip.setCompoundDrawablePadding(dp(6));
         styleToggle(chip, on);
         return chip;
     }
 
-    /** On: Spotify green with a check; off: an outline. */
+    /** On: Spotify green with a check; off: glass with the feature's own icon. */
     private void styleToggle(TextView chip, boolean on) {
-        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-        bg.setCornerRadius(dp(20));
-        if (on) {
-            bg.setColor(Color.rgb(30, 215, 96));
-        } else {
-            bg.setColor(Color.TRANSPARENT);
-            bg.setStroke(dp(1), Color.argb(80, 255, 255, 255));
-        }
+        android.graphics.drawable.GradientDrawable bg = glass(dp(20), on ? 255 : 30, 0);
+        if (on) bg.setColor(Color.rgb(30, 215, 96));
         chip.setBackground(bg);
-        chip.setText((on ? "✓ " : "") + chip.getTag());
-        chip.setTextColor(on ? Color.BLACK : Color.argb(220, 255, 255, 255));
+        int color = on ? Color.BLACK : Color.argb(220, 255, 255, 255);
+        LineIcon icon = new LineIcon(on ? LineIcon.Kind.CHECK : (LineIcon.Kind) chip.getTag(), color);
+        icon.setBounds(0, 0, dp(16), dp(16));
+        chip.setCompoundDrawablesRelative(icon, null, null, null);
+        chip.setTextColor(color);
         chip.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
     }
 
@@ -923,46 +1271,187 @@ final class LyricsShareCardController {
         }
     }
 
-    /** A round button (an app's icon, or a glyph on a light disc) over its label. */
-    private View shareTarget(android.graphics.drawable.Drawable icon, String glyph, String label,
+    /** A round button (an app's own icon, or a line icon on glass) over its label. */
+    private View shareTarget(android.graphics.drawable.Drawable appIcon, LineIcon.Kind kind, String label,
                              View.OnClickListener onClick) {
         LinearLayout item = new LinearLayout(activity);
         item.setOrientation(LinearLayout.VERTICAL);
         item.setGravity(Gravity.CENTER_HORIZONTAL);
-        item.setPadding(dp(6), dp(2), dp(6), dp(2));
-        View button;
-        if (icon != null) {
-            ImageView image = new ImageView(activity);
-            image.setImageDrawable(icon);
-            image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            button = image;
+        item.setPadding(dp(4), dp(2), dp(4), dp(2));
+        ImageView button;
+        if (appIcon != null) {
+            button = new ImageView(activity);
+            button.setImageDrawable(appIcon);
+            button.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            android.graphics.drawable.GradientDrawable round = new android.graphics.drawable.GradientDrawable();
+            round.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            round.setColor(Color.TRANSPARENT);
+            button.setBackground(round);
+            button.setClipToOutline(true);
         } else {
-            TextView text = new TextView(activity);
-            text.setText(glyph);
-            text.setTextSize(18);
-            text.setTypeface(Typeface.DEFAULT_BOLD);
-            text.setTextColor(Color.WHITE);
-            text.setGravity(Gravity.CENTER);
-            android.graphics.drawable.GradientDrawable disc = new android.graphics.drawable.GradientDrawable();
-            disc.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-            disc.setColor(Color.argb(46, 255, 255, 255));
-            text.setBackground(disc);
-            button = text;
+            button = iconButton(kind, dp(52));
         }
         item.addView(button, new LinearLayout.LayoutParams(dp(52), dp(52)));
         TextView name = new TextView(activity);
         name.setText(label);
         name.setTextSize(11);
-        name.setTextColor(Color.argb(210, 255, 255, 255));
+        name.setTextColor(Color.argb(200, 255, 255, 255));
         name.setGravity(Gravity.CENTER);
         name.setMaxLines(2);
-        name.setWidth(dp(72));
+        name.setWidth(dp(70));
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         nameLp.topMargin = dp(6);
         item.addView(name, nameLp);
         item.setOnClickListener(onClick);
+        // A press dips the button a little.
+        item.setOnTouchListener((v, event) -> {
+            int action = event.getActionMasked();
+            if (action == android.view.MotionEvent.ACTION_DOWN) {
+                button.animate().scaleX(0.9f).scaleY(0.9f).setDuration(90).start();
+            } else if (action == android.view.MotionEvent.ACTION_UP
+                    || action == android.view.MotionEvent.ACTION_CANCEL) {
+                button.animate().scaleX(1f).scaleY(1f).setDuration(160).start();
+            }
+            return false;
+        });
         return item;
+    }
+
+    /**
+     * Line icons drawn on a 24-unit grid (2-unit round strokes), in place of text glyphs whose
+     * look depended on the font.
+     */
+    static final class LineIcon extends android.graphics.drawable.Drawable {
+        enum Kind { CLOSE, LINK, DOWNLOAD, MORE, CHECK, ALIGN_START, ALIGN_CENTER, ALIGN_END,
+            POS_TOP, POS_MIDDLE, POS_BOTTOM, CODE, GLOBE }
+
+        private final Kind kind;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        LineIcon(Kind kind, int color) {
+            this.kind = kind;
+            paint.setColor(color);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+            paint.setStrokeWidth(2f);
+        }
+
+        void setColor(int color) {
+            paint.setColor(color);
+            invalidateSelf();
+        }
+
+        @Override
+        public void draw(Canvas c) {
+            android.graphics.Rect b = getBounds();
+            float s = Math.min(b.width(), b.height()) / 24f;
+            c.save();
+            c.translate(b.left + (b.width() - 24 * s) / 2f, b.top + (b.height() - 24 * s) / 2f);
+            c.scale(s, s);
+            Paint p = paint;
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(2f);
+            switch (kind) {
+                case CLOSE:
+                    c.drawLine(6, 6, 18, 18, p);
+                    c.drawLine(18, 6, 6, 18, p);
+                    break;
+                case LINK: {
+                    Path path = new Path();
+                    path.moveTo(10, 7);
+                    path.lineTo(7.5f, 7);
+                    path.arcTo(new RectF(2.5f, 7, 12.5f, 17), 270, -180);
+                    path.lineTo(10, 17);
+                    path.moveTo(14, 7);
+                    path.lineTo(16.5f, 7);
+                    path.arcTo(new RectF(11.5f, 7, 21.5f, 17), 270, 180);
+                    path.lineTo(14, 17);
+                    c.drawPath(path, p);
+                    c.drawLine(8.5f, 12, 15.5f, 12, p);
+                    break;
+                }
+                case DOWNLOAD:
+                    c.drawLine(12, 4, 12, 15, p);
+                    c.drawLine(7, 10, 12, 15, p);
+                    c.drawLine(17, 10, 12, 15, p);
+                    c.drawLine(5, 20, 19, 20, p);
+                    break;
+                case MORE:
+                    p.setStyle(Paint.Style.FILL);
+                    c.drawCircle(5.5f, 12, 1.9f, p);
+                    c.drawCircle(12, 12, 1.9f, p);
+                    c.drawCircle(18.5f, 12, 1.9f, p);
+                    break;
+                case CHECK: {
+                    Path path = new Path();
+                    path.moveTo(5, 12.5f);
+                    path.lineTo(10, 17.5f);
+                    path.lineTo(19, 7);
+                    c.drawPath(path, p);
+                    break;
+                }
+                case ALIGN_START:
+                case ALIGN_CENTER:
+                case ALIGN_END: {
+                    float[] ys = {6, 10, 14, 18};
+                    for (int i = 0; i < ys.length; i++) {
+                        boolean full = i % 2 == 0;
+                        float len = full ? 16 : 10;
+                        float x0 = kind == Kind.ALIGN_START ? 4 : kind == Kind.ALIGN_END ? 20 - len : 12 - len / 2f;
+                        c.drawLine(x0, ys[i], x0 + len, ys[i], p);
+                    }
+                    break;
+                }
+                case POS_TOP:
+                case POS_MIDDLE:
+                case POS_BOTTOM: {
+                    p.setStrokeWidth(1.6f);
+                    c.drawRoundRect(new RectF(3.5f, 3.5f, 20.5f, 20.5f), 3.5f, 3.5f, p);
+                    p.setStrokeWidth(2f);
+                    float y = kind == Kind.POS_TOP ? 8 : kind == Kind.POS_MIDDLE ? 10.5f : 13;
+                    c.drawLine(8, y, 16, y, p);
+                    c.drawLine(8, y + 3, 14, y + 3, p);
+                    break;
+                }
+                case CODE: {
+                    p.setStyle(Paint.Style.FILL);
+                    c.drawCircle(5, 12, 2.6f, p);
+                    p.setStyle(Paint.Style.STROKE);
+                    float[] heights = {5, 10, 6, 12, 7, 4};
+                    for (int i = 0; i < heights.length; i++) {
+                        float x = 10 + i * 2.2f;
+                        c.drawLine(x, 12 - heights[i] / 2f, x, 12 + heights[i] / 2f, p);
+                    }
+                    break;
+                }
+                case GLOBE:
+                    p.setStrokeWidth(1.7f);
+                    c.drawCircle(12, 12, 9, p);
+                    c.drawOval(new RectF(8, 3, 16, 21), p);
+                    c.drawLine(3, 12, 21, 12, p);
+                    break;
+                default:
+                    break;
+            }
+            c.restore();
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+            paint.setAlpha(alpha);
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter filter) {
+            paint.setColorFilter(filter);
+        }
+
+        @Override
+        public int getOpacity() {
+            return android.graphics.PixelFormat.TRANSLUCENT;
+        }
     }
 
     private void installPreviewGestures(View view) {
@@ -1144,6 +1633,7 @@ final class LyricsShareCardController {
         List<String> translations = collectTranslations(startIndex, endIndex);
         Design prev = designAt(design.ordinal() - 1);
         Design next = designAt(design.ordinal() + 1);
+        TextStyle style = textStyle;
         Backdrop b = backdrop;
         Bitmap art = artwork;
         Bitmap artist = artistImage;
@@ -1153,9 +1643,9 @@ final class LyricsShareCardController {
             Bitmap left;
             Bitmap right;
             try {
-                left = renderCard(prev, b, null, art, artist, lyricsBg, quotes, translations,
+                left = renderCard(prev, style, b, null, art, artist, lyricsBg, quotes, translations,
                         safe(t.title), safe(t.artist));
-                right = renderCard(next, b, null, art, artist, lyricsBg, quotes, translations,
+                right = renderCard(next, style, b, null, art, artist, lyricsBg, quotes, translations,
                         safe(t.title), safe(t.artist));
             } catch (Throwable error) {
                 return;
@@ -1275,6 +1765,7 @@ final class LyricsShareCardController {
         List<String> translations = collectTranslations(startIndex, endIndex);
         List<Integer> ids = collectQuoteIds(startIndex, endIndex);
         Design d = design;
+        TextStyle style = textStyle;
         Backdrop b = backdrop;
         Bitmap code = spotifyCode ? cachedCode(track, onPaper(d)) : null;
         Bitmap art = artwork;
@@ -1286,11 +1777,11 @@ final class LyricsShareCardController {
             List<Piece> pieces;
             Bitmap full;
             try {
-                base = renderCard(d, b, code, art, artist, lyricsBg, quotes, translations,
+                base = renderCard(d, style, b, code, art, artist, lyricsBg, quotes, translations,
                         safe(t.title), safe(t.artist), false);
-                pieces = quotePieces(d, quotes, translations, code != null, ids);
+                pieces = quotePieces(d, style, quotes, translations, code != null, ids);
                 full = base.copy(Bitmap.Config.ARGB_8888, true);
-                drawQuoteText(new Canvas(full), d, quotes, translations, code != null);
+                drawQuoteText(new Canvas(full), d, style, quotes, translations, code != null);
             } catch (Throwable error) {
                 XpLog.log(TAG + " render failed: " + error);
                 return;
@@ -1423,17 +1914,14 @@ final class LyricsShareCardController {
      * The quote as the card sets it, split per lyric line: same box, size and positions as
      * {@link #drawQuoteText}, each line (with its translation) on its own transparent image.
      */
-    private static List<Piece> quotePieces(Design design, List<String> quotes,
+    private static List<Piece> quotePieces(Design design, TextStyle style, List<String> quotes,
                                            List<String> translations, boolean withCode,
                                            List<Integer> ids) {
         List<Piece> out = new ArrayList<>();
         if (quotes == null || quotes.isEmpty()) return out;
-        TextBox box = textBox(design, true);
-        if (design == Design.GLASS && !withCode) {
-            box = box.moved(box.left, box.top, box.height + 130);
-        }
+        TextBox box = lyricBox(design, style, withCode);
         Fitted f = layoutLyrics(quotes, translations, box, false);
-        float top = quoteTop(design, box, f.height);
+        float top = quoteTop(design, style, box, f.height);
         int width = Math.max(1, (int) Math.ceil(box.width));
         if (f.main.size() != quotes.size()) {
             // Squeezed into one block (lastResort): a single piece.
@@ -1485,6 +1973,8 @@ final class LyricsShareCardController {
         currentCard = incoming;
         currentBase = baseView;
         currentTextLayer = textLayer;
+        // The pressed line is still flying in word by word; its words land on this text.
+        if (quoteFlying) textLayer.setAlpha(0f);
         pieceViews = views;
         pieceData = data;
         PathInterpolator ease = new PathInterpolator(0.2f, 0.9f, 0.2f, 1f);
@@ -1562,7 +2052,7 @@ final class LyricsShareCardController {
     private static final class TextBox {
         final float left, top, width, height;
         final int color, subColor;
-        final boolean center;
+        final Layout.Alignment align;
         /** The lyric's typeface; null for the default bold. */
         final Typeface face;
 
@@ -1578,18 +2068,75 @@ final class LyricsShareCardController {
             this.height = height;
             this.color = color;
             this.subColor = subColor;
-            this.center = center;
+            this.align = center ? Layout.Alignment.ALIGN_CENTER : Layout.Alignment.ALIGN_NORMAL;
             this.face = face;
         }
 
+        private TextBox(TextBox from, float left, float top, float height, Layout.Alignment align) {
+            this.left = left;
+            this.top = top;
+            this.width = from.width;
+            this.height = height;
+            this.color = from.color;
+            this.subColor = from.subColor;
+            this.align = align;
+            this.face = from.face;
+        }
+
         TextBox moved(float left, float top, float height) {
-            return new TextBox(left, top, width, height, color, subColor, center, face);
+            return new TextBox(this, left, top, height, align);
+        }
+
+        TextBox aligned(Layout.Alignment align) {
+            return new TextBox(this, left, top, height, align);
         }
     }
 
-    /** Where the lyric block starts in its box: centred, bottom-anchored or a little above centre. */
-    private static float quoteTop(Design design, TextBox box, float textHeight) {
+    /** The user's lyric alignment and position on the card; AUTO keeps the design's own. */
+    enum TextAlign { AUTO, START, CENTER, END }
+    enum TextPos { AUTO, TOP, MIDDLE, BOTTOM }
+
+    static final class TextStyle {
+        final TextAlign align;
+        final TextPos pos;
+
+        TextStyle(TextAlign align, TextPos pos) {
+            this.align = align;
+            this.pos = pos;
+        }
+    }
+
+    /** The box the lyric is set in: the design's, with the user's alignment. */
+    private static TextBox lyricBox(Design design, TextStyle style, boolean withCode) {
+        TextBox box = textBox(design, true);
+        // Glass without the code: the lyric also takes the panel's footer.
+        if (design == Design.GLASS && !withCode) box = box.moved(box.left, box.top, box.height + 130);
+        switch (style.align) {
+            case START:
+                return box.aligned(Layout.Alignment.ALIGN_NORMAL);
+            case CENTER:
+                return box.aligned(Layout.Alignment.ALIGN_CENTER);
+            case END:
+                return box.aligned(Layout.Alignment.ALIGN_OPPOSITE);
+            default:
+                return box;
+        }
+    }
+
+    /** Where the lyric block starts in its box: the user's position, else the design's own
+     *  (centred, bottom-anchored or a little above centre). */
+    private static float quoteTop(Design design, TextStyle style, TextBox box, float textHeight) {
         float free = Math.max(0f, box.height - textHeight);
+        switch (style.pos) {
+            case TOP:
+                return box.top;
+            case MIDDLE:
+                return box.top + free / 2f;
+            case BOTTOM:
+                return box.top + free;
+            default:
+                break;
+        }
         switch (design) {
             case MINIMAL:
             case SPOTLIGHT:
@@ -1654,12 +2201,12 @@ final class LyricsShareCardController {
             Fitted f = new Fitted();
             float gap = size * 0.5f;
             for (int i = 0; i < quotes.size(); i++) {
-                StaticLayout l = layout(quotes.get(i), paint, (int) box.width, box.center);
+                StaticLayout l = layout(quotes.get(i), paint, (int) box.width, box.align);
                 f.main.add(l);
                 f.height += l.getHeight();
                 String t = translations != null && i < translations.size() ? translations.get(i) : "";
                 if (!isBlank(t)) {
-                    StaticLayout sl = layout(t, sub, (int) box.width, box.center);
+                    StaticLayout sl = layout(t, sub, (int) box.width, box.align);
                     f.sub.add(sl);
                     f.height += size * 0.18f + sl.getHeight();
                 } else {
@@ -1689,43 +2236,63 @@ final class LyricsShareCardController {
         return f;
     }
 
-    private static StaticLayout layout(String text, TextPaint paint, int width, boolean center) {
+    private static StaticLayout layout(String text, TextPaint paint, int width, Layout.Alignment align) {
         return StaticLayout.Builder.obtain(text, 0, text.length(), paint, width)
-                .setAlignment(center ? Layout.Alignment.ALIGN_CENTER : Layout.Alignment.ALIGN_NORMAL)
+                .setAlignment(align)
                 .setLineSpacing(0f, 1.08f)
                 .setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED)
                 .build();
     }
 
-    private static Bitmap renderCard(Design design, Backdrop backdrop, Bitmap code, Bitmap art,
-                                     Bitmap artist, Bitmap lyricsBg, List<String> quotes,
+    private static Bitmap renderCard(Design design, TextStyle style, Backdrop backdrop, Bitmap code,
+                                     Bitmap art, Bitmap artist, Bitmap lyricsBg, List<String> quotes,
                                      List<String> translations,
                                      String title, String artistName) {
-        return renderCard(design, backdrop, code, art, artist, lyricsBg, quotes, translations,
+        return renderCard(design, style, backdrop, code, art, artist, lyricsBg, quotes, translations,
                 title, artistName, true);
+    }
+
+    /** The whole card drawn at {@code scale} of its size - thumbnails without a full-size pass. */
+    private static Bitmap renderCardScaled(Design design, TextStyle style, Backdrop backdrop,
+                                           Bitmap art, Bitmap artist, Bitmap lyricsBg,
+                                           List<String> quotes, List<String> translations,
+                                           String title, String artistName, float scale) {
+        Bitmap bitmap = Bitmap.createBitmap(Math.max(1, Math.round(W * scale)),
+                Math.max(1, Math.round(H * scale)), Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        canvas.scale(scale, scale);
+        drawCard(canvas, design, style, backdrop, null, art, artist, lyricsBg, quotes, translations,
+                title, artistName, true);
+        return bitmap;
     }
 
     /**
      * The lyric text a design sets on the card, drawn on its own so the preview can animate it
      * separately from the card (see swapText). Same boxes and sizes as the full card.
      */
-    private static void drawQuoteText(Canvas canvas, Design design, List<String> quotes,
+    private static void drawQuoteText(Canvas canvas, Design design, TextStyle style, List<String> quotes,
                                       List<String> translations, boolean withCode) {
         if (quotes == null || quotes.isEmpty()) return;
-        TextBox box = textBox(design, true);
-        // Glass without the code: the lyric also takes the panel's footer.
-        if (design == Design.GLASS && !withCode) box = box.moved(box.left, box.top, box.height + 130);
+        TextBox box = lyricBox(design, style, withCode);
         Fitted f = layoutLyrics(quotes, translations, box, false);
-        drawFitted(canvas, f, box, quoteTop(design, box, f.height));
+        drawFitted(canvas, f, box, quoteTop(design, style, box, f.height));
     }
 
-    private static Bitmap renderCard(Design design, Backdrop backdrop, Bitmap code, Bitmap art,
-                                     Bitmap artist, Bitmap lyricsBg, List<String> quotes,
+    private static Bitmap renderCard(Design design, TextStyle style, Backdrop backdrop, Bitmap code,
+                                     Bitmap art, Bitmap artist, Bitmap lyricsBg, List<String> quotes,
                                      List<String> translations,
                                      String title, String artistName, boolean withQuoteText) {
-        boolean withCode = code != null;
         Bitmap bitmap = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
+        drawCard(new Canvas(bitmap), design, style, backdrop, code, art, artist, lyricsBg, quotes,
+                translations, title, artistName, withQuoteText);
+        return bitmap;
+    }
+
+    private static void drawCard(Canvas canvas, Design design, TextStyle style, Backdrop backdrop,
+                                 Bitmap code, Bitmap art, Bitmap artist, Bitmap lyricsBg,
+                                 List<String> quotes, List<String> translations,
+                                 String title, String artistName, boolean withQuoteText) {
+        boolean withCode = code != null;
         Path clip = new Path();
         clip.addRoundRect(new RectF(0, 0, W, H), 64, 64, Path.Direction.CW);
         canvas.clipPath(clip);
@@ -1750,7 +2317,7 @@ final class LyricsShareCardController {
                 RectF photo = new RectF(150, 150, W - 150, 150 + (W - 300) * 0.82f);
                 drawCover(canvas, art, photo, 14);
                 if (hasQuotes) {
-                    if (withQuoteText) drawQuoteText(canvas, design, quotes, translations, withCode);
+                    if (withQuoteText) drawQuoteText(canvas, design, style, quotes, translations, withCode);
                     drawTitleBlock(canvas, title, artistName, 150, H - 160, W - 300 - (withCode ? CODE_W_POLAROID + 30 : 0),
                             Color.rgb(40, 40, 44), Color.rgb(120, 120, 126), 34, 28);
                 } else {
@@ -1763,7 +2330,7 @@ final class LyricsShareCardController {
             }
             case MINIMAL: {
                 if (hasQuotes) {
-                    if (withQuoteText) drawQuoteText(canvas, design, quotes, translations, withCode);
+                    if (withQuoteText) drawQuoteText(canvas, design, style, quotes, translations, withCode);
                     drawTitleBlock(canvas, title, artistName, 90, H - 125, W - 180 - (withCode ? CODE_W + 40 : 0),
                             Color.WHITE, Color.argb(170, 255, 255, 255), 34, 28);
                 } else {
@@ -1785,7 +2352,7 @@ final class LyricsShareCardController {
                 canvas.drawRect(90, H - 290, W - 90, H - 288, line);
                 if (hasQuotes) {
                     canvas.drawText("“", 70, 330, mark);
-                    if (withQuoteText) drawQuoteText(canvas, design, quotes, translations, withCode);
+                    if (withQuoteText) drawQuoteText(canvas, design, style, quotes, translations, withCode);
                     RectF thumb = new RectF(90, H - 250, 90 + 150, H - 100);
                     drawCover(canvas, art, thumb, 20);
                     drawTitleBlock(canvas, title, artistName, 90 + 180, H - 175,
@@ -1822,7 +2389,7 @@ final class LyricsShareCardController {
                 canvas.drawRect(0, 0, W, W + 2, melt);
                 float rowY = hasQuotes ? H - 120 : H - 190;
                 if (hasQuotes) {
-                    if (withQuoteText) drawQuoteText(canvas, design, quotes, translations, withCode);
+                    if (withQuoteText) drawQuoteText(canvas, design, style, quotes, translations, withCode);
                     drawTitleBlock(canvas, title, artistName, 90, rowY, W - 180 - (withCode ? CODE_W + 40 : 0),
                             Color.WHITE, Color.argb(180, 255, 255, 255), 36, 29);
                 } else {
@@ -1836,7 +2403,7 @@ final class LyricsShareCardController {
                 // Vinyl: a record with the artwork as its label, the lyric set centred beneath it.
                 float cx = W / 2f;
                 drawRecord(canvas, art, cx, hasQuotes ? 330 : 560, hasQuotes ? 250 : 400);
-                if (hasQuotes && withQuoteText) drawQuoteText(canvas, design, quotes, translations, withCode);
+                if (hasQuotes && withQuoteText) drawQuoteText(canvas, design, style, quotes, translations, withCode);
                 float rowY = hasQuotes ? H - 130 : H - 170;
                 float titleSize = hasQuotes ? 36 : 50;
                 float artistSize = hasQuotes ? 29 : 34;
@@ -1885,7 +2452,7 @@ final class LyricsShareCardController {
                 head.setColor(Color.rgb(70, 66, 60));
                 canvas.drawText("♪ ADMIT ONE", 170, 200, head);
                 if (hasQuotes) {
-                    if (withQuoteText) drawQuoteText(canvas, design, quotes, translations, withCode);
+                    if (withQuoteText) drawQuoteText(canvas, design, style, quotes, translations, withCode);
                 } else {
                     drawCover(canvas, art, new RectF((W - 600) / 2f, 290, (W + 600) / 2f, 890), 12);
                 }
@@ -1913,7 +2480,7 @@ final class LyricsShareCardController {
                     Paint rule = new Paint();
                     rule.setColor(Color.argb(90, 255, 255, 255));
                     canvas.drawRect(cx - 36, 490, cx + 36, 493, rule);
-                    if (withQuoteText) drawQuoteText(canvas, design, quotes, translations, withCode);
+                    if (withQuoteText) drawQuoteText(canvas, design, style, quotes, translations, withCode);
                 } else {
                     drawRoundCover(canvas, art, cx, 540, 330);
                     drawTitleBlock(canvas, title, artistName, 100, 1000, W - 200,
@@ -1938,7 +2505,7 @@ final class LyricsShareCardController {
                     drawCover(canvas, art, thumb, 18);
                     drawTitleBlock(canvas, title, artistName, 150 + 150, 270, W - 150 - 150 - 150,
                             Color.WHITE, Color.argb(185, 255, 255, 255), 36, 29);
-                    if (withQuoteText) drawQuoteText(canvas, design, quotes, translations, withCode);
+                    if (withQuoteText) drawQuoteText(canvas, design, style, quotes, translations, withCode);
                 } else {
                     // No quote: the cover fills the panel, the song name beneath it.
                     drawCover(canvas, art, new RectF(150, 210, W - 150, 210 + W - 300), 28);
@@ -1950,7 +2517,6 @@ final class LyricsShareCardController {
             }
         }
         drawBrandMark(canvas, design);
-        return bitmap;
     }
 
     /**
@@ -2222,7 +2788,7 @@ final class LyricsShareCardController {
             return;
         } else {
             // The lyrics screen's look: artwork dissolved into soft colour fields.
-            Bitmap blurred = softBlur(art != null ? art : artist, 14);
+            Bitmap blurred = cachedBlur(art != null ? art : artist);
             Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
             ColorMatrix saturate = new ColorMatrix();
             saturate.setSaturation(1.5f);
@@ -2236,6 +2802,18 @@ final class LyricsShareCardController {
         vignette.setShader(new RadialGradient(W / 2f, H / 2f, H * 0.75f,
                 Color.TRANSPARENT, Color.argb(120, 0, 0, 0), Shader.TileMode.CLAMP));
         canvas.drawRect(full, vignette);
+    }
+
+    private static Bitmap blurSource;
+    private static Bitmap blurResult;
+
+    /** The backdrop blur of the last image asked for; the same artwork is blurred once. */
+    private static synchronized Bitmap cachedBlur(Bitmap source) {
+        if (source != blurSource || blurResult == null) {
+            blurResult = softBlur(source, 14);
+            blurSource = source;
+        }
+        return blurResult;
     }
 
     /** Cheap, smooth blur: shrink to {@code tiny} px then scale back up twice (bilinear). */
