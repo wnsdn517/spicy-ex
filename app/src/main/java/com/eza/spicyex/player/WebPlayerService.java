@@ -703,8 +703,13 @@ public final class WebPlayerService extends Service {
             wm.addView(w, lp);
             if (Build.VERSION.SDK_INT >= 35) {
                 // Votes only for this invisible 1x1 view; other windows keep their own rates.
+                // Looked up at runtime: the constant is missing from some SDK stubs (e.g. the
+                // android.jar Termux builds use), which failed compilation there.
                 try {
-                    w.setRequestedFrameRate(android.view.View.REQUESTED_FRAME_RATE_CATEGORY_LOW);
+                    float low = android.view.View.class
+                            .getField("REQUESTED_FRAME_RATE_CATEGORY_LOW").getFloat(null);
+                    android.view.View.class.getMethod("setRequestedFrameRate", float.class)
+                            .invoke(w, low);
                 } catch (Throwable ignored) {
                 }
             }
