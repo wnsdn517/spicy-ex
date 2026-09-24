@@ -48,6 +48,18 @@ final class LyricsShellEmptyStateController {
      * Ads carry no lyrics: a compact card with an "AD" badge in their place, saying what happens
      * to the ad's audio (muted / replaced with music / plays) and that lyrics come back after it.
      */
+    /** Break position and time left, under the ad card's title; null while no ad card shows. */
+    private TextView adProgress;
+
+    void updateAdProgress(String text) {
+        TextView view = adProgress;
+        if (view == null || !view.isAttachedToWindow()) return;
+        String value = text == null ? "" : text;
+        if (!value.contentEquals(view.getText())) view.setText(value);
+        int visibility = value.isEmpty() ? View.GONE : View.VISIBLE;
+        if (view.getVisibility() != visibility) view.setVisibility(visibility);
+    }
+
     void showAdState(ScrollView lyricsScroll, LinearLayout lyricsColumn) {
         stateToken++;
         lyricsColumn.removeAllViews();
@@ -82,6 +94,13 @@ final class LyricsShellEmptyStateController {
         label.setGravity(Gravity.CENTER);
         label.setPadding(0, dp(12), 0, 0);
         card.addView(label);
+
+        adProgress = textFactory.createText(activity, "", 14, Color.rgb(220, 220, 228),
+                textFactory.resolveTypeface(true));
+        adProgress.setGravity(Gravity.CENTER);
+        adProgress.setPadding(0, dp(6), 0, 0);
+        adProgress.setVisibility(View.GONE);
+        card.addView(adProgress);
 
         String mode = config.get(Settings.AD_MODE);
         boolean muted = Settings.AD_MODE_MUTE.equals(mode);

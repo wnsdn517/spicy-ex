@@ -145,6 +145,21 @@ public final class Settings {
             "mini_player_lyrics_icon", LYRICS, "Show lyrics icon on mini player", false
     );
 
+    // Holding a lyric line opens a share card for it (see LyricsShareCardController).
+    public static final Setting<Boolean> LONG_PRESS_SHARE = boolSetting(
+            "lyrics_long_press_share", LYRICS, "Long-press a line to share", true
+    );
+
+    // Whether the lyrics screen keeps the status bar hidden, per orientation. A swipe from the
+    // edge still shows it for a moment.
+    public static final Setting<Boolean> STATUS_BAR_HIDDEN_PORTRAIT = boolSetting(
+            "lyrics_status_bar_hidden_portrait", LYRICS, "Hide status bar (portrait)", false
+    );
+
+    public static final Setting<Boolean> STATUS_BAR_HIDDEN_LANDSCAPE = boolSetting(
+            "lyrics_status_bar_hidden_landscape", LYRICS, "Hide status bar (landscape)", true
+    );
+
     public static final IntegerSetting SYNC_OFFSET_MS = intSetting(
             "lyric_sync_offset_ms", LYRICS, "Sync offset",
             0, -5000, 5000, 100
@@ -208,68 +223,68 @@ public final class Settings {
     );
 
     public static final Setting<String> LIVE_CARD_WEIGHT = enumSetting(
-            "lyrics_live_card_weight", NOW_PLAYING, "Lyric weight",
+            "lyrics_live_card_weight", INTERNAL, "Lyric weight",
             "Medium",
             "Regular", "Medium", "Bold"
     );
 
     public static final Setting<String> LIVE_CARD_TEXT_SIZE = enumSetting(
-            "lyrics_live_card_text_size", NOW_PLAYING, "Text size",
+            "lyrics_live_card_text_size", INTERNAL, "Text size",
             "normal",
             "small", "normal", "large", "xlarge", "custom"
     );
 
     // Multiplier x100 for the live card's "custom" text size mode (0.0-5.0 in 0.05 steps).
     public static final IntegerSetting LIVE_CARD_TEXT_SIZE_CUSTOM = intSetting(
-            "lyrics_live_card_text_size_custom", NOW_PLAYING, "Custom size",
+            "lyrics_live_card_text_size_custom", INTERNAL, "Custom size",
             100, 0, 500, 5
     );
 
     public static final Setting<String> LIVE_CARD_SECONDARY_MODE = enumSetting(
-            "lyrics_live_card_secondary_mode", NOW_PLAYING, "Extra line",
+            "lyrics_live_card_secondary_mode", INTERNAL, "Extra line",
             "Main only",
             "Main only", "Transliteration", "Translation", "Both"
     );
 
     public static final Setting<String> LIVE_CARD_ANIMATION = enumSetting(
-            "lyrics_live_card_animation", NOW_PLAYING, "Animation",
+            "lyrics_live_card_animation", INTERNAL, "Animation",
             "Karaoke fill",
             "Minimal", "Karaoke fill", "Spotlight word"
     );
 
     public static final Setting<String> LIVE_CARD_GLOW = enumSetting(
-            "lyrics_live_card_glow", NOW_PLAYING, "Glow",
+            "lyrics_live_card_glow", INTERNAL, "Glow",
             "Off",
             "Off", "Word only", "Subtle line"
     );
 
     public static final Setting<String> LIVE_CARD_LINE_SYNC_FILL = enumSetting(
-            "lyrics_live_card_line_sync_fill", NOW_PLAYING, "Fill direction",
+            "lyrics_live_card_line_sync_fill", INTERNAL, "Fill direction",
             "Top to bottom",
             "Top to bottom", "Left to right (block)", "Left to right (sentence)"
     );
 
     public static final Setting<String> LIVE_CARD_OVERFLOW = enumSetting(
-            "lyrics_live_card_overflow", NOW_PLAYING, "Overflow",
+            "lyrics_live_card_overflow", INTERNAL, "Overflow",
             "Wrap",
             "Wrap", "Scroll with lyric", "Clip"
     );
 
     public static final Setting<String> LIVE_CARD_SCROLL_SCOPE = enumSetting(
-            "lyrics_live_card_scroll_scope", NOW_PLAYING, "Scroll scope",
+            "lyrics_live_card_scroll_scope", INTERNAL, "Scroll scope",
             "Grouped",
             "Grouped", "Individual lines"
     );
 
     public static final Setting<String> LIVE_CARD_TRANSITION = enumSetting(
-            "lyrics_live_card_transition", NOW_PLAYING, "Transition",
+            "lyrics_live_card_transition", INTERNAL, "Transition",
             "Fade up",
             "Fade up", "Crossfade", "None"
     );
 
     // --- Text ---
     public static final Setting<Boolean> ADAPTIVE_SECTIONING = boolSetting(
-            "lyric_adaptive_sectioning", TEXT, "Adaptive sectioning", true
+            "lyric_adaptive_sectioning", INTERNAL, "Adaptive sectioning", true
     );
 
     // Scales the vertical gap between lyric rows (sentences); wrapped lines inside one sentence
@@ -314,7 +329,7 @@ public final class Settings {
     // about which of the app's supported scripts it doesn't cover; unsupported scripts still fall
     // back correctly at render time regardless (LyricsTextFactory's per-script fallback chain).
     public static final Setting<String> LYRICS_FONT_CUSTOM_PATH = stringSetting(
-            "lyrics_font_custom_path", TEXT, "Custom font file", ""
+            "lyrics_font_custom_path", INTERNAL, "Custom font file", ""
     );
 
     public static final Setting<String> LYRICS_TEXT_SIZE = enumSetting(
@@ -481,7 +496,7 @@ public final class Settings {
     // column on the right. The readout overlays stand down while it is engaged. Takes effect when
     // the lyrics screen is (re)opened; see NativeSpicyShellViewImpl#twoColumnEngaged.
     public static final Setting<Boolean> ADAPTIVE_LANDSCAPE_LAYOUT = boolSetting(
-            "lyrics_adaptive_landscape_layout", TEXT, "Two-column layout on wide screens", true
+            "lyrics_adaptive_landscape_layout", INTERNAL, "Two-column layout on wide screens", true
     );
 
     // Media controls for artwork (two-column panel + readout art, same behavior): Off
@@ -489,7 +504,7 @@ public final class Settings {
     // Double tap toggles play/pause directly with a brief icon pulse, skipping the overlay.
     // Applies live, no reopen needed. Stored booleans migrate in SettingsStore.
     public static final Setting<String> PANEL_MEDIA_CONTROLS = enumSetting(
-            "lyrics_panel_media_controls", TEXT, "Panel media controls", "Single tap",
+            "lyrics_panel_media_controls", INTERNAL, "Panel media controls", "Single tap",
             "Off", "Single tap", "Double tap"
     );
 
@@ -507,19 +522,19 @@ public final class Settings {
     // Apple-owned sub-section (R3). Visible only while ANIMATION_STYLE is Apple Music; each key
     // is read only under that style, so switching styles never migrates or resets user values.
     public static final Setting<Boolean> APPLE_FADE_PASSED_LINES = boolSetting(
-            "lyric_apple_fade_passed_lines", APPLE, "Fade passed lines", true
+            "lyric_apple_fade_passed_lines", INTERNAL, "Fade passed lines", true
     );
 
 
     // Row-scroll cascade. Apple-owned: rendered only inside the Apple sub-section.
     public static final Setting<Boolean> LINE_SLIDE_ANIMATION = boolSetting(
-            "lyric_line_slide_animation", APPLE, "Apple Music-style slide", false
+            "lyric_line_slide_animation", INTERNAL, "Apple Music-style slide", false
     );
 
     // Apple-owned lift motion. This is the only Apple lift entry: WORD_BOUNCE_STYLE deliberately
     // carries no competing "Apple lift" value; the renderer reads this key under Apple Music.
     public static final Setting<Boolean> APPLE_LIFT = boolSetting(
-            "lyric_apple_lift", APPLE, "Apple lift", true
+            "lyric_apple_lift", INTERNAL, "Apple lift", true
     );
 
     // Apple-owned: a one-shot reveal for the first render of a freshly loaded document (opening
@@ -1092,7 +1107,20 @@ public final class Settings {
                 || setting == TRACK_INFO_ART_SIZE || setting == TRACK_INFO_ART_SIZE_CUSTOM_DP
                 || setting == TRACK_INFO_TEXT_SIZE || setting == TRACK_INFO_TEXT_SIZE_CUSTOM
                 || setting == SKIP_CHIP_POSITION || setting == FOLLOW_CHIP_POSITION
-                || setting == CHROME_CLUSTER_POSITION;
+                || setting == CHROME_CLUSTER_POSITION
+                // Motion and the readout's look: a wide screen often wants a calmer or different
+                // setup. Each orientation starts from the other's value and then keeps its own.
+                || setting == ANIMATION_STYLE || setting == LOAD_LIFT_ANIMATION
+                || setting == LINE_SLIDE_ANIMATION || setting == APPLE_LIFT
+                || setting == APPLE_FADE_PASSED_LINES
+                || setting == APPLE_CASCADE_SPEED || setting == APPLE_SPRING_STRENGTH
+                || setting == WORD_BOUNCE || setting == WORD_BOUNCE_STYLE
+                || setting == LINE_SYNC_FILL || setting == ENABLE_GLOW_BLUR
+                || setting == ENABLE_LINE_BLUR || setting == LYRICS_BLUR_INTENSITY
+                || setting == TRACK_INFO_BACKGROUND || setting == TRACK_INFO_ART_RADIUS
+                || setting == TRACK_INFO_TEXT_ALIGN || setting == TRACK_INFO_TEXT_OVERFLOW
+                || setting == TRACK_INFO_SHOW_TITLE || setting == TRACK_INFO_SHOW_ARTIST
+                || setting == TRACK_INFO_SHOW_ALBUM || setting == TRACK_INFO_TEXT_SIZE_ADAPTIVE;
     }
 
     /**

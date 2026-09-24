@@ -115,6 +115,7 @@ final class LyricsLayoutEditController {
         private Runnable disableDemoData;
         private EditableChip skipChip;
         private EditableChip followChip;
+        private boolean cardMode;
 
         Request activity(Activity value) { this.activity = value; return this; }
         Request shellRoot(ViewGroup value) { this.shellRoot = value; return this; }
@@ -132,6 +133,8 @@ final class LyricsLayoutEditController {
         Request disableDemoData(Runnable value) { this.disableDemoData = value; return this; }
         Request skipChip(EditableChip value) { this.skipChip = value; return this; }
         Request followChip(EditableChip value) { this.followChip = value; return this; }
+        /** Open on the now-playing card instead of the lyrics screen. */
+        Request cardMode(boolean value) { this.cardMode = value; return this; }
 
         EditorHandle show() {
             if (activity == null || shellRoot == null) return null;
@@ -171,13 +174,20 @@ final class LyricsLayoutEditController {
                 Settings.ENABLE_GLOW_BLUR, Settings.LINE_SYNC_FILL,
                 Settings.ANIMATION_STYLE, Settings.LOAD_LIFT_ANIMATION,
                 Settings.APPLE_CASCADE_SPEED, Settings.APPLE_SPRING_STRENGTH,
-                Settings.FOLLOW_CHIP_ANIMATION, Settings.FOLLOW_CHIP_PROGRESS
+                Settings.FOLLOW_CHIP_ANIMATION, Settings.FOLLOW_CHIP_PROGRESS,
+                Settings.ADAPTIVE_SECTIONING, Settings.ADAPTIVE_LANDSCAPE_LAYOUT,
+                Settings.PANEL_MEDIA_CONTROLS, Settings.LYRICS_FONT_CUSTOM_PATH,
+                Settings.APPLE_FADE_PASSED_LINES, Settings.LINE_SLIDE_ANIMATION, Settings.APPLE_LIFT,
+                Settings.LIVE_CARD_TEXT_SIZE, Settings.LIVE_CARD_TEXT_SIZE_CUSTOM, Settings.LIVE_CARD_WEIGHT,
+                Settings.LIVE_CARD_SECONDARY_MODE, Settings.LIVE_CARD_ANIMATION, Settings.LIVE_CARD_GLOW,
+                Settings.LIVE_CARD_LINE_SYNC_FILL, Settings.LIVE_CARD_OVERFLOW,
+                Settings.LIVE_CARD_SCROLL_SCOPE, Settings.LIVE_CARD_TRANSITION
         };
 
         /** Which on-screen thing is selected. Artwork and its title/artist text used to be one
          *  bundled element with no outline of its own for the text half - they are now separate so
          *  each can be tapped and configured independently. */
-        private enum Element { ARTWORK, TRACK_TEXT, FOCUS, TEXT, BACKGROUND, SKIP, FOLLOW, DOCK }
+        private enum Element { ARTWORK, TRACK_TEXT, FOCUS, TEXT, BACKGROUND, SKIP, FOLLOW, DOCK, CARD }
 
 
         private final Activity activity;
@@ -200,6 +210,7 @@ final class LyricsLayoutEditController {
         private final Runnable disableDemoData;
         private final EditableChip skipChip;
         private final EditableChip followChip;
+        private final boolean startInCardMode;
 
         private final FrameLayout overlay;
         private final FrameLayout artLayer;
@@ -235,9 +246,6 @@ final class LyricsLayoutEditController {
         private View trackTextHandle;
         /** Live value shown next to whatever is being resized or pinched. */
         private TextView valueBubble;
-        /** Small "Options" button floating by the selection; the sheet opens only on request, so
-         *  the canvas itself - drag, pinch, grips - stays the primary way to edit. */
-        private TextView optionsPill;
 
         /** One outline and the real on-screen view it traces. */
         private static final class CaptureBinding {
@@ -380,6 +388,7 @@ final class LyricsLayoutEditController {
             this.disableDemoData = request.disableDemoData;
             this.skipChip = request.skipChip;
             this.followChip = request.followChip;
+            this.startInCardMode = request.cardMode;
             this.store = new SettingsStore(activity);
             this.writer = new SettingsWriter(store);
             this.strings = UiLanguage.strings(activity, store.get(Settings.UI_LANGUAGE));
@@ -416,6 +425,7 @@ final class LyricsLayoutEditController {
 
         private <T> void put(Settings.Setting<T> setting, T value, Runnable afterApply) {
             writer.put(setting, value);
+            cardConfigDirty = true;
             overlay.post(() -> {
                 if (applyPreferences != null) applyPreferences.run();
                 // applyPreferences() only *requests* a layout pass (requestLayout() never runs
@@ -529,10 +539,19 @@ final class LyricsLayoutEditController {
             optionsScroll.addView(optionsCard, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+            // On a wide screen (landscape, unfolded foldable) a full-width bottom sheet covers most
+            // of what is being edited; it becomes a floating side sheet on the trailing edge.
+            android.content.res.Configuration screen = activity.getResources().getConfiguration();
+            boolean sideSheet = screen.screenWidthDp > screen.screenHeightDp || screen.screenWidthDp >= 600;
             GradientDrawable panelBg = new GradientDrawable();
             panelBg.setColor(0xF21C1C22);
             float cornerRadius = dp(24);
-            panelBg.setCornerRadii(new float[]{cornerRadius, cornerRadius, cornerRadius, cornerRadius, 0, 0, 0, 0});
+            if (sideSheet) {
+                panelBg.setCornerRadius(cornerRadius);
+                optionsScroll.maxHeightFraction = 0.82f;
+            } else {
+                panelBg.setCornerRadii(new float[]{cornerRadius, cornerRadius, cornerRadius, cornerRadius, 0, 0, 0, 0});
+            }
             panelBg.setStroke(dp(1), 0x24FFFFFF);
             panelContainer.setBackground(panelBg);
             panelContainer.setElevation(dp(16));
@@ -551,9 +570,18 @@ final class LyricsLayoutEditController {
             panelContainer.addView(optionsScroll, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            overlay.addView(panelContainer, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                    Gravity.BOTTOM));
+            FrameLayout.LayoutParams panelLp;
+            if (sideSheet) {
+                int screenW = Math.round(screen.screenWidthDp * activity.getResources().getDisplayMetrics().density);
+                panelLp = new FrameLayout.LayoutParams(Math.min(dp(420), Math.round(screenW * 0.46f)),
+                        ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.END);
+                panelLp.rightMargin = dp(12);
+                panelLp.bottomMargin = dp(12);
+            } else {
+                panelLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+            }
+            overlay.addView(panelContainer, panelLp);
             panelVisible = false;
             panelContainer.setVisibility(View.INVISIBLE);
 
@@ -582,12 +610,14 @@ final class LyricsLayoutEditController {
                 refreshFollowChip();
                 refreshDock();
                 refreshBackButton();
+                if (startInCardMode) setCardMode(true);
             });
             startCaptureSync();
         }
 
         private void close() {
             stopCaptureSync();
+            overlay.removeCallbacks(cardFrame);
             if (disableDemoData != null) {
                 demoActive = false;
                 disableDemoData.run();
@@ -781,7 +811,7 @@ final class LyricsLayoutEditController {
                             put(Settings.TRACK_INFO_POSITION, dy < 0 ? "Top" : "Bottom", () -> {
                                 refreshArtwork();
                                 refreshTrackText();
-                                selectElement(Element.ARTWORK);
+                                selectElement(Element.ARTWORK, false);
                             });
                         } else {
                             selectElement(Element.ARTWORK);
@@ -854,7 +884,7 @@ final class LyricsLayoutEditController {
                             // outline onto wherever the artwork actually ended up - no rebuild
                             // needed, and no window where the outline shows the old size.
                             if (applyPreferences != null) overlay.post(applyPreferences);
-                            selectElement(Element.ARTWORK);
+                            selectElement(Element.ARTWORK, false);
                             return true;
                         }
                         default:
@@ -1013,7 +1043,7 @@ final class LyricsLayoutEditController {
                     case MotionEvent.ACTION_CANCEL:
                         resizingTrackText = false;
                         hideValueBubble();
-                        selectElement(Element.TRACK_TEXT);
+                        selectElement(Element.TRACK_TEXT, false);
                         return true;
                     default:
                         return false;
@@ -1049,8 +1079,11 @@ final class LyricsLayoutEditController {
          *  are added earlier and would otherwise lose that overlap by z-order alone. A touch
          *  landing on the live artwork or track-text rect is declined outright (returns false on
          *  ACTION_DOWN) so it falls through to whatever real view is underneath instead. */
+        private View textTapLayer;
+
         private void buildTextTapLayer() {
             View layer = new View(activity);
+            textTapLayer = layer;
             int[] pos = relativePosition(focusArea, shellRoot);
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                     Math.max(0, focusArea.getWidth()), Math.max(0, focusArea.getHeight()),
@@ -1106,7 +1139,7 @@ final class LyricsLayoutEditController {
                 @Override
                 public void onScaleEnd(android.view.ScaleGestureDetector detector) {
                     hideValueBubble();
-                    if (selected == Element.TEXT) selectElement(Element.TEXT);
+                    if (selected == Element.TEXT) selectElement(Element.TEXT, false);
                 }
             });
             layer.setOnTouchListener((v, event) -> {
@@ -1267,6 +1300,8 @@ final class LyricsLayoutEditController {
 
             float[] startRawY = new float[1];
             int[] startTopMargin = new int[1];
+            boolean[] moved = new boolean[1];
+            int slop = android.view.ViewConfiguration.get(activity).getScaledTouchSlop();
             line.setOnTouchListener((v, event) -> {
                 int[] pos = relativePosition(focusArea, shellRoot);
                 int areaHeight = Math.max(1, focusArea.getHeight());
@@ -1275,8 +1310,11 @@ final class LyricsLayoutEditController {
                     case MotionEvent.ACTION_DOWN:
                         startRawY[0] = event.getRawY();
                         startTopMargin[0] = lp.topMargin;
+                        moved[0] = false;
                         return true;
                     case MotionEvent.ACTION_MOVE: {
+                        if (!moved[0] && Math.abs(event.getRawY() - startRawY[0]) < slop) return true;
+                        moved[0] = true;
                         int newTop = clamp(startTopMargin[0]
                                 + Math.round(event.getRawY() - startRawY[0]),
                                 pos[1] - half, pos[1] + areaHeight - half);
@@ -1293,7 +1331,7 @@ final class LyricsLayoutEditController {
                     }
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
-                        selectElement(Element.FOCUS);
+                        selectElement(Element.FOCUS, !moved[0]);
                         return true;
                     default:
                         return false;
@@ -1366,6 +1404,209 @@ final class LyricsLayoutEditController {
                     s("save", "Save"), this::close);
             backLayer.addView(cancel, editorActionLp(pos[0], pos[1], buttonSize));
             backLayer.addView(save, editorActionLp(pos[0] + buttonSize + dp(6), pos[1], buttonSize));
+            LinearLayout pills = new LinearLayout(activity);
+            pills.setOrientation(LinearLayout.HORIZONTAL);
+            TextView mode = actionPill(cardMode ? s("mode_lyrics", "Lyrics screen") : s("mode_card", "Now playing card"),
+                    () -> setCardMode(!cardMode));
+            pills.addView(mode, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, buttonSize));
+            if (!cardMode && enableDemoData != null && disableDemoData != null) {
+                TextView demoPill = actionPill(demoActive ? s("demo_lyrics", "Demo") : s("live_lyrics", "Live"),
+                        this::toggleDemo);
+                LinearLayout.LayoutParams sourceLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, buttonSize);
+                sourceLp.leftMargin = dp(6);
+                pills.addView(demoPill, sourceLp);
+            }
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, buttonSize, Gravity.TOP | Gravity.START);
+            lp.leftMargin = pos[0] + 2 * (buttonSize + dp(6));
+            lp.topMargin = pos[1];
+            backLayer.addView(pills, lp);
+        }
+
+        // -- now-playing card mode ---------------------------------------------
+
+        /** True while the editor shows the now-playing card instead of the lyrics screen. */
+        private boolean cardMode;
+        private FrameLayout cardLayer;
+        private com.eza.spicyex.lyrics.LiveLyricCardView cardPreview;
+        private View cardCapture;
+        private com.eza.spicyex.lyrics.LyricsDocument cardDocument;
+        private com.eza.spicyex.lyrics.LyricsRenderConfig cardConfig;
+        private boolean cardConfigDirty = true;
+        private long cardStartMs;
+        private long cardLastFrameMs;
+        private int cardLastIndex = -1;
+        private final Runnable cardFrame = this::stepCardPreview;
+
+        /** Layers that belong to the lyrics-screen elements; hidden while editing the card. */
+        private View[] lyricsModeViews() {
+            return new View[]{artLayer, trackTextLayer, focusHandle, textTapLayer, textOutline,
+                    skipLayer, followLayer, dockLayer};
+        }
+
+        private void setCardMode(boolean enabled) {
+            if (enabled == cardMode && (!enabled || cardLayer != null)) return;
+            cardMode = enabled;
+            for (View view : lyricsModeViews()) {
+                if (view != null) view.setVisibility(enabled ? View.GONE : View.VISIBLE);
+            }
+            overlay.setBackgroundColor(enabled ? 0xD9000000 : 0x4D000000);
+            if (enabled) {
+                buildCardPreview();
+                cardLayer.setVisibility(View.VISIBLE);
+                cardConfigDirty = true;
+                cardStartMs = android.os.SystemClock.uptimeMillis();
+                cardLastFrameMs = 0L;
+                cardLastIndex = -1;
+                overlay.removeCallbacks(cardFrame);
+                overlay.postOnAnimation(cardFrame);
+                selectElement(Element.CARD, false);
+            } else {
+                overlay.removeCallbacks(cardFrame);
+                if (cardLayer != null) cardLayer.setVisibility(View.GONE);
+                selectElement(Element.TEXT, false);
+                afterNextLayout(this::refreshAllCaptures);
+            }
+            hidePanelSheet(false);
+            refreshBackButton();
+        }
+
+        /** A stand-in for Spotify's now-playing card: same dark rounded surface, the real
+         *  {@link com.eza.spicyex.lyrics.LiveLyricCardView} inside, driven by the demo lyrics. */
+        private void buildCardPreview() {
+            if (cardLayer != null) return;
+            cardLayer = new FrameLayout(activity);
+            cardLayer.setClipChildren(false);
+            FrameLayout card = new FrameLayout(activity);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(0xFF2A2A2E);
+            bg.setCornerRadius(dp(12));
+            card.setBackground(bg);
+            card.setPadding(dp(16), dp(14), dp(16), dp(14));
+            cardPreview = new com.eza.spicyex.lyrics.LiveLyricCardView(activity);
+            card.addView(cardPreview, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            card.setOnClickListener(v -> selectElement(Element.CARD));
+            FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER);
+            int side = Math.max(dp(16), (overlay.getWidth() - dp(560)) / 2);
+            cardLp.leftMargin = side;
+            cardLp.rightMargin = side;
+            cardLayer.addView(card, cardLp);
+            cardCapture = card;
+            TextView caption = text(s("card_caption", "Now playing card"), 13, 0x99FFFFFF, true);
+            FrameLayout.LayoutParams captionLp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER_HORIZONTAL | Gravity.TOP);
+            captionLp.topMargin = dp(120);
+            cardLayer.addView(caption, captionLp);
+            // Below the sheet (added before it) so the sheet still covers the preview.
+            overlay.addView(cardLayer, overlay.indexOfChild(panelContainer), new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            cardDocument = DemoLyricsContent.demoDocument();
+            com.eza.spicyex.lyrics.LyricTimeline.applySyncedRows(cardDocument);
+        }
+
+        private void stepCardPreview() {
+            if (!cardMode || overlay.getParent() == null || cardPreview == null || cardDocument == null) return;
+            long now = android.os.SystemClock.uptimeMillis();
+            float dt = cardLastFrameMs == 0L ? 1f / 60f : Math.min(0.08f, (now - cardLastFrameMs) / 1000f);
+            cardLastFrameMs = now;
+            try {
+                if (cardConfigDirty || cardConfig == null) {
+                    cardConfigDirty = false;
+                    cardConfig = com.eza.spicyex.lyrics.LyricsRenderConfig.read(activity,
+                            com.eza.spicyex.SpotifyPlusConfig.from(activity));
+                    cardPreview.applyConfig(cardConfig);
+                    cardPreview.invalidateMountedContent();
+                    cardLastIndex = -1;
+                }
+                long pos = (now - cardStartMs) % Math.max(1L, cardDocument.durationMs);
+                java.util.List<com.eza.spicyex.lyrics.AppliedLine> lines = cardDocument.appliedLines;
+                int index = com.eza.spicyex.lyrics.LyricTimeline.findPrimaryActiveRow(lines, pos);
+                if (index < 0 || index >= lines.size()) {
+                    if (cardLastIndex != -1) {
+                        cardPreview.clear();
+                        cardLastIndex = -1;
+                    }
+                } else {
+                    boolean changed = index != cardLastIndex;
+                    cardLastIndex = index;
+                    cardPreview.renderLine(activity, lines.get(index), cardConfig, pos, dt,
+                            cardDocument, (line, segment, full) -> "", changed);
+                }
+            } catch (Throwable t) {
+                com.eza.spicyex.xposed.XpLog.log("[SpicyLayoutEditor] card preview failed: " + t);
+            }
+            overlay.postOnAnimation(cardFrame);
+        }
+
+        private void buildCardOptions() {
+            beginGroup(strings.setting(Settings.LIVE_CARD_TEXT_SIZE));
+            addOption(presetSliderRow(Settings.LIVE_CARD_TEXT_SIZE, Settings.LIVE_CARD_TEXT_SIZE_CUSTOM,
+                    "custom", new String[]{"small", "normal", "large", "xlarge"},
+                    new int[]{90, 100, 120, 150}, this::markCardDirty), matchWrap(12));
+            cardChips(Settings.LIVE_CARD_WEIGHT, new String[]{"Regular", "Medium", "Bold"});
+            cardChips(Settings.LIVE_CARD_SECONDARY_MODE,
+                    new String[]{"Main only", "Transliteration", "Translation", "Both"});
+            cardChips(Settings.LIVE_CARD_ANIMATION, new String[]{"Minimal", "Karaoke fill", "Spotlight word"});
+            cardChips(Settings.LIVE_CARD_GLOW, new String[]{"Off", "Word only", "Subtle line"});
+            cardChips(Settings.LIVE_CARD_LINE_SYNC_FILL,
+                    new String[]{"Top to bottom", "Left to right (block)", "Left to right (sentence)"});
+            cardChips(Settings.LIVE_CARD_OVERFLOW, new String[]{"Wrap", "Scroll with lyric", "Clip"});
+            if ("Scroll with lyric".equals(store.get(Settings.LIVE_CARD_OVERFLOW))) {
+                cardChips(Settings.LIVE_CARD_SCROLL_SCOPE, new String[]{"Grouped", "Individual lines"});
+            }
+            cardChips(Settings.LIVE_CARD_TRANSITION, new String[]{"Fade up", "Crossfade", "None"});
+            endGroup();
+        }
+
+        private void cardChips(Settings.Setting<String> setting, String[] values) {
+            endGroup();
+            beginGroup(strings.setting(setting));
+            addOption(chipRow(setting, values, () -> {
+                markCardDirty();
+                selectElement(Element.CARD, false);
+            }), matchWrap(4));
+        }
+
+        private void markCardDirty() {
+            cardConfigDirty = true;
+        }
+
+        /** Rounded text button in the editor's top bar. */
+        private TextView actionPill(String label, Runnable onClick) {
+            TextView pill = new TextView(activity);
+            pill.setText(label);
+            pill.setTextColor(Color.WHITE);
+            pill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            pill.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            pill.setGravity(Gravity.CENTER);
+            pill.setPadding(dp(14), 0, dp(14), 0);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(Color.argb(200, 34, 34, 38));
+            bg.setStroke(dp(1), Color.argb(70, 255, 255, 255));
+            bg.setCornerRadius(dp(22));
+            pill.setBackground(bg);
+            pill.setClickable(true);
+            NativeIconButtons.applyPressScale(pill);
+            pill.setOnClickListener(v -> onClick.run());
+            return pill;
+        }
+
+        /** Switches the preview between the demo lyrics and whatever is really playing. */
+        private void toggleDemo() {
+            if (demoActive) {
+                demoActive = false;
+                disableDemoData.run();
+            } else {
+                demoActive = true;
+                enableDemoData.run();
+            }
+            refreshBackButton();
+            afterNextLayout(this::refreshAllCaptures);
         }
 
         private FrameLayout.LayoutParams editorActionLp(int left, int top, int size) {
@@ -1445,6 +1686,9 @@ final class LyricsLayoutEditController {
                 case DOCK:
                     buildDockOptions();
                     break;
+                case CARD:
+                    buildCardOptions();
+                    break;
             }
             if (rebuildOnly) {
                 optionsScroll.scrollTo(0, previousScrollY);
@@ -1452,86 +1696,9 @@ final class LyricsLayoutEditController {
             } else {
                 optionsScroll.scrollTo(0, 0);
             }
-            // The sheet opens from the floating Options button (or stays open if it already is);
-            // selecting only shows the element's handles, so the canvas is where editing happens.
-            if (!panelVisible) afterNextLayout(this::showOptionsPill);
-        }
-
-        private void showOptionsPill() {
-            if (panelVisible || overlay.getParent() == null) return;
-            if (optionsPill == null) {
-                TextView pill = new TextView(activity);
-                pill.setText(s("options_button", "Options") + "  \u2303");
-                pill.setTextColor(Color.WHITE);
-                pill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-                pill.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                pill.setGravity(Gravity.CENTER);
-                pill.setPadding(dp(16), dp(8), dp(16), dp(8));
-                GradientDrawable bg = new GradientDrawable();
-                bg.setColor(Color.argb(235, 34, 34, 38));
-                bg.setStroke(dp(1), Color.argb(70, 255, 255, 255));
-                bg.setCornerRadius(dp(20));
-                pill.setBackground(bg);
-                pill.setElevation(dp(6));
-                NativeIconButtons.applyPressScale(pill);
-                pill.setOnClickListener(v -> {
-                    hideOptionsPill();
-                    showPanelSheet(true);
-                });
-                overlay.addView(pill, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                        Gravity.TOP | Gravity.START));
-                optionsPill = pill;
-            }
-            TextView pill = optionsPill;
-            pill.bringToFront();
-            pill.setVisibility(View.VISIBLE);
-            pill.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
-            int w = pill.getMeasuredWidth();
-            int h = pill.getMeasuredHeight();
-            int overlayW = Math.max(1, overlay.getWidth());
-            int overlayH = Math.max(1, overlay.getHeight());
-            View anchor = anchorFor(selected);
-            int x;
-            int y;
-            if (anchor != null && anchor.getWidth() > 0 && anchor.getParent() != null) {
-                int[] pos = relativePosition(anchor, overlay);
-                x = pos[0] + anchor.getWidth() / 2 - w / 2;
-                y = pos[1] + anchor.getHeight() + dp(12);
-                if (y + h > overlayH - dp(24)) y = pos[1] - h - dp(12);
-            } else {
-                // Lyrics, background and focus span the screen: park the button bottom-center.
-                x = overlayW / 2 - w / 2;
-                y = overlayH - h - dp(40);
-            }
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) pill.getLayoutParams();
-            lp.leftMargin = clamp(x, dp(12), Math.max(dp(12), overlayW - w - dp(12)));
-            lp.topMargin = clamp(y, dp(12), Math.max(dp(12), overlayH - h - dp(12)));
-            pill.setLayoutParams(lp);
-            pill.setAlpha(0f);
-            pill.setScaleX(0.9f);
-            pill.setScaleY(0.9f);
-            pill.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180)
-                    .setInterpolator(SHEET_EASE).start();
-        }
-
-        private void hideOptionsPill() {
-            if (optionsPill != null) {
-                optionsPill.animate().cancel();
-                optionsPill.setVisibility(View.GONE);
-            }
-        }
-
-        private View anchorFor(Element element) {
-            if (element == null) return null;
-            switch (element) {
-                case ARTWORK: return artCapture;
-                case TRACK_TEXT: return trackTextCapture;
-                case SKIP: return skipCapture;
-                case FOLLOW: return followCapture;
-                case DOCK: return dockCapture;
-                default: return null;
-            }
+            // A tap on an element opens its sheet; drags and resizes select without covering the
+            // canvas with it (they pass revealPanel = false).
+            if (revealPanel && !panelVisible) showPanelSheet(true);
         }
 
         /** Live readout (e.g. "120 dp", "115%") floating above what is being resized, or centered
@@ -1604,7 +1771,6 @@ final class LyricsLayoutEditController {
 
         private void showPanelSheet(boolean animate) {
             panelVisible = true;
-            hideOptionsPill();
             if (panelContainer.getVisibility() != View.VISIBLE) {
                 panelContainer.setTranslationY(sheetHiddenOffset());
                 panelContainer.setVisibility(View.VISIBLE);
@@ -1618,10 +1784,8 @@ final class LyricsLayoutEditController {
 
         private void hidePanelSheet(boolean animate, float velocityPxPerSec) {
             panelVisible = false;
-            animateSheetTo(sheetHiddenOffset(), velocityPxPerSec, animate, () -> {
-                panelContainer.setVisibility(View.INVISIBLE);
-                if (!panelVisible) showOptionsPill();
-            });
+            animateSheetTo(sheetHiddenOffset(), velocityPxPerSec, animate,
+                    () -> panelContainer.setVisibility(View.INVISIBLE));
         }
 
         /** Where the sheet goes when the finger lets go: a flick or a long enough pull closes it,
@@ -1823,6 +1987,7 @@ final class LyricsLayoutEditController {
                 case SKIP: return s("element_skip", "Skip");
                 case FOLLOW: return s("element_follow", "Follow");
                 case DOCK: return s("element_top_bar", "Top bar");
+                case CARD: return s("element_card", "Now playing card");
                 default: return s("element_background", "Background");
             }
         }
@@ -1850,6 +2015,13 @@ final class LyricsLayoutEditController {
                         refreshArtwork();
                     }),
                     matchWrap(0));
+
+            endGroup();
+            beginGroup(strings.setting(Settings.PANEL_MEDIA_CONTROLS));
+            addOption(chipRow(Settings.PANEL_MEDIA_CONTROLS,
+                    new String[]{"Off", "Single tap", "Double tap"}, null), matchWrap(12));
+            addOption(toggleRow(Settings.ADAPTIVE_LANDSCAPE_LAYOUT,
+                    strings.setting(Settings.ADAPTIVE_LANDSCAPE_LAYOUT), null), matchWrap(0));
 
             endGroup();
             buildTrackTextOptions();
@@ -1919,13 +2091,13 @@ final class LyricsLayoutEditController {
                     new int[]{90, 100, 120, 150},
                     null), matchWrap(8));
             addOption(toggleRow(Settings.LYRICS_ADAPTIVE_TEXT_SIZE,
-                    strings.setting(Settings.LYRICS_ADAPTIVE_TEXT_SIZE), null), matchWrap(14));
+                    strings.setting(Settings.LYRICS_ADAPTIVE_TEXT_SIZE), null), matchWrap(8));
+            addOption(toggleRow(Settings.ADAPTIVE_SECTIONING,
+                    strings.setting(Settings.ADAPTIVE_SECTIONING), null), matchWrap(14));
 
             addDivider();
             addSectionLabel(Settings.LYRICS_FONT, 10);
-            addOption(chipRow(Settings.LYRICS_FONT,
-                    new String[]{"spotify", "apple", "custom"},
-                    () -> selectElement(Element.TEXT)), matchWrap(8));
+            addOption(fontChipRow(), matchWrap(8));
             if ("custom".equals(store.get(Settings.LYRICS_FONT))) {
                 addOption(text(s("font_hint",
                         "Tap below to choose a font."),
@@ -1981,6 +2153,12 @@ final class LyricsLayoutEditController {
             addOption(toggleRow(Settings.LOAD_LIFT_ANIMATION,
                     strings.setting(Settings.LOAD_LIFT_ANIMATION), null), matchWrap(12));
             if (isAppleStyle()) {
+                addOption(toggleRow(Settings.LINE_SLIDE_ANIMATION,
+                        strings.setting(Settings.LINE_SLIDE_ANIMATION), null), matchWrap(6));
+                addOption(toggleRow(Settings.APPLE_LIFT,
+                        strings.setting(Settings.APPLE_LIFT), null), matchWrap(6));
+                addOption(toggleRow(Settings.APPLE_FADE_PASSED_LINES,
+                        strings.setting(Settings.APPLE_FADE_PASSED_LINES), null), matchWrap(12));
                 addOption(text(strings.setting(Settings.APPLE_CASCADE_SPEED),
                         12, GROUP_TITLE_COLOR, true), matchWrap(8));
                 addOption(settingSlider(Settings.APPLE_CASCADE_SPEED, "%", null), matchWrap(12));
@@ -2094,28 +2272,7 @@ final class LyricsLayoutEditController {
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             row.addView(button, btnLp);
 
-            button.setOnClickListener(v -> {
-                android.widget.PopupMenu popup = new android.widget.PopupMenu(activity, button);
-                String[] systemFonts = {"sans-serif", "sans-serif-medium", "sans-serif-condensed",
-                        "serif", "monospace", "casual", "cursive"};
-                for (int i = 0; i < systemFonts.length; i++) {
-                    popup.getMenu().add(0, i, i, systemFonts[i]);
-                }
-                popup.getMenu().add(1, 100, 100, s("font_pick_file", "Pick file..."));
-                popup.getMenu().add(1, 101, 101, s("font_type_path", "Type path..."));
-                popup.setOnMenuItemClickListener(item -> {
-                    if (item.getItemId() == 100) {
-                        pickFontFileWithSaf();
-                    } else if (item.getItemId() == 101) {
-                        promptCustomFontPath();
-                    } else if (item.getItemId() < systemFonts.length) {
-                        put(Settings.LYRICS_FONT_CUSTOM_PATH, systemFonts[item.getItemId()],
-                                () -> selectElement(Element.TEXT));
-                    }
-                    return true;
-                });
-                popup.show();
-            });
+            button.setOnClickListener(v -> openFontChooser(button));
             return row;
         }
 
@@ -2135,65 +2292,135 @@ final class LyricsLayoutEditController {
             return name;
         }
 
-        /** Opens the Storage Access Framework document picker so the user can pick a real
-         *  .ttf/.otf file on disk instead of typing the path by hand. We receive a content://
-         *  URI and persist it via takePersistableUriPermission so the font factory can reopen it
-         *  later without re-prompting; falls back to copying the file into our own cache dir with
-         *  a plain absolute path if permission grants are not available (older devices / custom
-         *  pickers that refuse grants). */
-        private void pickFontFileWithSaf() {
-            try {
-                android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
-                intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
-                intent.setType("*/*");
-                String[] mime = {"font/ttf", "font/otf", "application/x-font-ttf",
-                        "application/x-font-otf", "application/font-sfnt"};
-                intent.putExtra(android.content.Intent.EXTRA_MIME_TYPES, mime);
-                activity.startActivityForResult(intent, FILE_PICKER_REQUEST_CODE);
-                // The host Activity (Spotify's) won't route onActivityResult back to us, so we
-                // can't actually get the picked URI this way in an Xposed hook without a proxy
-                // activity. Instead, fall through and tell the user via the free-text prompt that
-                // they can long-press the file in any file manager -> Copy path, then paste.
-                // For hosts where we *can* register a listener we still surface the button so the
-                // flow reads as "there is a file picker path"; the text prompt keeps it functional.
-            } catch (Throwable ignored) {
+        /** Font chips. Spotify/Apple apply at once; Custom only opens the chooser, and the setting
+         *  changes once a font is actually picked - backing out of the chooser (or the file
+         *  picker) leaves the previous font in place instead of a "custom" with nothing behind it. */
+        private LinearLayout fontChipRow() {
+            String[] values = {"spotify", "apple", "custom"};
+            LinearLayout row = new LinearLayout(activity);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            String current = store.get(Settings.LYRICS_FONT);
+            TextView[] chips = new TextView[values.length];
+            for (int i = 0; i < values.length; i++) {
+                TextView chip = chip(strings.option((Settings.StringSetting) Settings.LYRICS_FONT, values[i]));
+                chips[i] = chip;
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                lp.leftMargin = dp(3);
+                lp.rightMargin = dp(3);
+                row.addView(chip, lp);
+                paintChip(chip, values[i].equals(current));
             }
-            promptCustomFontPath();
+            for (int i = 0; i < values.length; i++) {
+                String value = values[i];
+                TextView chip = chips[i];
+                chip.setOnClickListener(v -> {
+                    if ("custom".equals(value)) {
+                        openFontChooser(chip);
+                        return;
+                    }
+                    for (int j = 0; j < values.length; j++) paintChip(chips[j], values[j].equals(value));
+                    put(Settings.LYRICS_FONT, value, () -> selectElement(Element.TEXT));
+                });
+            }
+            return row;
         }
 
-        /** Same free-text entry the main Settings panel's own font path field uses, so both
-         *  surfaces write the exact same setting and neither one goes stale relative to the
-         *  other. Also surfaces a paste hint so users who copied a path from a real file
-         *  manager on-device know they can just paste it here instead of typing. */
-        private void promptCustomFontPath() {
-            com.eza.spicyex.ui.PanelDialog dialog = new com.eza.spicyex.ui.PanelDialog(
-                    activity, strings.setting(Settings.LYRICS_FONT_CUSTOM_PATH));
-            android.widget.EditText field = dialog.field(false,
-                    store.get(Settings.LYRICS_FONT_CUSTOM_PATH));
-            android.widget.LinearLayout hintWrap = new android.widget.LinearLayout(activity);
-            hintWrap.setOrientation(android.widget.LinearLayout.VERTICAL);
-            hintWrap.setPadding(0, dp(2), 0, 0);
-            android.widget.TextView hint = new android.widget.TextView(activity);
-            hint.setText(s("font_path_hint",
-                    "Tip: use a file manager → long-press a .ttf / .otf file → Copy path, then paste it here. "
-                            + "A system font family name (sans-serif, sans-serif-medium, serif…) also works."));
-            hint.setTextSize(12);
-            hint.setTextColor(0x7AFFFFFF);
-            hintWrap.addView(hint);
-            dialog.add(hintWrap);
-            dialog.primary(strings.get("settings_ai_save", "Save"), () -> {
-                String path = field.getText() == null ? "" : field.getText().toString().trim();
-                put(Settings.LYRICS_FONT_CUSTOM_PATH, path, () -> selectElement(Element.TEXT));
+        private static final String[] SYSTEM_FONTS = {"sans-serif", "sans-serif-medium",
+                "sans-serif-condensed", "serif", "monospace", "casual", "cursive"};
+
+        /** System font families plus "Pick file...". Nothing is written until one is chosen. */
+        private void openFontChooser(View anchor) {
+            android.widget.PopupMenu popup = new android.widget.PopupMenu(activity, anchor);
+            for (int i = 0; i < SYSTEM_FONTS.length; i++) {
+                popup.getMenu().add(0, i, i, SYSTEM_FONTS[i]);
+            }
+            popup.getMenu().add(1, 100, 100, s("font_pick_file", "Pick file..."));
+            popup.setOnMenuItemClickListener(item -> {
+                if (item.getItemId() == 100) {
+                    pickFontFile();
+                } else if (item.getItemId() < SYSTEM_FONTS.length) {
+                    commitCustomFont(SYSTEM_FONTS[item.getItemId()]);
+                }
+                return true;
             });
-            dialog.secondary(strings.get("settings_ai_cancel", "Cancel"), null);
-            dialog.show();
-            field.requestFocus();
-            android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
-            h.postDelayed(() -> {
-                android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager)
-                        activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
-                if (imm != null) imm.showSoftInput(field, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
-            }, 120);
+            popup.show();
+        }
+
+        private void commitCustomFont(String path) {
+            if (path == null || path.isEmpty()) return;
+            writer.put(Settings.LYRICS_FONT_CUSTOM_PATH, path);
+            put(Settings.LYRICS_FONT, "custom", () -> selectElement(Element.TEXT));
+        }
+
+        /** System document picker for a .ttf/.otf. The result comes back through
+         *  {@link ActivityResultBridge} (Spotify's own activity would otherwise receive it), and the
+         *  file is copied into Spotify's private files: the picker's content URI grant does not
+         *  outlive the process, a plain file does. */
+        private void pickFontFile() {
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            intent.putExtra(android.content.Intent.EXTRA_MIME_TYPES, new String[]{"font/ttf", "font/otf",
+                    "font/sfnt", "application/x-font-ttf", "application/x-font-otf",
+                    "application/font-sfnt", "application/octet-stream"});
+            ActivityResultBridge.start(activity, intent, FILE_PICKER_REQUEST_CODE, data -> {
+                android.net.Uri uri = data == null ? null : data.getData();
+                if (uri == null) return;
+                android.content.Context app = activity.getApplicationContext();
+                new Thread(() -> {
+                    String path = copyFontToPrivateStorage(app, uri);
+                    overlay.post(() -> {
+                        if (path == null) {
+                            android.widget.Toast.makeText(activity, s("font_pick_failed",
+                                    "Couldn't read that font file"), android.widget.Toast.LENGTH_SHORT).show();
+                        } else if (overlay.getParent() != null) {
+                            commitCustomFont(path);
+                        } else {
+                            writer.put(Settings.LYRICS_FONT_CUSTOM_PATH, path);
+                            writer.put(Settings.LYRICS_FONT, "custom");
+                        }
+                    });
+                }, "SpicyFontCopy").start();
+            });
+        }
+
+        /** Copies the picked font next to Spotify's own files; null if it is not a usable font. */
+        private static String copyFontToPrivateStorage(android.content.Context context, android.net.Uri uri) {
+            String name = "font";
+            try (android.database.Cursor cursor = context.getContentResolver().query(uri,
+                    new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) {
+                    name = cursor.getString(0);
+                }
+            } catch (Throwable ignored) {
+            }
+            String lower = name.toLowerCase(java.util.Locale.ROOT);
+            String ext = lower.endsWith(".otf") ? ".otf" : ".ttf";
+            String base = name.replaceAll("[^A-Za-z0-9._-]", "_");
+            if (base.toLowerCase(java.util.Locale.ROOT).endsWith(ext)) {
+                base = base.substring(0, base.length() - ext.length());
+            }
+            java.io.File dir = new java.io.File(context.getFilesDir(), "spicyex_fonts");
+            java.io.File out = new java.io.File(dir, base + "-" + System.currentTimeMillis() + ext);
+            try {
+                if (!dir.isDirectory() && !dir.mkdirs()) return null;
+                try (java.io.InputStream in = context.getContentResolver().openInputStream(uri);
+                     java.io.OutputStream os = new java.io.FileOutputStream(out)) {
+                    if (in == null) return null;
+                    byte[] buffer = new byte[64 * 1024];
+                    int read;
+                    while ((read = in.read(buffer)) > 0) os.write(buffer, 0, read);
+                }
+                android.graphics.Typeface.createFromFile(out);
+                // Older copies are no longer referenced by the setting.
+                java.io.File[] old = dir.listFiles();
+                if (old != null) for (java.io.File f : old) if (!f.equals(out)) f.delete();
+                return out.getAbsolutePath();
+            } catch (Throwable t) {
+                out.delete();
+                return null;
+            }
         }
 
         /** Mirrors PanelDialogs#reportFontCoverage's own resolution order (a real file on disk,
@@ -2762,7 +2989,8 @@ final class LyricsLayoutEditController {
      *  landscape's shorter screen means the options card sitting under (and blocking) the top
      *  bar rather than leaving room below it. */
     private static class MaxHeightScrollView extends android.widget.ScrollView {
-        private static final float MAX_HEIGHT_FRACTION = 0.6f;
+        /** Share of the parent's height the list may take; the side sheet allows more. */
+        float maxHeightFraction = 0.6f;
 
         MaxHeightScrollView(Activity activity) {
             super(activity);
@@ -2771,7 +2999,7 @@ final class LyricsLayoutEditController {
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             if (View.MeasureSpec.getMode(heightMeasureSpec) != View.MeasureSpec.UNSPECIFIED) {
-                int capped = Math.round(View.MeasureSpec.getSize(heightMeasureSpec) * MAX_HEIGHT_FRACTION);
+                int capped = Math.round(View.MeasureSpec.getSize(heightMeasureSpec) * maxHeightFraction);
                 heightMeasureSpec = View.MeasureSpec.makeMeasureSpec(capped, View.MeasureSpec.AT_MOST);
             }
             super.onMeasure(widthMeasureSpec, heightMeasureSpec);

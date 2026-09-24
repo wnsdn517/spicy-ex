@@ -911,9 +911,15 @@ final class TrackInfoReadoutController {
             bottomRow.setLayoutParams(rowLp);
         }
         boolean bottom = bottomBox.getVisibility() == View.VISIBLE;
-        int jumpMarginDp = bottom
-                ? (landscape ? BOTTOM_ART_INSET_LANDSCAPE_DP : BOTTOM_ART_INSET_PORTRAIT_DP)
-                        + bottomArtDpF + CLUSTER_GAP_DP : 24;
+        int rowTopDp = (landscape ? BOTTOM_ART_INSET_LANDSCAPE_DP : BOTTOM_ART_INSET_PORTRAIT_DP)
+                + bottomArtDpF;
+        int jumpMarginDp = bottom ? rowTopDp + CLUSTER_GAP_DP : 24;
+        // A solid dock is opaque over its whole height (the gradient band included), and the
+        // chips are drawn in the same plane: sitting just above the artwork row put them inside
+        // that fill, hidden behind it. Keep them above the dock's top edge instead.
+        if (bottom && "Solid".equals(config.get(Settings.TRACK_INFO_BACKGROUND))) {
+            jumpMarginDp = Math.max(rowTopDp, EDGE_GRADIENT_DP) + CLUSTER_GAP_DP;
+        }
         jumpController.setBottomMarginDp(jumpMarginDp);
         if (skipGapController != null) skipGapController.setBottomMarginDp(jumpMarginDp);
     }

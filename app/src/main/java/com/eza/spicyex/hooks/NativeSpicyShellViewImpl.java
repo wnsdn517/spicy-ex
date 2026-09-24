@@ -400,6 +400,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     void refreshPreferences() {
         preferenceRefreshPosted = false;
         if (!running) return;
+        applyStatusBarPreference();
         likedMode = config.get(Settings.LIKED_SONGS_BUTTON);
         refreshLikedButton(currentTrackThrottled());
         panelMediaMode = config.get(Settings.PANEL_MEDIA_CONTROLS);
@@ -506,11 +507,15 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
      *  LyricsLayoutEditController. Called from the settings panel's "Layout editor…" row via
      *  LyricsSettingsDialogController, after that dialog has already closed itself. */
     private void enterLayoutEditMode() {
+        enterLayoutEditMode(false);
+    }
+
+    private void enterLayoutEditMode(boolean cardMode) {
         // When the settings dialog dismisses, its window-teardown can momentarily detach the
         // shell's content parent. If the shell is not yet attached, defer so the overlay gets
         // a proper layout pass instead of being silently added to an invisible subtree.
         if (!isAttachedToWindow()) {
-            post(this::enterLayoutEditMode);
+            post(() -> enterLayoutEditMode(cardMode));
             return;
         }
         // Suppliers, not captured Views: which real frame is "current" can change (a position
@@ -544,6 +549,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 .disableDemoData(this::disableDemoMode)
                 .skipChip(skipChip)
                 .followChip(followChip)
+                .cardMode(cardMode)
                 .show();
     }
 
@@ -619,14 +625,25 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         return getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
     }
 
-    /** Hides the system status bar while the lyrics screen is open in landscape - there's no
-     *  chrome under it there worth keeping it visible for, and it eats into the already-tight
-     *  landscape two-column/side-dock layout. Portrait is unaffected. Swipe from the edge still
-     *  reveals it transiently (BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE / the pre-R sticky-immersive
-     *  equivalent), it just isn't pinned on screen. See NativeLyricsUtils#topSystemPadding, which
-     *  stops reserving status-bar height in landscape to match. */
-    private void applyLandscapeStatusBar() {
-        if (isLandscape()) hideStatusBar(); else showStatusBar();
+    /** Hides or shows the system status bar for the lyrics screen, per orientation (Settings'
+     *  "Hide status bar" rows). A swipe from the edge still reveals it for a moment
+     *  (BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE / the pre-R sticky-immersive equivalent). See
+     *  NativeLyricsUtils#topSystemPadding, which reserves the bar's height only while it shows. */
+    private boolean statusBarHidden;
+
+    private void applyStatusBarPreference() {
+        boolean hide = NativeLyricsUtils.statusBarHidden(activity);
+        if (hide) hideStatusBar(); else showStatusBar();
+        if (hide != statusBarHidden) {
+            statusBarHidden = hide;
+            // The chrome header and the lyrics' top clearance were sized for the old state.
+            if (chromeHeader != null) {
+                chromeHeader.setPadding(chromeHeader.getPaddingLeft(), topSystemPadding(activity),
+                        chromeHeader.getPaddingRight(), chromeHeader.getPaddingBottom());
+            }
+            lyricsTopInsetPx = topSystemPadding(activity);
+            applyLyricsScrollPadding();
+        }
     }
 
     private void hideStatusBar() {
@@ -826,7 +843,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         this.ambientController = new LyricsAmbientController(activity, HTTP, config);
         this.settingsDialogController = new LyricsSettingsDialogController(
                 activity, frameScheduler, ambientController, host, this::onSettingsClosed,
-                this::enterLayoutEditMode, this::resyncLyricsTiming, TAG);
+                mode -> enterLayoutEditMode(mode == com.eza.spicyex.SettingsPanel.EDITOR_CARD),
+                this::resyncLyricsTiming, TAG);
         this.emptyStateController = new LyricsShellEmptyStateController(activity, config, textFactory);
         this.shellLifecycle = new LyricsShellLifecycle(activity, () -> {
             if (consumeShareSheetBack() || consumeLayoutEditorBack()) return;
@@ -1453,7 +1471,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         synchronized (TrackInfoReadoutController.ART_NETWORK_LISTENERS) {
             TrackInfoReadoutController.ART_NETWORK_LISTENERS.add(artworkDownloadListener);
         }
-        applyLandscapeStatusBar();
+        statusBarHidden = NativeLyricsUtils.statusBarHidden(activity);
+        applyStatusBarPreference();
         refreshAudioListening();
         ambientController.start();
         revealChrome();
@@ -1879,6 +1898,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         }
         boolean clockPlayingNow = playingNow || audioRescueActive;
         long pos = playbackClock.getPosition(track, clockPlayingNow);
+        if (adTrack) updateAdCard(track, pos);
 
         String trackTitle = emptyFallback(track.title, "Unknown title");
         String trackArtist = emptyFallback(track.artist, "Unknown artist");
@@ -1985,6 +2005,24 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 LyricsScrollController.rangeStart(visibleRange),
                 LyricsScrollController.rangeEnd(visibleRange));
         updateFrameDemand(true);
+    }
+
+    /** "1 of 3 · 0:23" under the ad card: where this ad sits in the break and how long it has left. */
+    private void updateAdCard(SpotifyTrack track, long positionMs) {
+        StringBuilder text = new StringBuilder();
+        AdBreakInfo info = AdBreakInfo.current(track.uri);
+        if (info != null && info.known()) {
+            text.append(com.eza.spicyex.UiLanguage.strings(activity, config.get(Settings.UI_LANGUAGE))
+                    .get("lyrics_ad_position", "%1$d of %2$d")
+                    .replace("%1$d", String.valueOf(info.index))
+                    .replace("%2$d", String.valueOf(info.count)));
+        }
+        if (track.duration > 0 && positionMs >= 0) {
+            long left = Math.max(0L, (track.duration - positionMs + 999L) / 1000L);
+            if (text.length() > 0) text.append("  ·  ");
+            text.append(left / 60).append(':').append(left % 60 < 10 ? "0" : "").append(left % 60);
+        }
+        emptyStateController.updateAdProgress(text.toString());
     }
 
     private void updateFrameDemand(boolean playingNow) {
@@ -3297,6 +3335,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     }
 
     private void shareLyricLineAt(float yInScroll) {
+        if (config == null || !Boolean.TRUE.equals(config.get(Settings.LONG_PRESS_SHARE))) return;
         SpotifyTrack track = currentTrackThrottled();
         if (track == null) return;
         // Only a press on a lyric line opens the sheet. The nearest-row lookup used to pick a line

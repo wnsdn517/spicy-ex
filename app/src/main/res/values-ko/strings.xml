@@ -525,4 +525,16 @@
     <string name="settings_option_mute">음소거</string>
     <string name="settings_option_play_music_instead">음악으로 대체</string>
     <string name="settings_layout_editor_follow_chip_look">버튼 모양</string>
+    <string name="settings_label_lyrics_long_press_share">가사를 길게 눌러 공유</string>
+    <string name="settings_label_lyrics_status_bar_hidden_portrait">상태 표시줄 숨기기 (세로)</string>
+    <string name="settings_label_lyrics_status_bar_hidden_landscape">상태 표시줄 숨기기 (가로)</string>
+    <string name="settings_card_editor">재생 중 카드 편집기…</string>
+    <string name="settings_layout_editor_mode_card">재생 중 카드</string>
+    <string name="settings_layout_editor_mode_lyrics">가사 화면</string>
+    <string name="settings_layout_editor_demo_lyrics">데모</string>
+    <string name="settings_layout_editor_live_lyrics">실제 가사</string>
+    <string name="settings_layout_editor_element_card">재생 중 카드</string>
+    <string name="settings_layout_editor_card_caption">재생 중 카드</string>
+    <string name="settings_layout_editor_font_pick_failed">글꼴 파일을 읽을 수 없어요</string>
+    <string name="lyrics_ad_position" formatted="false">%2$d개 중 %1$d번째</string>
 </resources>

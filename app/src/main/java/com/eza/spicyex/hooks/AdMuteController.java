@@ -53,11 +53,17 @@ final class AdMuteController {
     private int restoreGeneration;
     private static final long RESTORE_FADE_MS = 900L;
     private static final long RESTORE_FADE_STEP_MS = 30L;
+    /** How long before the last ad ends the music starts its ending, so the ending (at most
+     *  AdMusicPlayer's outro plus its fade) is over by the time the song comes in. */
+    private static final long MUSIC_END_LEAD_MS = 2600L;
+    private final com.eza.spicyex.lyrics.LyricsPlaybackClock adClock;
+    private final Runnable recheck = this::check;
 
     AdMuteController(NativeSpicyLyricsHook host, Context context) {
         this.host = host;
         this.context = context;
         this.config = com.eza.spicyex.SpotifyPlusConfig.from(context);
+        this.adClock = new com.eza.spicyex.lyrics.LyricsPlaybackClock(host::readBestMeasuredProgressMs);
     }
 
     void start() {
@@ -87,7 +93,7 @@ final class AdMuteController {
             boolean isAd = track.uri.startsWith(AD_URI_PREFIX);
             if (isAd && !adActive) startAd();
             else if (!isAd && adActive) endAd();
-            if (adActive) updateMusic(mode);
+            if (adActive) updateMusic(mode, track);
         } catch (Throwable t) {
             XpLog.log(TAG + " check failed: " + t);
         }
@@ -103,11 +109,12 @@ final class AdMuteController {
 
     private void endAd() {
         adActive = false;
+        main.removeCallbacks(recheck);
         music.fadeOutAndStop();
         fadeInNormalVolumes();
     }
 
-    private void updateMusic(String mode) {
+    private void updateMusic(String mode, SpotifyTrack track) {
         if (!com.eza.spicyex.Settings.AD_MODE_MUSIC.equals(mode)) {
             if (music.isPlaying()) music.fadeOutAndStop();
             return;
@@ -117,10 +124,35 @@ final class AdMuteController {
         // pause in Spotify's own PlayerState holds it.
         if (host.isPlayerStatePaused()) {
             music.hold();
-        } else {
-            music.setTheme(config.get(com.eza.spicyex.Settings.AD_MUSIC_THEME));
-            music.fadeIn();
+            return;
         }
+        // On the last ad of a break the music ends with the ad instead of on the song's first
+        // note: without knowing the break's length it only stopped once the song had started,
+        // and its ending then played over it.
+        main.removeCallbacks(recheck);
+        long remaining = remainingMs(track);
+        AdBreakInfo info = AdBreakInfo.current(track.uri);
+        if (info != null && info.isLast() && remaining >= 0 && remaining <= MUSIC_END_LEAD_MS) {
+            if (music.isPlaying()) music.fadeOutAndStop();
+            return;
+        }
+        music.setTheme(config.get(com.eza.spicyex.Settings.AD_MUSIC_THEME));
+        music.fadeIn();
+        if (remaining > 0) {
+            // Look again just in time for the ending (and meanwhile once a second, so a break
+            // position that only shows up on screen later is still caught).
+            long wait = info != null && info.isLast()
+                    ? Math.max(50L, remaining - MUSIC_END_LEAD_MS)
+                    : Math.min(1000L, Math.max(50L, remaining - MUSIC_END_LEAD_MS));
+            main.postDelayed(recheck, wait);
+        }
+    }
+
+    /** Time left in the current ad, or -1 when unknown. */
+    private long remainingMs(SpotifyTrack track) {
+        if (track == null || track.duration <= 0) return -1;
+        long position = adClock.getPosition(track, !host.isPlayerStatePaused());
+        return position < 0 ? -1 : Math.max(0L, track.duration - position);
     }
 
     private void tick() {

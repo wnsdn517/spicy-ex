@@ -100,6 +100,7 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
             // Ad muting runs process-wide, not per screen: it applies to local playback
             // everywhere while changing only Spotify's ad AudioTrack.
             new AdMuteController(this, applicationContext).start();
+            ActivityResultBridge.install();
             // Installs only the AudioTrack#play hook, which is cheap. The Visualizer it can
             // trigger stays off until the lyrics screen asks for it - see setListeningEnabled.
             audioReactiveController.start();

@@ -58,17 +58,24 @@ final class NativeLyricsUtils {
         return landscape ? dp(72) : dp(20);
     }
 
-    static int topSystemPadding(Context context) {
-        // Landscape hides the status bar entirely (see
-        // NativeSpicyShellViewImpl#applyLandscapeStatusBar), so there's no bar height to reserve
-        // there - just the fixed chrome clearance.
-        boolean landscape = false;
+    /** Whether the lyrics screen hides the status bar in the current orientation. */
+    static boolean statusBarHidden(Context context) {
         try {
-            landscape = context.getResources().getDisplayMetrics().widthPixels
+            boolean landscape = context.getResources().getDisplayMetrics().widthPixels
                     > context.getResources().getDisplayMetrics().heightPixels;
+            com.eza.spicyex.SpotifyPlusConfig config = com.eza.spicyex.SpotifyPlusConfig.from(context);
+            return Boolean.TRUE.equals(config.get(landscape
+                    ? com.eza.spicyex.Settings.STATUS_BAR_HIDDEN_LANDSCAPE
+                    : com.eza.spicyex.Settings.STATUS_BAR_HIDDEN_PORTRAIT));
         } catch (Throwable ignored) {
+            return false;
         }
-        if (landscape) return dp(28);
+    }
+
+    static int topSystemPadding(Context context) {
+        // A hidden status bar (NativeSpicyShellViewImpl#applyStatusBarPreference) leaves no bar
+        // height to reserve - just the fixed chrome clearance.
+        if (statusBarHidden(context)) return dp(28);
         int status = 0;
         try {
             int resId = context.getResources().getIdentifier("status_bar_height", "dimen", "android");

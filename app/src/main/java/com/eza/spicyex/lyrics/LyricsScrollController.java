@@ -124,11 +124,25 @@ public final class LyricsScrollController {
         if (scrollView == null || contentColumn == null || row == null) return 0;
         workRect.set(0, 0, row.getWidth(), row.getHeight());
         contentColumn.offsetDescendantRectToMyCoords(row, workRect);
+        int lineOffset = anchorLineOffset(row.getHeight(), rowHalfPx, anchorFraction);
         if (anchorFraction == CENTER_ANCHOR_FRACTION) {
-            return scrollView.getPaddingTop() + workRect.top - (scrollView.getHeight() / 2) + rowHalfPx;
+            return scrollView.getPaddingTop() + workRect.top - (scrollView.getHeight() / 2) + lineOffset;
         }
         return scrollView.getPaddingTop() + workRect.top
-                - Math.round(scrollView.getHeight() * anchorFraction) + rowHalfPx;
+                - Math.round(scrollView.getHeight() * anchorFraction) + lineOffset;
+    }
+
+    /**
+     * Which line of a row sits on the focus point, as an offset from the row's top. Up to the
+     * middle of the screen it is the first line, so reading starts where the eye already is. Below
+     * the middle it moves to the last line: anchoring a wrapped lyric by its first line near the
+     * bottom pushed its remaining lines off the screen. The switch is blended over a short band
+     * past the middle so a focus point dragged across it glides rather than jumps.
+     */
+    static int anchorLineOffset(int rowHeightPx, int rowHalfPx, float anchorFraction) {
+        float lower = Math.max(0f, Math.min(1f, (anchorFraction - CENTER_ANCHOR_FRACTION) / 0.15f));
+        int extra = Math.max(0, rowHeightPx - 2 * rowHalfPx);
+        return rowHalfPx + Math.round(extra * lower);
     }
 
     public boolean isRowVisible(View row, int minVisiblePx) {

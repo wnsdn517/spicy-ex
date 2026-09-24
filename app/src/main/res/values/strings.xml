@@ -520,4 +520,17 @@
     <string name="settings_option_mute">Mute</string>
     <string name="settings_option_play_music_instead">Play music instead</string>
     <string name="settings_layout_editor_follow_chip_look">Chip</string>
+    <string name="settings_label_lyrics_long_press_share">Long-press a line to share</string>
+    <string name="settings_label_lyrics_status_bar_hidden_portrait">Hide status bar (portrait)</string>
+    <string name="settings_label_lyrics_status_bar_hidden_landscape">Hide status bar (landscape)</string>
+    <string name="settings_card_editor">Now playing card editor…</string>
+    <string name="settings_layout_editor_mode_card">Now playing card</string>
+    <string name="settings_layout_editor_mode_lyrics">Lyrics screen</string>
+    <string name="settings_layout_editor_demo_lyrics">Demo</string>
+    <string name="settings_layout_editor_live_lyrics">Live</string>
+    <string name="settings_layout_editor_element_card">Now playing card</string>
+    <string name="settings_layout_editor_card_caption">Now playing card</string>
+    <string name="settings_layout_editor_font_pick_file">Pick file…</string>
+    <string name="settings_layout_editor_font_pick_failed">Couldn\'t read that font file</string>
+    <string name="lyrics_ad_position" formatted="false">%1$d of %2$d</string>
 </resources>

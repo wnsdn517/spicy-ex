@@ -36,7 +36,7 @@ public class LyricsSurfaceRowPlannerTest {
     @Test
     public void adaptiveSectioningIsPublicAndDefaultsOn() {
         assertEquals("lyric_adaptive_sectioning", Settings.ADAPTIVE_SECTIONING.key);
-        assertSame(Settings.TEXT, Settings.ADAPTIVE_SECTIONING.section);
+        assertSame(Settings.INTERNAL, Settings.ADAPTIVE_SECTIONING.section);
         assertTrue(Settings.ADAPTIVE_SECTIONING.defaultValue);
     }
 
