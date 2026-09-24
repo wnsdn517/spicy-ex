@@ -79,6 +79,11 @@ import static com.eza.spicyex.lyrics.LyricUtils.trackIdFromUri;
 final class LyricsShareCardController {
     private static final String TAG = "[SpicyExLyricsShare]";
     private static final int W = 1080;
+    /** Spotify Code width on the card. At ~300px (a quarter of the card) it was too small to read
+     *  at a glance or to scan from a screenshot; these keep the title beside it readable. */
+    private static final int CODE_W = 430;
+    private static final int CODE_W_POLAROID = 410;
+    private static final int CODE_W_CLASSIC = 380;
     private static final int H = 1350;
     // A short quote is set large enough to fill the card instead of floating in empty space.
     private static final float MAX_TEXT = 128f;
@@ -1352,28 +1357,28 @@ final class LyricsShareCardController {
                 drawCover(canvas, art, photo, 14);
                 if (hasQuotes) {
                     if (withQuoteText) drawQuoteText(canvas, design, quotes, translations, withCode);
-                    drawTitleBlock(canvas, title, artistName, 150, H - 160, W - 300 - (withCode ? 330 : 0),
+                    drawTitleBlock(canvas, title, artistName, 150, H - 160, W - 300 - (withCode ? CODE_W_POLAROID + 30 : 0),
                             Color.rgb(40, 40, 44), Color.rgb(120, 120, 126), 34, 28);
                 } else {
                     // No quote: the caption is the song itself, set large in the print's margin.
                     drawTitleBlock(canvas, title, artistName, 150, 965, W - 300,
                             Color.rgb(34, 34, 38), Color.rgb(110, 110, 116), 52, 36);
                 }
-                if (withCode) drawSpotifyCode(canvas, code, W - 150 - 300, H - 160 - 38, 300, true);
+                if (withCode) drawSpotifyCode(canvas, code, W - 150, H - 160, CODE_W_POLAROID, true);
                 break;
             }
             case MINIMAL: {
                 if (hasQuotes) {
                     if (withQuoteText) drawQuoteText(canvas, design, quotes, translations, withCode);
-                    drawTitleBlock(canvas, title, artistName, 90, H - 125, W - 180 - (withCode ? 340 : 0),
+                    drawTitleBlock(canvas, title, artistName, 90, H - 125, W - 180 - (withCode ? CODE_W + 40 : 0),
                             Color.WHITE, Color.argb(170, 255, 255, 255), 34, 28);
                 } else {
                     // No quote: the cover fills the card, the song name under it.
                     drawCover(canvas, art, new RectF(110, 110, W - 110, 110 + W - 220), 36);
-                    drawTitleBlock(canvas, title, artistName, 110, H - 140, W - 220 - (withCode ? 330 : 0),
+                    drawTitleBlock(canvas, title, artistName, 110, H - 140, W - 220 - (withCode ? CODE_W + 30 : 0),
                             Color.WHITE, Color.argb(170, 255, 255, 255), 44, 32);
                 }
-                if (withCode) drawSpotifyCode(canvas, code, W - 110 - 300, (hasQuotes ? H - 125 : H - 140) - 38, 300, false);
+                if (withCode) drawSpotifyCode(canvas, code, W - 90, hasQuotes ? H - 125 : H - 140, CODE_W, false);
                 break;
             }
             case CLASSIC: {
@@ -1390,17 +1395,17 @@ final class LyricsShareCardController {
                     RectF thumb = new RectF(90, H - 250, 90 + 150, H - 100);
                     drawCover(canvas, art, thumb, 20);
                     drawTitleBlock(canvas, title, artistName, 90 + 180, H - 175,
-                            W - 90 - 180 - 90 - (withCode ? 320 : 0),
+                            W - 90 - 180 - 90 - (withCode ? CODE_W_CLASSIC + 40 : 0),
                             Color.WHITE, Color.argb(180, 255, 255, 255), 40, 32);
                 } else {
                     // No quote: a large cover above the rule; no second thumbnail of the same art.
                     float side = H - 290 - 90 - 90;
                     drawCover(canvas, art, new RectF((W - side) / 2f, 90, (W + side) / 2f, 90 + side), 32);
                     drawTitleBlock(canvas, title, artistName, 90, H - 175,
-                            W - 180 - (withCode ? 320 : 0),
+                            W - 180 - (withCode ? CODE_W_CLASSIC + 40 : 0),
                             Color.WHITE, Color.argb(180, 255, 255, 255), 44, 32);
                 }
-                if (withCode) drawSpotifyCode(canvas, code, W - 90 - 280, H - 175 - 35, 280, false);
+                if (withCode) drawSpotifyCode(canvas, code, W - 90, H - 175, CODE_W_CLASSIC, false);
                 break;
             }
             default: {
@@ -1423,10 +1428,10 @@ final class LyricsShareCardController {
                 } else {
                     // No quote: the cover fills the panel, the song name beneath it.
                     drawCover(canvas, art, new RectF(150, 210, W - 150, 210 + W - 300), 28);
-                    drawTitleBlock(canvas, title, artistName, 150, H - 210, W - 300 - (withCode ? 330 : 0),
+                    drawTitleBlock(canvas, title, artistName, 150, H - 210, W - 300 - (withCode ? CODE_W_POLAROID + 30 : 0),
                             Color.WHITE, Color.argb(185, 255, 255, 255), 44, 32);
                 }
-                if (withCode) drawSpotifyCode(canvas, code, W - 150 - 300, H - 210 - 38, 300, false);
+                if (withCode) drawSpotifyCode(canvas, code, W - 150, H - 210, CODE_W_POLAROID, false);
                 break;
             }
         }
@@ -1511,10 +1516,12 @@ final class LyricsShareCardController {
      * card the black drops out and only the bars remain; on paper, black bars on white multiplied
      * in for the same effect the other way round.
      */
-    private static void drawSpotifyCode(Canvas canvas, Bitmap code, float left, float top,
+    private static void drawSpotifyCode(Canvas canvas, Bitmap code, float right, float centreY,
                                         float width, boolean onPaper) {
         if (code == null || code.getWidth() <= 0) return;
         float height = width * code.getHeight() / code.getWidth();
+        float left = right - width;
+        float top = centreY - height / 2f;
         Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
         if (Build.VERSION.SDK_INT >= 29) {
             paint.setBlendMode(onPaper ? android.graphics.BlendMode.MULTIPLY
