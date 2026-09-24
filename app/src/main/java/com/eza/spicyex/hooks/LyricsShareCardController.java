@@ -106,7 +106,9 @@ final class LyricsShareCardController {
     private static final ExecutorService RENDER = Executors.newSingleThreadExecutor();
     private static final ExecutorService THUMBS = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(() -> {
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+            // Just below normal: the background class is throttled so hard inside a busy Spotify
+            // that half the strip never arrived.
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE);
             runnable.run();
         }, "SpicyExShareThumbs");
         thread.setDaemon(true);
@@ -312,142 +314,279 @@ final class LyricsShareCardController {
 
     /**
      * Word by word: each word of the pressed line leaves its place in the lyric list and lands on
-     * its own place in the card - its own line and x there, not the line's - growing or shrinking
-     * to the card's type size and turning the card's text colour on the way, a beat after the
-     * word before it. When the last one lands the card's text takes over under them.
+     * its own place in the card - its own line and x there - a beat after the word before it. On
+     * the way it turns from the word as it looked in the list (its real pixels: font, size,
+     * highlight) into the card's own glyphs (the card's font, size and colour), so that it lands
+     * exactly on the card's text, which takes over under it.
+     *
+     * <p>A row is either one text view for the line or, for word-synced lyrics, one small text
+     * view per word (or syllable); both are mapped by finding each view's text in the line.
      *
      * @return false when the row's text cannot be mapped onto the card's (the snapshot flies).
      */
     private boolean flyWordsIn(View row) {
         if (!(overlay instanceof ViewGroup) || cardHost == null || cardHost.getWidth() <= 0) return false;
-        TextView text = firstText(row);
-        if (text == null || text.getTextSize() <= 0f || text.getLayout() == null) return false;
         List<String> quotes = collectQuotes(startIndex, endIndex);
         if (quotes.isEmpty()) return false;
         String quote = quotes.get(0);
-        String source = text.getText().toString();
-        int base = source.indexOf(quote);
-        if (base < 0) return false;
+
+        // The row's text views, each placed at its offset in the line.
+        List<TextView> views = new ArrayList<>();
+        collectTexts(row, views);
+        List<SourceRun> runs = new ArrayList<>();
+        int cursor = 0;
+        for (TextView view : views) {
+            if (view.getLayout() == null || view.getWidth() <= 0) continue;
+            String own = view.getText().toString();
+            String trimmed = own.trim();
+            if (trimmed.isEmpty()) continue;
+            int at = quote.indexOf(trimmed, cursor);
+            // Only a gap of spacing between runs: anything further is another line's text
+            // (a translation, the romanization) that merely contains the same letters.
+            if (at < 0 || !quote.substring(cursor, at).trim().isEmpty()) continue;
+            runs.add(new SourceRun(view, at, own.indexOf(trimmed), trimmed.length()));
+            cursor = at + trimmed.length();
+        }
+        if (runs.isEmpty() || !quote.substring(cursor).trim().isEmpty()) return false;
+
         TextBox box = lyricBox(design, textStyle, spotifyCode && cachedCode(track, onPaper(design)) != null);
         Fitted fitted = layoutLyrics(quotes, collectTranslations(startIndex, endIndex), box, false);
         if (fitted.main.size() != quotes.size()) return false;
         StaticLayout target = fitted.main.get(0);
-        android.text.Layout from = text.getLayout();
+        float targetSize = target.getPaint().getTextSize();
+        TextPaint cardPaint = new TextPaint(target.getPaint());
+        cardPaint.setColor(box.color);
+        Paint.FontMetrics cardMetrics = cardPaint.getFontMetrics();
 
         float cardScale = cardHost.getWidth() / (float) W;
         float quoteTop = quoteTop(design, textStyle, box, fitted.height);
-        // The row may be scaled (the active line is drawn larger): its size on screen, not its own.
-        float scaleOnScreen = 1f;
-        for (View v = text; v != null && v != root; v = v.getParent() instanceof View ? (View) v.getParent() : null) {
-            scaleOnScreen *= v.getScaleX();
-        }
-        float sourceScale = scaleOnScreen;
-        float sourceSize = text.getTextSize();
-        float targetScale = target.getPaint().getTextSize() * cardScale / sourceSize;
-        int sourceColor = text.getCurrentTextColor();
-        int targetColor = box.color;
-
         int[] overlayLoc = new int[2];
-        int[] textLoc = new int[2];
         int[] cardLoc = new int[2];
         overlay.getLocationOnScreen(overlayLoc);
-        text.getLocationOnScreen(textLoc);
         cardHost.getLocationOnScreen(cardLoc);
         // The card is still rising into place; aim for where it comes to rest.
         View carousel = (View) cardHost.getParent();
         float settle = carousel == null ? 0f : carousel.getTranslationY();
 
+        // Each source view drawn once; words are cut from it with their highlight as seen.
+        Map<TextView, Bitmap> drawn = new java.util.HashMap<>();
+        List<FlyingWord> flying = new ArrayList<>();
         java.text.BreakIterator words = java.text.BreakIterator.getWordInstance();
         words.setText(quote);
-        List<TextView> ghosts = new ArrayList<>();
-        List<float[]> paths = new ArrayList<>();
-        ViewGroup host = (ViewGroup) overlay;
-        TextPaint measure = new TextPaint(text.getPaint());
-        float ascent = -measure.getFontMetrics().ascent;
+        int order = 0;
         for (int start = words.first(), end = words.next(); end != java.text.BreakIterator.DONE;
              start = end, end = words.next()) {
-            String word = quote.substring(start, end);
-            if (word.trim().isEmpty()) continue;
-            int srcLine = from.getLineForOffset(base + start);
-            float sx = textLoc[0] - overlayLoc[0]
-                    + (text.getTotalPaddingLeft() + from.getPrimaryHorizontal(base + start)) * sourceScale;
-            float sBaseline = textLoc[1] - overlayLoc[1]
-                    + (text.getTotalPaddingTop() + from.getLineBaseline(srcLine)) * sourceScale;
-            int dstLine = target.getLineForOffset(start);
-            float tx = cardLoc[0] - overlayLoc[0] + (box.left + target.getPrimaryHorizontal(start)) * cardScale;
-            float tBaseline = cardLoc[1] - settle - overlayLoc[1]
-                    + (quoteTop + target.getLineBaseline(dstLine)) * cardScale;
-
-            TextView ghost = new TextView(activity);
-            ghost.setText(word);
-            ghost.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sourceSize);
-            ghost.setTypeface(text.getTypeface());
-            ghost.setLetterSpacing(text.getLetterSpacing());
-            ghost.setTextColor(sourceColor);
-            ghost.setIncludeFontPadding(false);
-            ghost.setPadding(0, 0, 0, 0);
-            ghost.setSingleLine(true);
-            ghost.setPivotX(0f);
-            ghost.setPivotY(0f);
-            ghost.setElevation(dp(70));
-            host.addView(ghost, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            ghosts.add(ghost);
-            paths.add(new float[]{sx, sBaseline, tx, tBaseline});
+            if (quote.substring(start, end).trim().isEmpty()) continue;
+            boolean any = false;
+            // A word may span several syllable views: each piece flies, all starting together.
+            for (SourceRun run : runs) {
+                int pieceStart = Math.max(start, run.quoteStart);
+                int pieceEnd = Math.min(end, run.quoteStart + run.length);
+                if (pieceEnd <= pieceStart) continue;
+                FlyingWord w = flyingPiece(run, quote, pieceStart, pieceEnd, drawn, overlayLoc,
+                        target, cardPaint, cardMetrics, targetSize, box, quoteTop, cardScale, cardLoc, settle);
+                if (w == null) continue;
+                w.order = order;
+                flying.add(w);
+                any = true;
+            }
+            if (any) order++;
         }
-        if (ghosts.isEmpty()) return false;
+        for (Bitmap whole : drawn.values()) whole.recycle();
+        if (flying.isEmpty()) return false;
+
+        FlightView flight = new FlightView(activity, flying, dp(14));
+        flight.setElevation(dp(70));
+        ((ViewGroup) overlay).addView(flight, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         quoteFlying = true;
         if (currentTextLayer != null) currentTextLayer.setAlpha(0f);
         cardHost.setAlpha(0f);
-        cardHost.animate().alpha(1f).setStartDelay(200).setDuration(360)
+        cardHost.animate().alpha(1f).setStartDelay(160).setDuration(380)
                 .setInterpolator(new PathInterpolator(0.3f, 0f, 0.2f, 1f)).start();
 
-        int n = ghosts.size();
-        long stagger = n <= 1 ? 0 : Math.min(34L, 380L / (n - 1));
-        long flight = 620L;
-        long total = flight + stagger * (n - 1);
-        PathInterpolator along = new PathInterpolator(0.3f, 0f, 0.1f, 1f);
-        PathInterpolator down = new PathInterpolator(0.45f, 0f, 0.15f, 1f);
-        android.animation.ArgbEvaluator argb = new android.animation.ArgbEvaluator();
-        float hop = dp(14);
+        int n = order;
+        long stagger = n <= 1 ? 0 : Math.min(40L, 420L / (n - 1));
+        long total = FlightView.FLIGHT_MS + stagger * (n - 1);
+        flight.stagger = stagger;
         android.animation.ValueAnimator animator = android.animation.ValueAnimator.ofFloat(0f, 1f);
         animator.setDuration(total);
         animator.setInterpolator(null);
-        animator.addUpdateListener(a -> {
-            float elapsed = a.getAnimatedFraction() * total;
-            for (int i = 0; i < n; i++) {
-                float t = Math.max(0f, Math.min(1f, (elapsed - i * stagger) / flight));
-                float[] p = paths.get(i);
-                float ex = along.getInterpolation(t);
-                float ey = down.getInterpolation(t);
-                float scale = sourceScale + (targetScale - sourceScale) * ex;
-                // A slight arc: x leads, y follows, with a small lift mid-way.
-                float baseline = p[1] + (p[3] - p[1]) * ey - hop * (float) Math.sin(Math.PI * t);
-                TextView g = ghosts.get(i);
-                g.setScaleX(scale);
-                g.setScaleY(scale);
-                g.setX(p[0] + (p[2] - p[0]) * ex);
-                g.setY(baseline - ascent * scale);
-                g.setTextColor((Integer) argb.evaluate(ex, sourceColor, targetColor));
-            }
-        });
+        animator.addUpdateListener(a -> flight.setElapsed(a.getAnimatedFraction() * total));
         animator.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(android.animation.Animator animation) {
                 quoteFlying = false;
+                // The words sit exactly on the card's text now: swap them for it.
                 if (currentTextLayer != null) {
-                    currentTextLayer.animate().alpha(1f).setDuration(160).start();
+                    currentTextLayer.animate().alpha(1f).setDuration(120).start();
                 }
-                for (TextView g : ghosts) {
-                    g.animate().alpha(0f).setDuration(200).withEndAction(() -> {
-                        if (g.getParent() instanceof ViewGroup) ((ViewGroup) g.getParent()).removeView(g);
-                    }).start();
-                }
+                flight.animate().alpha(0f).setStartDelay(60).setDuration(160).withEndAction(() -> {
+                    if (flight.getParent() instanceof ViewGroup) ((ViewGroup) flight.getParent()).removeView(flight);
+                }).start();
             }
         });
         animator.start();
         return true;
+    }
+
+    /** One run's share of a word: cut from the row as seen, and set as the card sets it. */
+    private FlyingWord flyingPiece(SourceRun run, String quote, int pieceStart, int pieceEnd,
+                                   Map<TextView, Bitmap> drawn, int[] overlayLoc, StaticLayout target,
+                                   TextPaint cardPaint, Paint.FontMetrics cardMetrics, float targetSize,
+                                   TextBox box, float quoteTop, float cardScale, int[] cardLoc, float settle) {
+        TextView view = run.view;
+        android.text.Layout from = view.getLayout();
+        int s0 = run.viewStart + (pieceStart - run.quoteStart);
+        int s1 = run.viewStart + (pieceEnd - run.quoteStart);
+        int line = from.getLineForOffset(s0);
+        float left = from.getPrimaryHorizontal(s0);
+        float right = from.getLineForOffset(Math.max(s0, s1 - 1)) == line && s1 < view.getText().length()
+                ? from.getPrimaryHorizontal(s1) : from.getLineRight(line);
+        if (right <= left) return null;
+        Bitmap whole = drawn.get(view);
+        if (whole == null) {
+            whole = Bitmap.createBitmap(view.getWidth(), view.getHeight(), Bitmap.Config.ARGB_8888);
+            view.draw(new Canvas(whole));
+            drawn.put(view, whole);
+        }
+        int cropLeft = Math.max(0, Math.round(view.getTotalPaddingLeft() + left) - 2);
+        int cropRight = Math.min(whole.getWidth(), Math.round(view.getTotalPaddingLeft() + right) + 2);
+        int cropTop = Math.max(0, view.getTotalPaddingTop() + from.getLineTop(line));
+        int cropBottom = Math.min(whole.getHeight(), view.getTotalPaddingTop() + from.getLineBottom(line));
+        if (cropRight <= cropLeft || cropBottom <= cropTop) return null;
+
+        float viewScale = 1f;
+        for (View v = view; v != null && v != root; v = v.getParent() instanceof View ? (View) v.getParent() : null) {
+            viewScale *= v.getScaleX();
+        }
+        int[] viewLoc = new int[2];
+        view.getLocationOnScreen(viewLoc);
+        FlyingWord w = new FlyingWord();
+        w.source = Bitmap.createBitmap(whole, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop);
+        w.sourceSize = view.getTextSize();
+        w.sourceOriginX = view.getTotalPaddingLeft() + left - cropLeft;
+        w.sourceBaseline = view.getTotalPaddingTop() + from.getLineBaseline(line) - cropTop;
+        w.fromX = viewLoc[0] - overlayLoc[0] + (view.getTotalPaddingLeft() + left) * viewScale;
+        w.fromBaseline = viewLoc[1] - overlayLoc[1]
+                + (view.getTotalPaddingTop() + from.getLineBaseline(line)) * viewScale;
+        w.fromScreenSize = view.getTextSize() * viewScale;
+
+        // The same letters as the card sets them, at the card's own size and colour.
+        String text = quote.substring(pieceStart, pieceEnd);
+        int pad = Math.round(targetSize * 0.25f);
+        Bitmap card = Bitmap.createBitmap(Math.max(1, Math.round(cardPaint.measureText(text)) + pad * 2),
+                Math.max(1, Math.round(cardMetrics.bottom - cardMetrics.top) + pad * 2),
+                Bitmap.Config.ARGB_8888);
+        new Canvas(card).drawText(text, pad, pad - cardMetrics.top, cardPaint);
+        w.card = card;
+        w.cardOriginX = pad;
+        w.cardBaseline = pad - cardMetrics.top;
+        w.cardSize = targetSize;
+        int dstLine = target.getLineForOffset(pieceStart);
+        w.toX = cardLoc[0] - overlayLoc[0] + (box.left + target.getPrimaryHorizontal(pieceStart)) * cardScale;
+        w.toBaseline = cardLoc[1] - settle - overlayLoc[1]
+                + (quoteTop + target.getLineBaseline(dstLine)) * cardScale;
+        w.toScreenSize = targetSize * cardScale;
+        return w;
+    }
+
+    private static void collectTexts(View view, List<TextView> out) {
+        if (view.getVisibility() != View.VISIBLE) return;
+        if (view instanceof TextView) {
+            if (((TextView) view).getText().length() > 0) out.add((TextView) view);
+            return;
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) collectTexts(group.getChildAt(i), out);
+        }
+    }
+
+    /** One of the row's text views and where its text sits in the line. */
+    private static final class SourceRun {
+        final TextView view;
+        final int quoteStart;
+        final int viewStart;
+        final int length;
+
+        SourceRun(TextView view, int quoteStart, int viewStart, int length) {
+            this.view = view;
+            this.quoteStart = quoteStart;
+            this.viewStart = viewStart;
+            this.length = length;
+        }
+    }
+
+    /** A word in flight: its look in the list and on the card, and both places. */
+    private static final class FlyingWord {
+        int order;
+        Bitmap source;
+        float sourceSize, sourceOriginX, sourceBaseline;
+        float fromX, fromBaseline, fromScreenSize;
+        Bitmap card;
+        float cardSize, cardOriginX, cardBaseline;
+        float toX, toBaseline, toScreenSize;
+    }
+
+    /** Draws every flying word; one view for all of them, redrawn per frame. */
+    private static final class FlightView extends View {
+        static final long FLIGHT_MS = 640L;
+        private final List<FlyingWord> words;
+        private final float hop;
+        private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private final PathInterpolator along = new PathInterpolator(0.3f, 0f, 0.1f, 1f);
+        private final PathInterpolator down = new PathInterpolator(0.45f, 0f, 0.15f, 1f);
+        long stagger;
+        private float elapsed;
+
+        FlightView(Context context, List<FlyingWord> words, float hop) {
+            super(context);
+            this.words = words;
+            this.hop = hop;
+        }
+
+        void setElapsed(float elapsed) {
+            this.elapsed = elapsed;
+            invalidate();
+        }
+
+        private static float smooth(float edge0, float edge1, float x) {
+            float t = Math.max(0f, Math.min(1f, (x - edge0) / (edge1 - edge0)));
+            return t * t * (3f - 2f * t);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            for (int i = 0; i < words.size(); i++) {
+                FlyingWord w = words.get(i);
+                float t = Math.max(0f, Math.min(1f, (elapsed - w.order * stagger) / FLIGHT_MS));
+                float ex = along.getInterpolation(t);
+                float ey = down.getInterpolation(t);
+                float x = w.fromX + (w.toX - w.fromX) * ex;
+                // x leads and y follows, with a small lift mid-way: a gentle arc.
+                float baseline = w.fromBaseline + (w.toBaseline - w.fromBaseline) * ey
+                        - hop * (float) Math.sin(Math.PI * t);
+                float size = w.fromScreenSize + (w.toScreenSize - w.fromScreenSize) * ex;
+                float cardAlpha = smooth(0.12f, 0.7f, t);
+                if (cardAlpha < 1f) draw(canvas, w.source, w.sourceOriginX, w.sourceBaseline,
+                        size / w.sourceSize, x, baseline, 1f - smooth(0.2f, 0.8f, t));
+                if (cardAlpha > 0f) draw(canvas, w.card, w.cardOriginX, w.cardBaseline,
+                        size / w.cardSize, x, baseline, cardAlpha);
+            }
+        }
+
+        private void draw(Canvas canvas, Bitmap bitmap, float originX, float originBaseline, float scale,
+                          float x, float baseline, float alpha) {
+            if (alpha <= 0f) return;
+            float left = x - originX * scale;
+            float top = baseline - originBaseline * scale;
+            rect.set(left, top, left + bitmap.getWidth() * scale, top + bitmap.getHeight() * scale);
+            paint.setAlpha(Math.round(255 * alpha));
+            canvas.drawBitmap(bitmap, null, rect, paint);
+        }
     }
 
     /** The whole row as one image - when its words cannot be matched to the card's. */
@@ -1164,10 +1303,20 @@ final class LyricsShareCardController {
         Bitmap artist = artistImage;
         Bitmap lyricsBg = lyricsBackground;
         SpotifyTrack t = track;
-        float scale = Math.min(1f, dp(72) * 2f / H);
-        // Their own low-priority thread: the card and its neighbours never queue behind them.
+        float scale = thumbScale();
+        // The current design first, then outward from it - what is on screen fills in first.
+        List<Design> order = new ArrayList<>();
+        int n = Design.values().length;
+        order.add(design);
+        for (int step = 1; order.size() < n; step++) {
+            Design after = designAt(design.ordinal() + step);
+            if (!order.contains(after)) order.add(after);
+            Design before = designAt(design.ordinal() - step);
+            if (!order.contains(before)) order.add(before);
+        }
+        // Their own thread: the card and its neighbours never queue behind them.
         THUMBS.execute(() -> {
-            for (Design d : Design.values()) {
+            for (Design d : order) {
                 if (token != thumbGeneration) return;
                 Bitmap small;
                 try {
@@ -1184,6 +1333,20 @@ final class LyricsShareCardController {
                 });
             }
         });
+    }
+
+    private float thumbScale() {
+        return Math.min(1f, dp(72) * 2f / H);
+    }
+
+    private static Bitmap shrink(Bitmap full, float scale) {
+        return Bitmap.createScaledBitmap(full, Math.max(1, Math.round(W * scale)),
+                Math.max(1, Math.round(H * scale)), true);
+    }
+
+    /** A card rendered anyway (the current one, a neighbour) doubles as its thumbnail. */
+    private void setThumb(Design d, Bitmap small) {
+        if (small != null && d.ordinal() < designThumbs.size()) designThumbs.get(d.ordinal()).setImageBitmap(small);
     }
 
     private boolean hasAnyTranslation() {
@@ -1639,21 +1802,29 @@ final class LyricsShareCardController {
         Bitmap artist = artistImage;
         Bitmap lyricsBg = lyricsBackground;
         SpotifyTrack t = track;
+        float thumbScale = thumbScale();
         RENDER.execute(() -> {
             Bitmap left;
             Bitmap right;
+            Bitmap leftThumb;
+            Bitmap rightThumb;
             try {
                 left = renderCard(prev, style, b, null, art, artist, lyricsBg, quotes, translations,
                         safe(t.title), safe(t.artist));
                 right = renderCard(next, style, b, null, art, artist, lyricsBg, quotes, translations,
                         safe(t.title), safe(t.artist));
+                leftThumb = shrink(left, thumbScale);
+                rightThumb = shrink(right, thumbScale);
             } catch (Throwable error) {
+                XpLog.log(TAG + " peek render failed: " + error);
                 return;
             }
             main.post(() -> {
                 if (token != peekGeneration || peekPrev == null) return;
                 peekPrev.setImageBitmap(left);
                 peekNext.setImageBitmap(right);
+                setThumb(prev, leftThumb);
+                setThumb(next, rightThumb);
             });
         });
     }
@@ -1772,16 +1943,19 @@ final class LyricsShareCardController {
         Bitmap artist = artistImage;
         Bitmap lyricsBg = lyricsBackground;
         SpotifyTrack t = track;
+        float thumbScale = thumbScale();
         RENDER.execute(() -> {
             Bitmap base;
             List<Piece> pieces;
             Bitmap full;
+            Bitmap thumb;
             try {
                 base = renderCard(d, style, b, code, art, artist, lyricsBg, quotes, translations,
                         safe(t.title), safe(t.artist), false);
                 pieces = quotePieces(d, style, quotes, translations, code != null, ids);
                 full = base.copy(Bitmap.Config.ARGB_8888, true);
                 drawQuoteText(new Canvas(full), d, style, quotes, translations, code != null);
+                thumb = shrink(full, thumbScale);
             } catch (Throwable error) {
                 XpLog.log(TAG + " render failed: " + error);
                 return;
@@ -1789,6 +1963,7 @@ final class LyricsShareCardController {
             main.post(() -> {
                 if (token != generation || cardHost == null) return;
                 currentBitmap = full;
+                setThumb(d, thumb);
                 boolean textOnly = transition == Transition.SLIDE_UP || transition == Transition.SLIDE_DOWN
                         || transition == Transition.TEXT;
                 Runnable apply = () -> {
@@ -2186,37 +2361,64 @@ final class LyricsShareCardController {
         float height;
     }
 
-    /** Largest size (down to the floor) at which the whole selection fits the box, or null. */
+    /**
+     * Largest size (down to the floor, in steps of 2) at which the whole selection fits the box,
+     * or null. Binary search: a card used to try up to 48 sizes per render, and every render
+     * (card, neighbours, eight thumbnails) paid for it.
+     */
     private static Fitted layoutLyrics(List<String> quotes, List<String> translations, TextBox box,
                                        boolean strict) {
+        int steps = (int) ((MAX_TEXT - MIN_TEXT) / 2f);
+        Fitted best = null;
+        int lo = 0;
+        int hi = steps;
+        while (lo <= hi) {
+            int mid = (lo + hi) >>> 1;
+            Fitted f = fittedAt(quotes, translations, box, MAX_TEXT - mid * 2f);
+            if (f.height <= box.height) {
+                best = f;
+                hi = mid - 1;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        if (best != null || strict) return best;
+        TextPaint paint = lyricPaint(box, MIN_TEXT);
+        return lastResort(quotes, paint, box);
+    }
+
+    private static TextPaint lyricPaint(TextBox box, float size) {
         TextPaint paint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         paint.setColor(box.color);
         paint.setTypeface(box.face != null ? box.face : Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        paint.setTextSize(size);
+        return paint;
+    }
+
+    /** The selection laid out at one size (fresh paints: a layout keeps drawing with its paint). */
+    private static Fitted fittedAt(List<String> quotes, List<String> translations, TextBox box, float size) {
+        TextPaint paint = lyricPaint(box, size);
         TextPaint sub = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         sub.setColor(box.subColor);
         if (box.face != null) sub.setTypeface(Typeface.create(box.face, Typeface.NORMAL));
-        for (float size = MAX_TEXT; size >= MIN_TEXT; size -= 2f) {
-            paint.setTextSize(size);
-            sub.setTextSize(Math.max(26f, size * 0.52f));
-            Fitted f = new Fitted();
-            float gap = size * 0.5f;
-            for (int i = 0; i < quotes.size(); i++) {
-                StaticLayout l = layout(quotes.get(i), paint, (int) box.width, box.align);
-                f.main.add(l);
-                f.height += l.getHeight();
-                String t = translations != null && i < translations.size() ? translations.get(i) : "";
-                if (!isBlank(t)) {
-                    StaticLayout sl = layout(t, sub, (int) box.width, box.align);
-                    f.sub.add(sl);
-                    f.height += size * 0.18f + sl.getHeight();
-                } else {
-                    f.sub.add(null);
-                }
-                if (i < quotes.size() - 1) f.height += gap;
+        sub.setTextSize(Math.max(26f, size * 0.52f));
+        Fitted f = new Fitted();
+        float gap = size * 0.5f;
+        for (int i = 0; i < quotes.size(); i++) {
+            StaticLayout l = layout(quotes.get(i), paint, (int) box.width, box.align);
+            f.main.add(l);
+            f.height += l.getHeight();
+            String t = translations != null && i < translations.size() ? translations.get(i) : "";
+            if (!isBlank(t)) {
+                StaticLayout sl = layout(t, sub, (int) box.width, box.align);
+                f.sub.add(sl);
+                f.height += size * 0.18f + sl.getHeight();
+            } else {
+                f.sub.add(null);
             }
-            if (f.height <= box.height) return f;
+            if (i < quotes.size() - 1) f.height += gap;
         }
-        return strict ? null : lastResort(quotes, paint, box);
+        return f;
     }
 
     /** A single oversized line: the floor size, ellipsized to the box. Never overflows. */
