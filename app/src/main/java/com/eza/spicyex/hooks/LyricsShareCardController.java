@@ -1435,7 +1435,46 @@ final class LyricsShareCardController {
                 break;
             }
         }
+        drawBrandMark(canvas, design);
         return bitmap;
+    }
+
+    /**
+     * A small "SpicyEx" in the top-right corner, kept clear of everything the designs put at the
+     * bottom (title, Spotify Code): in the paper's margin for Polaroid, above the frosted panel for
+     * Glass, in the free corner for Minimal and Classic. Sized from the card, not the screen.
+     */
+    private static void drawBrandMark(Canvas canvas, Design design) {
+        TextPaint mark = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        mark.setTypeface(Typeface.DEFAULT_BOLD);
+        mark.setTextSize(W * 0.024f);
+        mark.setLetterSpacing(0.04f);
+        mark.setTextAlign(Paint.Align.RIGHT);
+        float right;
+        float baseline;
+        switch (design) {
+            case POLAROID:
+                mark.setColor(Color.argb(120, 40, 40, 44));
+                right = W - 150;
+                baseline = 128;
+                break;
+            case GLASS:
+                mark.setColor(Color.argb(130, 255, 255, 255));
+                right = W - 100;
+                baseline = 118;
+                break;
+            case CLASSIC:
+                mark.setColor(Color.argb(130, 255, 255, 255));
+                right = W - 90;
+                baseline = 110;
+                break;
+            default:
+                mark.setColor(Color.argb(130, 255, 255, 255));
+                right = W - 90;
+                baseline = 82;
+                break;
+        }
+        canvas.drawText("SpicyEx", right, baseline, mark);
     }
 
     private static void drawLyrics(Canvas canvas, List<String> quotes, List<String> translations, TextBox box) {
