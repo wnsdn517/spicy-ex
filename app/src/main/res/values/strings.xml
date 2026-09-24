@@ -221,6 +221,10 @@
     <string name="share_save">Save</string>
     <string name="share_share">Share</string>
     <string name="share_full">No room for more lines on this card</string>
+    <string name="share_pick_lines">Lyrics</string>
+    <string name="share_pick_title">Choose lyrics</string>
+    <string name="share_pick_count" formatted="false">%1$d selected</string>
+    <string name="share_done">Done</string>
     <string name="share_artist_unavailable">Artist photo unavailable</string>
     <string name="share_saved">Saved to Pictures/SpicyEx</string>
     <string name="share_save_failed">Could not save the card</string>

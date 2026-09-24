@@ -206,6 +206,10 @@
     <string name="share_save">保存</string>
     <string name="share_share">共有</string>
     <string name="share_full">このカードにはこれ以上入りません</string>
+    <string name="share_pick_lines">歌詞を選ぶ</string>
+    <string name="share_pick_title">共有する歌詞を選ぶ</string>
+    <string name="share_pick_count" formatted="false">%1$d 行を選択中</string>
+    <string name="share_done">完了</string>
     <string name="share_artist_unavailable">アーティスト写真を取得できません</string>
     <string name="share_saved">ピクチャ/SpicyExに保存しました</string>
     <string name="share_save_failed">カードを保存できませんでした</string>
