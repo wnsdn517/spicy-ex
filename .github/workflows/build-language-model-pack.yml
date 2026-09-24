@@ -65,7 +65,6 @@ jobs:
             **Usage:**
             ```bash
             ./gradlew :app:assembleDebug \
-              -PexternalLanguageModels=true \
               -PLANGUAGE_MODEL_PACK_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/spicyex-language-models-v1.zip" \
               -PLANGUAGE_MODEL_PACK_SHA256="${{ steps.sha256.outputs.sha256 }}"
             ```

@@ -133,6 +133,31 @@ public final class WebPlayerService extends Service {
             + "}catch(e){}"
             + "})();";
 
+    /**
+     * The player page is a 1x1 transparent overlay nobody ever sees, but the desktop SPA still
+     * animates as if it were on a monitor: rAF-driven progress bars, CSS transitions, marquee
+     * titles, hover effects. Each of those keeps the renderer's main thread and compositor busy
+     * every vsync for the whole time the player is alive (which, with the boot receiver, is
+     * all day). Nothing here touches audio, timers or network: rAF callbacks still run - just a
+     * few times a second, like a background tab - and CSS animations/transitions finish
+     * instantly, so any code waiting on transitionend still gets it.
+     */
+    private static final String IDLE_RENDER_JS = "(function(){try{"
+            + "if(window.__spicyIdle)return;window.__spicyIdle=true;"
+            + "var q=[],t=0;"
+            + "function flush(){t=0;var c=q;q=[];var now=performance.now();"
+            + "for(var i=0;i<c.length;i++){if(c[i]){try{c[i].f(now);}catch(e){}}}}"
+            + "window.requestAnimationFrame=function(f){q.push({f:f});"
+            + "if(!t)t=setTimeout(flush,250);return q.length;};"
+            + "window.cancelAnimationFrame=function(id){if(id>0&&q[id-1])q[id-1]=null;};"
+            + "function css(){try{var s=document.createElement('style');"
+            + "s.textContent='*,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;"
+            + "animation-iteration-count:1!important;transition:none!important;scroll-behavior:auto!important}"
+            + "img,video,canvas,picture,svg image{visibility:hidden!important}';"
+            + "(document.head||document.documentElement).appendChild(s);}catch(e){}}"
+            + "if(document.documentElement)css();else document.addEventListener('DOMContentLoaded',css);"
+            + "}catch(e){}})();";
+
     // Analytics + ad-audio host lists, credited to Spotilol (lyssadev/Spotilol AdBlocker.kt).
     // workbox-window is deliberately NOT blocked: Spotify lazy-loads it as a webpack chunk
     // during init and blocking it trips a ChunkLoadError -> React error boundary.
@@ -140,6 +165,11 @@ public final class WebPlayerService extends Service {
             "doubleclick.net", "googlesyndication.com", "fastly-insights.com", "sentry.io",
             "t.6sc.co", "tracker.samplicio.us", "adsrvr.org", "aet.spotify.com",
             "retargeting-pixels", "spotify.com/gabo-receiver-service/public/v3/events",
+    };
+    // Canvas (the looping artist video) and other decorative video: never visible here, and each
+    // one is a hardware video decode running for the length of a track.
+    private static final String[] VIDEO_MARKERS = {
+            "canvaz.scdn.co", "video.akamaized.net", "video-fa.scdn.co", "video-ak.cdn.spotify.com",
     };
     private static final String[] AD_AUDIO_MARKERS = {
             "akamaized.net/audio/", "scdn.co/audio/", "scdn.co/mp3-ad/", "spotifycdn.com/audio/",
@@ -671,6 +701,13 @@ public final class WebPlayerService extends Service {
                     android.graphics.PixelFormat.TRANSLUCENT);
             lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
             wm.addView(w, lp);
+            if (Build.VERSION.SDK_INT >= 35) {
+                // Votes only for this invisible 1x1 view; other windows keep their own rates.
+                try {
+                    w.setRequestedFrameRate(android.view.View.REQUESTED_FRAME_RATE_CATEGORY_LOW);
+                } catch (Throwable ignored) {
+                }
+            }
             overlayWindowManager = wm;
             overlayAttachedView = w;
             Log.i(TAG, "webview attached to overlay window");
@@ -723,6 +760,9 @@ public final class WebPlayerService extends Service {
             s.setAllowContentAccess(false);
             s.setGeolocationEnabled(false);
             s.setSaveFormData(false);
+            // Cover art, avatars and playlist mosaics decode and upload to the GPU for a page
+            // nobody sees; playback, login and Connect never need them.
+            s.setBlockNetworkImage(true);
             s.setUserAgentString(DESKTOP_UA);
             try {
                 CookieManager cm = CookieManager.getInstance();
@@ -737,6 +777,8 @@ public final class WebPlayerService extends Service {
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                     WebViewCompat.addDocumentStartJavaScript(w, BROWSER_SPOOF_JS,
                             Collections.singleton("https://*.spotify.com"));
+                    WebViewCompat.addDocumentStartJavaScript(w, IDLE_RENDER_JS,
+                            Collections.singleton("https://open.spotify.com"));
                 }
             } catch (Throwable t) {
                 Log.e(TAG, "addDocumentStartJavaScript failed type=" + t.getClass().getName(), t);
@@ -753,6 +795,11 @@ public final class WebPlayerService extends Service {
                 // to logcat - otherwise that detail is invisible from the native side entirely.
                 @Override
                 public boolean onConsoleMessage(android.webkit.ConsoleMessage cm) {
+                    android.webkit.ConsoleMessage.MessageLevel level = cm.messageLevel();
+                    if (level != android.webkit.ConsoleMessage.MessageLevel.ERROR
+                            && level != android.webkit.ConsoleMessage.MessageLevel.WARNING) {
+                        return true;
+                    }
                     Log.i(TAG, "console[" + cm.messageLevel() + "] " + cm.message()
                             + " (" + cm.sourceId() + ":" + cm.lineNumber() + ")");
                     return true;
@@ -842,6 +889,9 @@ public final class WebPlayerService extends Service {
                 if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                     try {
                         view.evaluateJavascript(BROWSER_SPOOF_JS, null);
+                        if (url != null && url.startsWith("https://open.spotify.com")) {
+                            view.evaluateJavascript(IDLE_RENDER_JS, null);
+                        }
                     } catch (Throwable ignored) {
                     }
                 }
@@ -909,6 +959,12 @@ public final class WebPlayerService extends Service {
                 for (String host : ANALYTICS_HOSTS) {
                     if (lower.contains(host)) {
                         return new WebResourceResponse("text/plain", "utf-8", 200, "OK",
+                                corsHeaders(), new ByteArrayInputStream(new byte[0]));
+                    }
+                }
+                for (String marker : VIDEO_MARKERS) {
+                    if (lower.contains(marker)) {
+                        return new WebResourceResponse("text/plain", "utf-8", 404, "Not Found",
                                 corsHeaders(), new ByteArrayInputStream(new byte[0]));
                     }
                 }

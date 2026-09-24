@@ -83,6 +83,6 @@ public class SettingsDefaultsTest {
         assertEquals("Heavy", Settings.ENABLE_LINE_BLUR.coerce("Heavy"));
         assertEquals("Off", Settings.ENABLE_LINE_BLUR.coerce("bogus"));
         assertTrue(Settings.FORCE_DARK_BACKGROUND.defaultValue);
-        assertEquals(Integer.valueOf(35), Settings.EXTRA_DARK_BACKGROUND.defaultValue);
+        assertEquals(Integer.valueOf(60), Settings.EXTRA_DARK_BACKGROUND.defaultValue);
     }
 }

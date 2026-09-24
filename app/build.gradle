@@ -93,10 +93,6 @@ android {
         def modelPackSha256 = providers.gradleProperty("LANGUAGE_MODEL_PACK_SHA256")
             .orElse("")
             .get()
-        def externalLanguageModels = providers.gradleProperty("externalLanguageModels")
-            .map { it.toBoolean() }
-            .orElse(true)
-            .get()
         buildConfigField "String", "LANGUAGE_MODEL_PACK_URL", "\"${modelPackUrl}\""
         buildConfigField "String", "LANGUAGE_MODEL_PACK_SHA256", "\"${modelPackSha256}\""
 
@@ -112,6 +108,11 @@ android {
     sourceSets {
         main {
             aidl.srcDirs = []
+        }
+        // Model files are delivered only through the language model pack, never inside the APK.
+        // JVM tests still read the JMdict tables straight from the pack's source folder.
+        test {
+            resources.srcDirs += 'language-models'
         }
     }
 
@@ -160,21 +161,12 @@ android {
                     'META-INF/CONTRIBUTORS.md',
                     'META-INF/LICENSE.md'
             ]
-            if (providers.gradleProperty("externalLanguageModels").orNull?.toBoolean() ?: true) {
-                excludes += [
-                        'com/atilika/kuromoji/unidic/characterDefinitions.bin',
-                        'com/atilika/kuromoji/unidic/connectionCosts.bin',
-                        'com/atilika/kuromoji/unidic/doubleArrayTrie.bin',
-                        'com/atilika/kuromoji/unidic/tokenInfoDictionary.bin',
-                        'com/atilika/kuromoji/unidic/tokenInfoFeaturesMap.bin',
-                        'com/atilika/kuromoji/unidic/tokenInfoPartOfSpeechMap.bin',
-                        'com/atilika/kuromoji/unidic/tokenInfoTargetMap.bin',
-                        'com/atilika/kuromoji/unidic/unknownDictionary.bin',
-                        'org/apache/tika/langdetect/charsoup/langdetect-20260320.bin',
-                        'com/eza/spicyex/lyrics/JmdictFurigana.txt.gz',
-                        'com/eza/spicyex/lyrics/JmdictPreferredReadings.txt.gz'
-                ]
-            }
+            // The libraries ship their own copies of these models; the language model pack
+            // carries them instead (see packageLanguageModelPack).
+            excludes += [
+                    'com/atilika/kuromoji/unidic/*.bin',
+                    'org/apache/tika/langdetect/charsoup/*.bin'
+            ]
         }
     }
 }
@@ -206,10 +198,7 @@ dependencies {
 tasks.register("packageLanguageModelPack", Zip) {
     archiveFileName = "spicyex-language-models-v1.zip"
     destinationDirectory = layout.buildDirectory.dir("language-models")
-    from("src/main/resources/com/eza/spicyex/lyrics") {
-        include "JmdictFurigana.txt.gz", "JmdictPreferredReadings.txt.gz"
-        into "jmdict"
-    }
+    from("language-models")
     from(configurations.debugRuntimeClasspath.collect { zipTree(it) }) {
         include "com/atilika/kuromoji/unidic/*.bin"
         include "org/apache/tika/langdetect/charsoup/langdetect-20260320.bin"

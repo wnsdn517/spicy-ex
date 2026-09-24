@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -148,53 +149,46 @@ public final class JapaneseReadingEngine {
 
     private static FuriganaTable loadJmdictFurigana() {
         FuriganaTable.Builder out = new FuriganaTable.Builder();
-        try (InputStream in = LanguageModelPack.openOrPackaged(
-            "jmdict/JmdictFurigana.txt.gz", JapaneseReadingEngine.class,
-            "JmdictFurigana.txt.gz")) {
-            if (in == null) return out.build();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(new GZIPInputStream(in), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (!line.isEmpty() && line.charAt(0) == '\uFEFF') line = line.substring(1);
-                    int first = line.indexOf('|');
-                    int second = first < 0 ? -1 : line.indexOf('|', first + 1);
-                    if (first <= 0 || second <= first + 1 || second >= line.length() - 1) continue;
-                    String surface = line.substring(0, first);
-                    String reading = line.substring(first + 1, second);
-                    List<SpicyJapaneseChineseProcessor.FuriganaSegment> segments =
-                            parseJmdictSpanSpec(line.substring(second + 1));
-                    if (segments.isEmpty()) continue;
-                    // Builder.add keeps the first entry for a key, matching the
-                    // containsKey guard this replaced.
-                    out.add(kataToHira(surface) + "|" + kataToHira(reading), segments);
-                }
-            }
-        } catch (Throwable ignored) {
-        }
+        readJmdict("JmdictFurigana.txt.gz", line -> {
+            int first = line.indexOf('|');
+            int second = first < 0 ? -1 : line.indexOf('|', first + 1);
+            if (first <= 0 || second <= first + 1 || second >= line.length() - 1) return;
+            List<SpicyJapaneseChineseProcessor.FuriganaSegment> segments =
+                    parseJmdictSpanSpec(line.substring(second + 1));
+            if (segments.isEmpty()) return;
+            // Builder.add keeps the first entry for a key.
+            out.add(kataToHira(line.substring(0, first)) + "|"
+                    + kataToHira(line.substring(first + 1, second)), segments);
+        });
         return out.build();
     }
 
     private static Map<String, String> loadJmdictPreferredReadings() {
         HashMap<String, String> out = new HashMap<>();
-        try (InputStream in = LanguageModelPack.openOrPackaged(
-            "jmdict/JmdictPreferredReadings.txt.gz", JapaneseReadingEngine.class,
-            "JmdictPreferredReadings.txt.gz")) {
-            if (in == null) return out;
+        readJmdict("JmdictPreferredReadings.txt.gz", line -> {
+            int separator = line.indexOf('|');
+            if (separator <= 0 || separator >= line.length() - 1) return;
+            out.put(kataToHira(line.substring(0, separator)),
+                    kataToHira(line.substring(separator + 1)));
+        });
+        return out;
+    }
+
+    /** Feeds each line of a gzipped JMdict table from the language model pack, BOM stripped. A
+     *  missing pack or a damaged file just yields fewer (or no) lines. */
+    private static void readJmdict(String name, Consumer<String> onLine) {
+        try (InputStream in = LanguageModelPack.openOrClasspath("jmdict/" + name, "/jmdict/" + name)) {
+            if (in == null) return;
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(new GZIPInputStream(in), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     if (!line.isEmpty() && line.charAt(0) == '\uFEFF') line = line.substring(1);
-                    int separator = line.indexOf('|');
-                    if (separator <= 0 || separator >= line.length() - 1) continue;
-                    out.put(kataToHira(line.substring(0, separator)),
-                            kataToHira(line.substring(separator + 1)));
+                    onLine.accept(line);
                 }
             }
         } catch (Throwable ignored) {
         }
-        return out;
     }
 
     static List<SpicyJapaneseChineseProcessor.FuriganaSegment> parseJmdictSpanSpec(String spec) {

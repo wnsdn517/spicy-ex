@@ -93,7 +93,7 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
             + "    c = mix(normal, dim, dark) * brightness;\n"
             + "    // Desktop hash/dither strength, moved after final darkening to retain output precision.\n"
             + "    // Zero brightness must stay exactly black.\n"
-            + "    float noise = hash(float3(floor(p), floor(time * 60.0)));\n"
+            + "    float noise = hash(float3(floor(p), 0.0));\n"
             + "    c += (noise - 0.5) * 0.008 * min(1.0, brightness * 255.0);\n"
             + "    return half4(clamp(c, 0.0, 1.0), 1.0);\n"
             + "}\n";
@@ -124,13 +124,32 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
      *  hot, instead of continuing to add GPU load on top of whatever caused it. */
     private boolean thermalThrottled;
     private PowerManager.OnThermalStatusChangedListener thermalListener;
-    /**
-     * Beat reactivity: the live audio level is applied as a transient boost on top of the shader's
-     * steady-state warp amount, so the background visibly kicks with the music instead of only
-     * flowing at a constant rate. Written from the capture thread, read on the next draw.
+    /*
+     * Music reactivity, in two layers:
+     *  - beat: each kick "breathes" the whole background - a slight zoom and brightening that
+     *    rises quickly and eases back. Applied through the view's scale and the layer's paint,
+     *    both composite-time properties, so it moves smoothly at the display rate without
+     *    re-running the shader. (It used to jump the shader's warp amount on each kick, redrawn at
+     *    20-30fps, which read as the image twitching.)
+     *  - energy: the song's loudness, smoothed and measured against its own running level, sets
+     *    how fast and how far the background flows. Quiet verses drift; a loud chorus moves.
      */
-    private static final float BEAT_BOOST = 0.65f;
+    private static final float BEAT_ZOOM = 0.03f;
+    private static final float BEAT_BRIGHTEN = 0.17f;
+    private static final float PULSE_ATTACK_SEC = 0.045f;
+    private static final float PULSE_RELEASE_SEC = 0.32f;
     private volatile float audioLevel;
+    /** The beat envelope actually shown. UI thread only. */
+    private float pulse;
+    private long lastPulseNanos;
+    private float appliedZoom = 1f;
+    // Energy: short and long loudness averages; energy01 is 0.5 at the song's usual level.
+    private float loudShort;
+    private float loudLong;
+    private float energy01 = 0.5f;
+    private long lastEnergyNanos;
+    private long energyUpdatedNanos;
+    private float baseBrightness = 1f;
 
     public AmbientArtworkBackgroundView(Context context, boolean dark) {
         super(context);
@@ -145,6 +164,7 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
         invalidate();
     }
     public void setDarkening(float brightness, ColorFilter filter) {
+        baseBrightness = brightness;
         shader.setFloatUniform("brightness", brightness);
         // Animated shader receives brightness directly; only the fallback canvas needs a filter.
         fallback.setColorFilter(filter);
@@ -157,7 +177,12 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
     }
     public void setPlaying(boolean value) {
         if (playing == value) return;
-        playing = value; schedule();
+        playing = value;
+        if (!playing) {
+            pulse = 0f;
+            applyPulse();
+        }
+        schedule();
     }
     public void setMotionEnabled(boolean value) {
         if (moving == value) return;
@@ -188,6 +213,62 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
         schedule(); invalidate();
     }
 
+    /**
+     * One frame of this background at {@code width} x {@code height}, for the lyric share card.
+     * Renders with its own copy of the shader (so the live view's uniforms are never touched from
+     * another thread) through an offscreen HardwareRenderer, and softens it like the live layer.
+     * Null when there is no artwork texture yet or the platform refuses.
+     */
+    public Bitmap snapshot(int width, int height) {
+        Bitmap source = texture;
+        if (source == null || source.isRecycled()) return null;
+        android.media.ImageReader reader = null;
+        HardwareRenderer renderer = null;
+        try {
+            RuntimeShader copy = new RuntimeShader(AGSL);
+            BitmapShader input = new BitmapShader(source, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            input.setFilterMode(BitmapShader.FILTER_MODE_LINEAR);
+            copy.setInputShader("image", input);
+            copy.setFloatUniform("resolution", width, height);
+            copy.setFloatUniform("time", (float) elapsedSeconds);
+            copy.setFloatUniform("dark", 0f);
+            copy.setFloatUniform("brightness", baseBrightness);
+            copy.setFloatUniform("warpIntensity", 1f);
+            Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
+            p.setShader(copy);
+            RenderNode node = new RenderNode("ambientSnapshot");
+            node.setPosition(0, 0, width, height);
+            node.setRenderEffect(RenderEffect.createBlurEffect(9f, 9f, Shader.TileMode.CLAMP));
+            RecordingCanvas canvas = node.beginRecording();
+            canvas.drawRect(0, 0, width, height, p);
+            node.endRecording();
+            reader = android.media.ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 1,
+                    android.hardware.HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE
+                            | android.hardware.HardwareBuffer.USAGE_GPU_COLOR_OUTPUT);
+            renderer = new HardwareRenderer();
+            renderer.setSurface(reader.getSurface());
+            renderer.setContentRoot(node);
+            renderer.createRenderRequest().setWaitForPresent(true).syncAndDraw();
+            try (android.media.Image image = reader.acquireNextImage()) {
+                if (image == null) return null;
+                android.hardware.HardwareBuffer buffer = image.getHardwareBuffer();
+                if (buffer == null) return null;
+                try {
+                    Bitmap wrapped = Bitmap.wrapHardwareBuffer(buffer,
+                            ColorSpace.get(ColorSpace.Named.SRGB));
+                    return wrapped == null ? null : wrapped.copy(Bitmap.Config.ARGB_8888, false);
+                } finally {
+                    buffer.close();
+                }
+            }
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            if (renderer != null) renderer.destroy();
+            if (reader != null) reader.close();
+        }
+    }
+
     public void release() {
         enabled = false; schedule();
         paint.setShader(null);
@@ -207,13 +288,19 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
         if (!posted) {
             posted = true;
             // ~20fps: slow drifting noise reads the same as at 33fps but wakes the GPU less often.
+            // The beat itself is not tied to this rate (see stepPulse).
             Choreographer.getInstance().postFrameCallbackDelayed(frame, 50);
         }
     }
     private void tick(long now) {
         posted = false;
         if (!animating()) { lastFrame = 0; return; }
-        if (lastFrame != 0) elapsedSeconds += Math.min(0.1, (now-lastFrame)/1e9);
+        if (lastFrame != 0) {
+            double dt = Math.min(0.1, (now - lastFrame) / 1e9);
+            elapsedSeconds += dt * flowSpeed();
+        }
+        // Keeps the beat envelope moving when nothing else calls setAudioLevel this frame.
+        stepPulse(System.nanoTime());
         lastFrame = now;
         invalidate();
         schedule();
@@ -280,7 +367,24 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
         // Uniform tracks the offscreen surface's own size, not the view's - the shader's uv
         // mapping (p / resolution) only needs to span 0..1 across whatever it's drawn onto.
         shader.setFloatUniform("resolution", lowW, lowH);
-        if (offscreenNode == null) offscreenNode = new RenderNode("ambientArtwork");
+        if (offscreenNode == null) {
+            offscreenNode = new RenderNode("ambientArtwork");
+            // The compositing layer is what makes this node an actual lowW x lowH surface. Without
+            // it, drawRenderNode just replays the rect under the parent's scale, so the shader ran
+            // per full-resolution screen pixel on every frame the lyrics above it redrew. With it,
+            // the shader runs only when onDraw re-records (the ~20fps tick); other frames reuse
+            // the layer texture, bilinear-upscaled.
+            offscreenNode.setUseCompositingLayer(true, null);
+        }
+        // Soften the low-resolution layer before it is upscaled. Unblurred, its warp edges and
+        // dither stair-step and shimmer once magnified (the background "crawled"), while the
+        // blurred lyric rows over it are smooth; a small blur at layer scale gives both the same
+        // soft texture. Cheap: it runs on the small layer, and only when the layer is redrawn.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            float radius = Math.max(1.5f, 3.2f * renderScale / DEFAULT_RENDER_SCALE);
+            offscreenNode.setRenderEffect(RenderEffect.createBlurEffect(
+                    radius, radius, Shader.TileMode.CLAMP));
+        }
         offscreenNode.setPosition(0, 0, lowW, lowH);
         updateFallback();
     }
@@ -291,6 +395,61 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
     @Override
     public void setAudioLevel(float level0to1) {
         audioLevel = Math.max(0f, Math.min(1f, level0to1));
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) stepPulse(System.nanoTime());
+    }
+
+    @Override
+    public void setAudioEnergy(float loudness0to1) {
+        long now = System.nanoTime();
+        float dt = lastEnergyNanos == 0 ? 0f : Math.min(0.2f, (now - lastEnergyNanos) / 1e9f);
+        lastEnergyNanos = now;
+        float loud = Math.max(0f, Math.min(1f, loudness0to1));
+        if (loud <= 0.001f || dt <= 0f) return;
+        energyUpdatedNanos = now;
+        if (loudLong <= 0f) {
+            loudShort = loud;
+            loudLong = loud;
+        } else {
+            loudShort += (loud - loudShort) * (1f - (float) Math.exp(-dt / 0.7f));
+            loudLong += (loud - loudLong) * (1f - (float) Math.exp(-dt / 12f));
+        }
+        float e = 0.5f + (loudShort - loudLong) / (loudLong * 1.2f + 0.02f);
+        energy01 = Math.max(0f, Math.min(1f, e));
+    }
+
+    /** True while the lyrics screen is feeding live loudness (beat-reactive on, audio playing). */
+    private boolean energyLive() {
+        return energyUpdatedNanos != 0 && System.nanoTime() - energyUpdatedNanos < 1_000_000_000L;
+    }
+
+    private float flowSpeed() {
+        return energyLive() ? 0.7f + 0.8f * energy01 : 1f;
+    }
+
+    /** Eases the shown beat envelope toward the live one: quick rise, slow release. */
+    private void stepPulse(long now) {
+        float dt = lastPulseNanos == 0 ? 0.016f : Math.min(0.1f, (now - lastPulseNanos) / 1e9f);
+        lastPulseNanos = now;
+        float target = moving && playing && enabled ? audioLevel : 0f;
+        // Kicks in a quiet passage are gentler than in a loud one.
+        if (energyLive()) target *= 0.55f + 0.6f * energy01;
+        float tau = target > pulse ? PULSE_ATTACK_SEC : PULSE_RELEASE_SEC;
+        pulse += (target - pulse) * (1f - (float) Math.exp(-dt / tau));
+        if (pulse < 0.002f) pulse = 0f;
+        applyPulse();
+    }
+
+    private void applyPulse() {
+        // Only the zoom goes out every frame: a view property, composited without touching the
+        // background layer. The brightening rides along in the shader's own ~20fps redraw
+        // (onDraw) - changing the layer's paint every frame instead damaged the layer, so the
+        // shader and its blur re-rendered at the full display rate and the GPU fell behind.
+        float zoom = 1f + BEAT_ZOOM * pulse;
+        if (Math.abs(zoom - appliedZoom) > 0.0004f) {
+            appliedZoom = zoom;
+            setScaleX(zoom);
+            setScaleY(zoom);
+        }
     }
 
     protected void onDraw(Canvas canvas) {
@@ -298,8 +457,11 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
             shader.setFloatUniform("time", (float) elapsedSeconds);
             // A paused or stopped background must not keep pulsing: the measured level can still
             // be non-zero for a beat after the shell stops advancing time.
-            float reactivity = moving && playing ? audioLevel : 0f;
-            shader.setFloatUniform("warpIntensity", 1f + BEAT_BOOST * reactivity);
+            // Energy widens the flow a little in loud sections; the beat is applied at composite
+            // time (applyPulse), not here.
+            float energyWarp = moving && playing && energyLive() ? 0.35f * (energy01 - 0.5f) : 0f;
+            shader.setFloatUniform("warpIntensity", 1f + energyWarp);
+            shader.setFloatUniform("brightness", baseBrightness * (1f + BEAT_BRIGHTEN * pulse));
             if (offscreenNode != null && canvas.isHardwareAccelerated()) {
                 int lowW = offscreenNode.getWidth(), lowH = offscreenNode.getHeight();
                 RecordingCanvas recording = offscreenNode.beginRecording();

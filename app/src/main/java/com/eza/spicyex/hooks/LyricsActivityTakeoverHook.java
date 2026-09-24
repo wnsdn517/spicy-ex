@@ -40,6 +40,7 @@ final class LyricsActivityTakeoverHook {
     private static final int TAG_NATIVE_SPICY_ROOT = 0x53504C53; // SPLS
     private static final int TAG_EXTRA_LYRICS_BUTTON = 0x53504C58; // SPLX
     private static final int TAG_MINI_PLAYER_LYRICS_BUTTON = 0x53504C4D; // SPLM
+    private static final int TAG_COVERED_SIBLINGS = 0x53504C43; // SPLC
     private static final long KEEP_LYRICS_ACTIVITY_AFTER_MOUNT_MS = 3500L;
     private static final long[] EXTRA_INJECTION_DELAYS_MS = {450L, 950L, 1400L, 2400L};
     private static final long MINI_PLAYER_STEADY_RETRY_MS = 3000L;
@@ -139,9 +140,10 @@ final class LyricsActivityTakeoverHook {
             // runs, so finish explicitly instead of relying on Spotify's onBackPressed to
             // finish. Inactive native screens fall through untouched.
             if (!shouldInterceptLyricsBack(nativeLyricsSessionActive, hasNativeSpicyRoot(activity))) return;
+            param.setResult(null);
+            if (shellConsumesBack(activity)) return;
             markExplicitLyricsExit(activity);
             activity.finish();
-            param.setResult(null);
         });
 
         XpHooks.findBefore(Activity.class, "finish", "takeover:Activity#finish", param -> {
@@ -197,6 +199,10 @@ final class LyricsActivityTakeoverHook {
                     unregisterSystemBackCallback(activity);
                     return;
                 }
+                // This callback outranks everything else on the dispatcher, so the layout editor
+                // never saw a back press and back closed the whole lyrics screen mid-edit. Ask
+                // the shell first: the editor's sheet closes, then the editor, then the screen.
+                if (shellConsumesBack(activity)) return;
                 markExplicitLyricsExit(activity);
                 activity.finish();
             };
@@ -460,6 +466,9 @@ final class LyricsActivityTakeoverHook {
      * carousel's own flexible zone immediately left of the device icon - encroaching there just
      * trims the track-title marquee a bit, it doesn't sit on top of a real control.
      */
+    // Smallest height each mini player bar has had: its normal, ad-free control-row height.
+    private static final java.util.Map<View, Integer> NORMAL_BAR_HEIGHT = new java.util.WeakHashMap<>();
+
     private void repositionMiniPlayerButton(View button, View bar, View content, int side,
                                              View connectButton, View carousel) {
         try {
@@ -480,7 +489,25 @@ final class LyricsActivityTakeoverHook {
                 x = barLeftInContent + bar.getWidth() - dp(PLAY_PAUSE_MARGIN_END_DP) - side * 3 - dp(8);
             }
             button.setX(x);
-            button.setY(barTopInContent + (bar.getHeight() - side) / 2f);
+            // Vertically: the bar's control row, not the whole bar. During an ad Spotify grows
+            // the bar (ad label/progress), and centring on that pushed the button up into the
+            // middle of it while the real controls stayed at the bottom.
+            int barHeight = bar.getHeight();
+            Integer normal = NORMAL_BAR_HEIGHT.get(bar);
+            if (barHeight > 0 && (normal == null || barHeight < normal)) {
+                NORMAL_BAR_HEIGHT.put(bar, barHeight);
+                normal = barHeight;
+            }
+            float centreY;
+            if (connectButton != null && connectButton.isShown() && connectButton.getHeight() > 0) {
+                int[] connLoc = new int[2];
+                connectButton.getLocationOnScreen(connLoc);
+                centreY = (connLoc[1] - contentLoc[1]) + connectButton.getHeight() / 2f;
+            } else {
+                int row = normal == null ? barHeight : normal;
+                centreY = barTopInContent + barHeight - row / 2f;
+            }
+            button.setY(centreY - side / 2f);
             // This button is a floating overlay, not a real MotionLayout participant, so the
             // marquee track title still scrolls straight into our button's space rather than
             // making room for it on its own. Push the carousel's own end margin out to actually
@@ -771,6 +798,7 @@ final class LyricsActivityTakeoverHook {
             View existing = content.findViewWithTag(TAG_NATIVE_SPICY_ROOT);
             if (existing instanceof NativeSpicyShellView) {
                 ((NativeSpicyShellView) existing).start();
+                if (existing.getAlpha() >= 1f) hideCoveredSiblings(content, existing);
                 ensureSystemBackCallback(activity);
                 return;
             }
@@ -793,7 +821,10 @@ final class LyricsActivityTakeoverHook {
             markLyricsActivityKeepWindow(activity);
             root.start();
             if (!rotationContinuation) {
-                root.animate().alpha(1f).translationY(0f).setDuration(260).start();
+                root.animate().alpha(1f).translationY(0f).setDuration(260)
+                        .withEndAction(() -> hideCoveredSiblings(content, root)).start();
+            } else {
+                hideCoveredSiblings(content, root);
             }
             XpLog.log(NativeSpicyLyricsHook.TAG + " mounted native Spicy renderer shell");
             Diagnostics.event("renderer", "mount_state",
@@ -814,6 +845,9 @@ final class LyricsActivityTakeoverHook {
             View existing = content.findViewWithTag(TAG_NATIVE_SPICY_ROOT);
             if (existing instanceof NativeSpicyShellView) {
                 NativeSpicyShellView shell = (NativeSpicyShellView) existing;
+                // Before any fade-out: the page underneath must be drawn again once the shell
+                // stops covering it.
+                restoreCoveredSiblings(shell);
                 // Host activity may already be leaving for rotation or a track-driven recreate.
                 // Do not rely on an exit animation callback from a detached window to stop the
                 // shell; that callback can be skipped, leaving stale subscriptions alive.
@@ -838,6 +872,56 @@ final class LyricsActivityTakeoverHook {
         // Rotation keeps the session (and its owned back) alive across remount; only release
         // owned back when ownership itself ended. Explicit exit and destroy unregister directly.
         if (!nativeLyricsSessionActive) unregisterSystemBackCallback(activity);
+    }
+
+    /**
+     * Spotify's own lyrics page (a full-screen ComposeView) stays mounted under the opaque shell.
+     * Left VISIBLE it is still recorded and rasterized every frame behind the lyrics - a whole
+     * extra screen of drawing, plus Compose's own lyric animations - without a single pixel of it
+     * ever reaching the display. Hiding it once the shell fully covers it changes nothing on
+     * screen; it stays attached and laid out, so anything reading its views still works.
+     */
+    private static void hideCoveredSiblings(FrameLayout content, View root) {
+        try {
+            if (content == null || root == null || root.getParent() != content) return;
+            if (root.getTag(TAG_COVERED_SIBLINGS) != null) return;
+            java.util.ArrayList<View> hidden = new java.util.ArrayList<>();
+            int rootIndex = content.indexOfChild(root);
+            for (int i = 0; i < rootIndex; i++) {
+                View child = content.getChildAt(i);
+                if (child == null || child.getVisibility() != View.VISIBLE) continue;
+                child.setVisibility(View.INVISIBLE);
+                hidden.add(child);
+            }
+            root.setTag(TAG_COVERED_SIBLINGS, hidden);
+        } catch (Throwable t) {
+            XpLog.log(NativeSpicyLyricsHook.TAG + " hide covered page failed: " + t);
+        }
+    }
+
+    private static void restoreCoveredSiblings(View root) {
+        try {
+            Object tag = root == null ? null : root.getTag(TAG_COVERED_SIBLINGS);
+            if (!(tag instanceof java.util.List)) return;
+            root.setTag(TAG_COVERED_SIBLINGS, null);
+            for (Object o : (java.util.List<?>) tag) {
+                // Only undo our own change; Spotify may have hidden the view itself meanwhile.
+                if (o instanceof View && ((View) o).getVisibility() == View.INVISIBLE) {
+                    ((View) o).setVisibility(View.VISIBLE);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private boolean shellConsumesBack(Activity activity) {
+        try {
+            FrameLayout content = activity.findViewById(android.R.id.content);
+            View root = content == null ? null : content.findViewWithTag(TAG_NATIVE_SPICY_ROOT);
+            return root instanceof NativeSpicyShellView && ((NativeSpicyShellView) root).consumeBack();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private boolean hasNativeSpicyRoot(Activity activity) {

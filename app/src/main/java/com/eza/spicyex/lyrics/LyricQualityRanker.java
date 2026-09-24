@@ -54,10 +54,10 @@ public final class LyricQualityRanker {
             return 1000;
         }
 
-        // QQ and NetEase are peers: both can serve genuine word-level timing (QRC and YRC
-        // respectively) or fall back to line-level for the same track, so they share a band and
+        // QQ, NetEase and Musixmatch are peers: each can serve genuine word-level timing (QRC,
+        // YRC and richsync respectively) or fall back to line-level for the same track, so they share a band and
         // the sync level decides between them rather than the provider name.
-        if (source == Source.QQ_MUSIC || source == Source.NETEASE) {
+        if (source == Source.QQ_MUSIC || source == Source.NETEASE || source == Source.MUSIXMATCH) {
             if (sync == Sync.SYLLABLE) return 3500;
             if (sync == Sync.WORD) return 3450;
             if (sync == Sync.LINE) return 3400;
@@ -135,6 +135,9 @@ public final class LyricQualityRanker {
 
     private static Source sourceOf(String fetchSource, String provider) {
         String source = LyricsDocument.safe(fetchSource).toLowerCase(java.util.Locale.US);
+        // Before the provider check below, which reads "musixmatch" as Spotify's own lyrics
+        // (Spotify licenses them from Musixmatch).
+        if (source.equals("musixmatch")) return Source.MUSIXMATCH;
         if (source.contains("lrclib")) return Source.LRCLIB;
         if (source.contains("spotify_native") || source.contains("native spotify")) return Source.NATIVE;
         if (source.contains("spicy") || source.contains("apple") || source.contains("lenerd")) return Source.SPICY;
@@ -164,6 +167,7 @@ public final class LyricQualityRanker {
         LRCLIB,
         QQ_MUSIC,
         NETEASE,
+        MUSIXMATCH,
         UNKNOWN
     }
 

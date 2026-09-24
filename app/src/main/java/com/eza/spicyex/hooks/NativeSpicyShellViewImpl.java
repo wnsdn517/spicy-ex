@@ -159,10 +159,13 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
      *  scrollTo() is. This covers them for long enough to finish. */
     private long programmaticScrollUntilMs;
     private static final long SMOOTH_SCROLL_GUARD_MS = 500L;
-    private static final float ROW_CASCADE_STAGGER_SEC = 0.06f;
-    private static final float ROW_CASCADE_MAX_DELAY_SEC = 0.42f;
-    private static final float ROW_CASCADE_FREQUENCY_HZ = 1.5f;
-    private static final float ROW_CASCADE_DAMPING = 0.92f;
+    // Apple Music's line advance: one spring shared by every row, released row by row behind the
+    // focused line. Damping 0.72 overshoots by ~4% of the move - a few pixels on a line advance -
+    // so each row visibly settles into place rather than merely stopping.
+    private static final float ROW_CASCADE_STAGGER_SEC = 0.045f;
+    private static final float ROW_CASCADE_MAX_DELAY_SEC = 0.32f;
+    private static final float ROW_CASCADE_FREQUENCY_HZ = 1.7f;
+    private static final float ROW_CASCADE_DAMPING = 0.72f;
     private static final float ROW_CASCADE_MAX_OFFSET_PX = 900f;
     /** Slower and more heavily damped than the per-row cascade spring - this one is carrying the
      *  whole visible column, so a lively wobble that looks great on a single line would look like
@@ -171,7 +174,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     /** Used for a hop of roughly one row; blended toward the frequency above as the jump grows
      *  (see scrollSpringFrequency). A line-to-line advance has to keep up with the song. */
     private static final float SCROLL_SPRING_NEAR_FREQUENCY_HZ = 1.55f;
-    private static final float SCROLL_SPRING_DAMPING = 0.76f;
+    private static final float SCROLL_SPRING_DAMPING = 0.9f;
     // Returning to the playing line after reading ahead. Livelier than an ordinary advance on
     // purpose: this one is a deliberate request, and Apple answers it with motion that clearly
     // travels rather than a polite ease. Lower damping leaves a touch of overshoot at the end.
@@ -182,8 +185,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private static final float RETURN_MAX_LAUNCH_VELOCITY_PX_PER_SEC = 2600f;
     /** Set while a return is being scheduled, consumed by scrollToActiveTarget. */
     private boolean returnToCurrentPending;
-    /** Set when a return spring should hand off to a row cascade once it lands. */
-    private boolean pendingArrivalCascade;
     private static final long ROW_CASCADE_MAX_LIFETIME_MS = 1600L;
     private final Map<AppliedLine, RowCascade> rowCascades = new WeakHashMap<>();
     /** Load reveal, driven off the same vsync tick as everything else rather than by a per-row
@@ -196,49 +197,52 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
 
     private static final class LoadEntrance {
         final float travelPx;
-        final float duration;
+        /** Time scale: 1 at 100% cascade speed, smaller is faster. */
+        final float timeScale;
         float delayRemaining;
         float elapsed;
 
-        LoadEntrance(float travelPx, float delaySeconds, float durationSeconds) {
+        LoadEntrance(float travelPx, float delaySeconds, float timeScale) {
             this.travelPx = travelPx;
-            this.duration = Math.max(0.05f, durationSeconds);
+            this.timeScale = Math.max(0.05f, timeScale);
             this.delayRemaining = Math.max(0f, delaySeconds);
         }
     }
 
+    // Load reveal: each row rises into place on an underdamped spring (a soft landing with a hint
+    // of settle, like the line slide) while it fades in and pulls into focus from a blur. It does
+    // not scale: growing from small reads as a zoom, not as the lyrics arriving. The fade
+    // and blur finish well before the motion does, so the text is legible while it is still
+    // arriving instead of the whole reveal reading as one long dissolve.
+    private static final float LOAD_REVEAL_FREQUENCY_HZ = 1.25f;
+    private static final float LOAD_REVEAL_DAMPING = 0.78f;
+    private static final float LOAD_REVEAL_DURATION_SEC = 1.05f;
+    private static final float LOAD_REVEAL_FADE_SEC = 0.5f;
+    private static final int LOAD_REVEAL_BLUR_DP = 7;
+    private static final float LOAD_REVEAL_STAGGER_SEC = 0.055f;
+    private static final float LOAD_REVEAL_MAX_DELAY_SEC = 0.38f;
+
     private static final class RowCascade {
         final Spring spring;
-        /** Launch speed this row is owed once its stagger delay is up. Held rather than applied at
-         *  construction so the row is genuinely still during the delay instead of drifting through
-         *  it, which is what would make the stagger read as two separate motions. */
-        float pendingLaunchVelocity;
         long startedAtMs;
         float delayRemaining;
+        /** Reflow springs keep following the row's layout: see followReflowLayout(). */
+        boolean followLayout;
+        float layoutTop = Float.NaN;
 
         RowCascade(float startOffset, LyricCascadeProfile profile) {
             spring = new Spring(startOffset, profile.frequencyHz, profile.damping);
             spring.setGoal(0f);
             delayRemaining = profile.delaySeconds;
-            pendingLaunchVelocity = profile.launchVelocityPxPerSec;
             startedAtMs = SystemClock.uptimeMillis();
         }
 
         /** Folds another wave's displacement into this still-settling row instead of restarting
          *  its spring. Also resets the max-lifetime clock: the extra distance this adds needs its
          *  own budget to decay, or the hard cutoff below can clip it mid-motion into a visible pop. */
-        void bump(float delta, float launchVelocity) {
+        void bump(float delta) {
             spring.nudgePosition(delta);
-            if (delayRemaining > 0f) pendingLaunchVelocity += launchVelocity;
-            else spring.nudgeVelocity(launchVelocity);
             startedAtMs = SystemClock.uptimeMillis();
-        }
-
-        /** Hands the row the speed it was launched with, once. */
-        void releaseLaunchVelocity() {
-            if (pendingLaunchVelocity == 0f) return;
-            spring.nudgeVelocity(pendingLaunchVelocity);
-            pendingLaunchVelocity = 0f;
         }
     }
     private TrackInfoReadoutController trackInfoController;
@@ -460,6 +464,12 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
      *  the real display-cutout side inset once WindowInsets dispatch on attach - a cutout/curved
      *  edge wider than that guess would otherwise clip content against the true screen edge. */
     private int lyricsSideInsetPx;
+    /** Real per-side system insets (cutout, navigation bar); 0 where that edge is free. */
+    private int safeLeftInsetPx;
+    private int safeRightInsetPx;
+    /** Landscape content clearance on an edge with nothing on it. */
+    private static final int LANDSCAPE_EDGE_MIN_DP = 24;
+    private static final int LANDSCAPE_TRAILING_EDGE_MIN_DP = 12;
     private long lastLyricPositionMs = -1;
     private long lastDisplayedProgressSecond = Long.MIN_VALUE;
     private String lastDisplayedTitle = "";
@@ -514,7 +524,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 () -> jumpToCurrentController == null ? null : jumpToCurrentController.view(),
                 () -> { if (jumpToCurrentController != null) jumpToCurrentController.showForEditing(); },
                 () -> { if (jumpToCurrentController != null) jumpToCurrentController.restoreAfterEditing(); });
-        if (trackInfoController != null) trackInfoController.setEditorPreview(true);
         layoutEditorHandle = new LyricsLayoutEditController.Request()
                 .activity(activity)
                 .shellRoot(this)
@@ -536,9 +545,17 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 .skipChip(skipChip)
                 .followChip(followChip)
                 .show();
-        if (layoutEditorHandle == null && trackInfoController != null) {
-            trackInfoController.setEditorPreview(false);
-        }
+    }
+
+    boolean consumeBack() {
+        return consumeShareSheetBack() || consumeLayoutEditorBack();
+    }
+
+    /** Back closes the lyric share sheet first, like any other sheet over the lyrics. */
+    private boolean consumeShareSheetBack() {
+        if (shareCardController == null || !shareCardController.isShowing()) return false;
+        shareCardController.dismiss();
+        return true;
     }
 
     private boolean consumeLayoutEditorBack() {
@@ -557,7 +574,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private void enableDemoMode() {
         if (demoModeActive) return;
         demoModeActive = true;
-        if (trackInfoController != null) trackInfoController.setEditorPreview(true);
         if (demoTrack == null) demoTrack = DemoLyricsContent.demoTrack();
         if (demoArtBitmap == null) demoArtBitmap = DemoLyricsContent.demoArtBitmap();
         document = DemoLyricsContent.demoDocument();
@@ -583,15 +599,11 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     /** Reverts everything {@link #enableDemoMode} touched; the next real per-frame update (now
      *  unfrozen) repaints title/artwork/lyrics from the real track normally. */
     private void disableDemoMode() {
-        if (!demoModeActive) {
-            if (trackInfoController != null) trackInfoController.setEditorPreview(false);
-            return;
-        }
+        if (!demoModeActive) return;
         demoModeActive = false;
         skipGapController.hide();
         jumpToCurrentController.restoreAfterEditing();
         if (trackInfoController != null) trackInfoController.clearDemoArt();
-        if (trackInfoController != null) trackInfoController.setEditorPreview(false);
         if (twoColumn && columnArt != null) {
             clearColumnArtwork();
             columnArt.setVisibility(GONE);
@@ -660,20 +672,24 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         }
     }
 
-    /** Minimum width/height ratio for the adaptive two-column landscape mode (PR9's gate). */
+    /** Minimum width/height ratio at which any screen counts as wide (PR9's landscape gate). */
     static final float TWO_COLUMN_ASPECT_MIN = 1.2f;
+    /** Material "medium" window width: from here a screen has room for two columns... */
+    static final float TWO_COLUMN_MIN_WIDTH_DP = 600f;
+    /** ...as long as it is not much taller than wide - an unfolded foldable, not a tall tablet. */
+    static final float TWO_COLUMN_SQUARE_ASPECT_MIN = 0.8f;
 
-    /** Two-column engages only when the adaptive setting is on, the screen reports landscape,
-     * and the aspect is genuinely wide — a separate mode from the Off/Top/Bottom readout,
-     * whose overlays stand down while it is engaged. */
-    static boolean twoColumnEngaged(boolean landscape, float aspect, boolean adaptive) {
-        if (!adaptive || !landscape) return false;
-        return aspect >= TWO_COLUMN_ASPECT_MIN;
-    }
-
-    private static float screenAspect(android.content.res.Resources res) {
-        android.util.DisplayMetrics metrics = res.getDisplayMetrics();
-        return metrics.widthPixels / (float) Math.max(1, metrics.heightPixels);
+    /**
+     * Two-column (artwork panel + lyrics) engages on landscape-shaped screens, and also on large
+     * near-square ones such as an unfolded foldable, whichever way it is held. Those used to get
+     * the phone layout, stretched: a small artwork in the corner and lyric lines 800dp long. It is
+     * a separate mode from the Off/Top/Bottom readout, whose overlays stand down while engaged.
+     */
+    static boolean twoColumnEngaged(float widthDp, float heightDp, boolean adaptive) {
+        if (!adaptive || widthDp <= 0f || heightDp <= 0f) return false;
+        float aspect = widthDp / heightDp;
+        if (aspect >= TWO_COLUMN_ASPECT_MIN) return true;
+        return widthDp >= TWO_COLUMN_MIN_WIDTH_DP && aspect >= TWO_COLUMN_SQUARE_ASPECT_MIN;
     }
 
     private LinearLayout rowContainer() {
@@ -710,6 +726,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                     dp(lyricsBottomPaddingDp()),
                     getResources().getDisplayMetrics().heightPixels,
                     dp(56), sidePad);
+            applyLandscapeChromeClearance();
             return;
         }
         int viewport = lyricsScroll.getHeight();
@@ -717,6 +734,17 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         int center = Math.max(0, viewport / 2 - dp(56));
         // Horizontal padding moved to rows; vertical padding remains on the container.
         lyricsScroll.setPadding(0, Math.max(safeTop, center), 0, Math.max(dp(lyricsBottomPaddingDp()), center));
+        applyLandscapeChromeClearance();
+    }
+
+    /** In landscape the control buttons stand in a column at the trailing edge, over the lyrics.
+     *  Long lines used to run underneath them; wrap before that column instead. */
+    private void applyLandscapeChromeClearance() {
+        if (lyricsScroll == null || !isLandscape()) return;
+        int clearance = dp(chromeButtonDp() + 16);
+        boolean rtl = getLayoutDirection() == LAYOUT_DIRECTION_RTL;
+        lyricsScroll.setPadding(rtl ? clearance : 0, lyricsScroll.getPaddingTop(),
+                rtl ? 0 : clearance, lyricsScroll.getPaddingBottom());
     }
 
     private int computeSafeTopInset(WindowInsets insets) {
@@ -783,10 +811,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         this.config = SpotifyPlusConfig.from(activity);
         // Construction-time layout decision: rotation remounts the shell, and the adaptive
         // toggle takes effect on the next open (same contract as PR9's landscape layout).
-        this.twoColumn = twoColumnEngaged(
-                activity.getResources().getConfiguration().orientation
-                        == android.content.res.Configuration.ORIENTATION_LANDSCAPE,
-                screenAspect(activity.getResources()),
+        android.content.res.Configuration screen = activity.getResources().getConfiguration();
+        this.twoColumn = twoColumnEngaged(screen.screenWidthDp, screen.screenHeightDp,
                 config.get(Settings.ADAPTIVE_LANDSCAPE_LAYOUT));
         this.aiSettings = new AiSettings(activity);
         this.styleBatcher = new FrameStyleBatcher(activity);
@@ -803,7 +829,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 this::enterLayoutEditMode, this::resyncLyricsTiming, TAG);
         this.emptyStateController = new LyricsShellEmptyStateController(activity, config, textFactory);
         this.shellLifecycle = new LyricsShellLifecycle(activity, () -> {
-            if (consumeLayoutEditorBack()) return;
+            if (consumeShareSheetBack() || consumeLayoutEditorBack()) return;
             host.markExplicitLyricsExit(activity);
             activity.finish();
         });
@@ -857,7 +883,24 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         addView(contentColumn, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         if (twoColumn) {
-            landscapeLeftColumn = new LinearLayout(activity);
+            landscapeLeftColumn = new LinearLayout(activity) {
+                /** Centres the art-and-info block in the column: once the cover is sized by the
+                 *  height rather than the width, the spare width is split evenly on both sides
+                 *  (it all used to pile up on one side, leaving the cover hugging the edge), and
+                 *  the text below spans exactly the cover's width. */
+                @Override
+                protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                    super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+                    if (columnArtFrame == null) return;
+                    int content = MeasureSpec.getSize(widthMeasureSpec);
+                    int side = columnArtFrame.getMeasuredWidth();
+                    int inset = side > 0 ? Math.max(0, (content - side) / 2) : 0;
+                    if (inset != getPaddingLeft() || inset != getPaddingRight()) {
+                        setPadding(inset, getPaddingTop(), inset, getPaddingBottom());
+                        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+                    }
+                }
+            };
             landscapeLeftColumn.setOrientation(LinearLayout.VERTICAL);
             // START keeps the art frame's left edge flush with the song-info text below
             // it; CENTER_VERTICAL centers the fitted stack in the column.
@@ -869,7 +912,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             // Equal screen-edge gutters: 40dp above the art matches the 24dp column
             // gutter + 16dp landscape content padding below the song info. This screen
             // is fully ours, so insets stay out of it — the chrome floats above.
-            leftLp.setMargins(0, dp(40), dp(20), dp(24));
+            leftLp.setMargins(0, dp(28), dp(32), dp(28));
             leftLp.gravity = Gravity.CENTER_VERTICAL;
             contentColumn.addView(landscapeLeftColumn, leftLp);
             // Square art at full column width when it fits, flush left with the song
@@ -898,8 +941,11 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                                     MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
                             reserve += albumLine.getMeasuredHeight();
                         }
-                        side = Math.min(width, Math.max(0,
-                                MeasureSpec.getSize(heightMeasureSpec) - reserve));
+                        // Not the whole remaining height: a cover that fills it pushes the song
+                        // info onto the bottom edge. Leaving room lets the column centre the
+                        // stack with even space above and below.
+                        side = Math.min(width, Math.max(0, Math.round(
+                                (MeasureSpec.getSize(heightMeasureSpec) - reserve) * 0.84f)));
                     }
                     int squareSpec = MeasureSpec.makeMeasureSpec(Math.max(0, side),
                             MeasureSpec.EXACTLY);
@@ -1062,14 +1108,16 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                         return;
                     }
                     showTranslation = !showTranslation;
+                    markTranslationToggled();
                     prefs.edit().putBoolean(Settings.NATIVE_SPICY_TRANSLATION.key, showTranslation).apply();
-        updateToggleVisuals();
-                    renderDocument();
+                    updateToggleVisuals();
+                    // In place: a full renderDocument() rebuilt every row object and reset the
+                    // active line, so the reflow springs found nothing to animate and the follow
+                    // scroll jumped - the flash when translations appeared or left.
+                    hideThenRebuild(showTranslation ? java.util.Collections.emptyList()
+                            : mountedTranslationViews(), this::rebuildSecondaryRowsInPlace);
                 },
-                () -> {
-                    XpLog.log(TAG + " settings click callback");
-                    settingsDialogController.show();
-                },
+                () -> settingsDialogController.show(),
                 com.eza.spicyex.ui.ActionIconDrawable.likedSongsKind(likedMode),
                 this::onLikeTapped);
         chromeHeader = chrome.header;
@@ -1080,7 +1128,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         likeButton = chrome.likeButton;
         if (chrome.settingsButton != null) {
             chrome.settingsButton.setOnLongClickListener(v -> {
-                XpLog.log(TAG + " settings long-click callback -> layout editor");
                 enterLayoutEditMode();
                 return true;
             });
@@ -1149,7 +1196,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             albumLine = null;
         }
 
-        lyricsScroll = new ScrollView(activity);
+        lyricsScroll = new com.eza.spicyex.lyrics.ElasticScrollView(activity);
         lyricsScroll.setFillViewport(false);
         lyricsScroll.setClipToPadding(false);
         lyricsScroll.setClipChildren(false);
@@ -1158,6 +1205,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         lyricsScroll.setFadingEdgeLength(0);
         lyricsScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         lyricsScroll.setVerticalScrollBarEnabled(false);
+        lyricsScroll.getViewTreeObserver().addOnPreDrawListener(() -> {
+            holdScrollAnchor();
+            return true;
+        });
         LyricsTapSeekHandler tapSeekHandler = new LyricsTapSeekHandler(
                 activity,
                 config,
@@ -1222,7 +1273,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 // the rows' offsets is now fighting their finger.
                 clearRowCascade();
                 scrollSpring = null;
-                pendingArrivalCascade = false;
                 clearScrollSubpixel();
             }
             frameScheduler.setContinuous(true);
@@ -1297,10 +1347,15 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 applyLyricsScrollPadding();
             }
             int side = computeSafeSideInset(insets);
-            if (side != lyricsSideInsetPx) {
+            int[] edges = safeSideInsets(insets);
+            if (side != lyricsSideInsetPx || edges[0] != safeLeftInsetPx
+                    || edges[1] != safeRightInsetPx) {
                 lyricsSideInsetPx = side;
+                safeLeftInsetPx = edges[0];
+                safeRightInsetPx = edges[1];
                 applyContentColumnPadding();
                 applyLyricsScrollPadding();
+                applyRowSideInsets();
             }
             return insets;
         });
@@ -1309,12 +1364,60 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     /** (Re)applies contentColumn's landscape side/bottom clearance - see its construction-time
      *  comment for why portrait drops this entirely. Split out so a later cutout-inset refinement
      *  (see the WindowInsets listener above) can re-run it without duplicating the padding logic. */
+    /**
+     * Rows carry the side inset in their own padding (so blur/glow can bleed past it), fixed when
+     * the row is built. The real inset only arrives with the window insets after attach, so rows
+     * built before that - the first screen, interlude rows - kept the provisional value and sat
+     * against the screen edge. Brings every built row to the current inset.
+     */
+    private void applyRowSideInsets() {
+        if (document == null || document.appliedLines == null) return;
+        int wanted = isLandscape() ? 0 : lyricsSideInsetPx;
+        for (AppliedLine line : document.appliedLines) {
+            View view = LyricsLineViewState.rowView(line);
+            if (!(view instanceof com.eza.spicyex.lyrics.BlurredRowLayout)) continue;
+            com.eza.spicyex.lyrics.BlurredRowLayout row = (com.eza.spicyex.lyrics.BlurredRowLayout) view;
+            int delta = wanted - row.horizontalOffsetPx;
+            if (delta == 0) continue;
+            row.horizontalOffsetPx = wanted;
+            row.setPaddingRelative(Math.max(0, row.getPaddingStart() + delta), row.getPaddingTop(),
+                    Math.max(0, row.getPaddingEnd() + delta), row.getPaddingBottom());
+        }
+    }
+
     private void applyContentColumnPadding() {
         if (contentColumn == null) return;
+        if (!isLandscape()) {
+            contentColumn.setPadding(0, 0, 0, 0);
+            return;
+        }
+        // Per side, from the real insets. A single symmetric value sized for the cutout or the
+        // navigation bar (72dp by default) also went on the free edge, leaving a wide empty strip
+        // between the lyrics and the side of the screen with nothing in it.
         contentColumn.setPadding(
-                isLandscape() ? lyricsSideInsetPx : 0, 0,
-                isLandscape() ? lyricsSideInsetPx : 0,
-                isLandscape() ? dp(16) : 0);
+                Math.max(dp(LANDSCAPE_EDGE_MIN_DP), safeLeftInsetPx), 0,
+                Math.max(dp(LANDSCAPE_TRAILING_EDGE_MIN_DP), safeRightInsetPx), dp(16));
+    }
+
+    /** {left, right} system insets: bars plus display cutout, per edge. */
+    private static int[] safeSideInsets(WindowInsets insets) {
+        if (insets == null) return new int[]{0, 0};
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets bars = insets.getInsets(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                return new int[]{bars.left, bars.right};
+            }
+            int left = insets.getSystemWindowInsetLeft();
+            int right = insets.getSystemWindowInsetRight();
+            if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null) {
+                left = Math.max(left, insets.getDisplayCutout().getSafeInsetLeft());
+                right = Math.max(right, insets.getDisplayCutout().getSafeInsetRight());
+            }
+            return new int[]{left, right};
+        } catch (Throwable t) {
+            return new int[]{0, 0};
+        }
     }
 
     /** Mirrors Settings.BEAT_REACTIVE_BACKGROUND; also gates whether the Visualizer is ever
@@ -1393,7 +1496,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         clearRowCascade();
         clearLoadEntrance();
         scrollSpring = null;
-        pendingArrivalCascade = false;
         returnToCurrentPending = false;
         clearScrollSubpixel();
         ambientController.stop();
@@ -1427,6 +1529,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // the same moment as its visibility so the first DOWN reaches the settings button and
         // Android can observe its long-press sequence.
         chromeHeader.bringToFront();
+        // The layout editor stays above the header: its Cancel/Save buttons sit exactly over the
+        // real back button, and its dock outline over the chrome cluster.
+        View layoutEditor = findViewWithTag(LyricsLayoutEditController.OVERLAY_TAG);
+        if (layoutEditor != null) layoutEditor.bringToFront();
         chromeHeader.setVisibility(View.VISIBLE);
         if (chromeHeader.getAlpha() < 0.99f && !chromeRevealAnimating) {
             chromeRevealAnimating = true;
@@ -1679,7 +1785,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     private void refreshAudioListening() {
         boolean seekWatchActive = seekWatchUntilMs > 0 && SystemClock.elapsedRealtime() < seekWatchUntilMs;
         if (seekWatchUntilMs > 0 && !seekWatchActive) seekWatchUntilMs = -1L;
-        boolean wanted = running && (beatReactiveBackground || seekWatchActive);
+        boolean wanted = running && (beatReactiveBackground || seekWatchActive || instrumentalShown);
         if (wanted != audioListeningActive) {
             audioListeningActive = wanted;
             host.setAudioReactiveListening(wanted);
@@ -1703,7 +1809,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         boolean playingNow = host.isPlayerActuallyPlaying();
         refreshAudioListening();
         ambientController.setPlaying(playingNow);
-        ambientController.updateAudioLevel(beatReactiveBackground ? host.currentAudioLevel() : 0f);
+        ambientController.updateAudioLevel(beatReactiveBackground ? host.currentAudioBeat() : 0f);
+        ambientController.updateAudioEnergy(beatReactiveBackground ? host.currentAudioLevel() : 0f);
         updateJumpToCurrentVisibility();
         updateToggleSpinners();
         // Ad break: Spotify models it as an ordinary track under a spotify:ad: URI. It has its
@@ -1750,12 +1857,12 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             ambientController.updateForTrack(track, () -> running);
             XpLog.log(TAG + " active track uri=" + uri + " title=\"" + safe(track.title) + "\"");
             if (adTrack) {
-                // Ads carry no lyrics: show a simple centered message immediately without the
-                // loading skeleton animation. Title/artwork update below via the per-frame path.
+                // Ads carry no lyrics: no loading skeleton, just an empty lyrics area. Title and
+                // artwork update below via the per-frame path.
                 loadingTrackId = "";
                 rowMountController.reset();
                 followState.resetActive();
-                emptyStateController.showAdPlaceholder(lyricsScroll, lyricsColumn, "Advertisement");
+                emptyStateController.showAdState(lyricsScroll, lyricsColumn);
             } else {
                 showLoading("Loading lyrics…");
                 loadLyrics(track, id);
@@ -1823,7 +1930,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                     setActiveLine(nextActive, lyricPos, track, drasticSeek);
                 }
                 boolean userScrollHeld = followState.isHoldingNow();
-                long visibleRange = userScrollHeld && scrollController != null
+                // Always, not only while held: rows outside it skip per-syllable animation work.
+                long visibleRange = scrollController != null
                         ? scrollController.visibleLineRange(rowHeightPrefix(), document.appliedLines.size())
                         : LyricsScrollController.ALL_LINES;
                 frameRenderer.applySynced(document, rowMountController.mountedIndices(), mountedRowsHost,
@@ -1869,7 +1977,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             setActiveLine(nextActive, lyricPos, demoTrack);
         }
         boolean userScrollHeld = followState.isHoldingNow();
-        long visibleRange = userScrollHeld && scrollController != null
+        long visibleRange = scrollController != null
                 ? scrollController.visibleLineRange(rowHeightPrefix(), document.appliedLines.size())
                 : LyricsScrollController.ALL_LINES;
         frameRenderer.applySynced(document, rowMountController.mountedIndices(), mountedRowsHost,
@@ -2128,7 +2236,11 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         SpotifyTrack current = host.getCurrentTrackSafely();
         long pos = current == null ? -1 : playbackClock.getPosition(current, host.isPlayerActuallyPlaying());
         long lyricPos = pos < 0 ? pos : adjustedLyricPositionMs(pos);
-        renderDocument();
+        int previousActive = followState.activeIndex();
+        rebuildWithReflow(this::renderDocument);
+        // renderDocument() resets the active line; without restoring it the next scroll counted
+        // as a first activation and jumped instead of gliding.
+        if (previousActive >= 0 && followState.activeIndex() < 0) followState.setActiveIndex(previousActive);
         if (current != null) setActiveLine(LyricTimeline.findPrimaryActiveRow(document.appliedLines, lyricPos), lyricPos, current);
         if (!isBlank(message)) status.setText(message);
     }
@@ -2140,11 +2252,21 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         emptyStateController.showLoading(lyricsScroll, lyricsColumn, message, sidePad);
     }
 
+    /** The instrumental visualizer is on screen, so audio analysis must keep running. */
+    private boolean instrumentalShown;
+
     private void showError(String error) {
+        instrumentalShown = false;
         document = null;
         loadingTrackId = "";
         rowMountController.reset();
         followState.resetActive();
+        if (com.eza.spicyex.lyrics.InstrumentalTracks.isInstrumental(host.getCurrentTrackSafely())) {
+            instrumentalShown = true;
+            emptyStateController.showInstrumental(lyricsColumn, host::currentAudioSpectrum);
+            status.setText("Instrumental");
+            return;
+        }
         emptyStateController.showError(lyricsColumn, error);
         status.setText("Lyrics error: " + safe(error));
     }
@@ -2154,6 +2276,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     }
 
     private void renderDocument(boolean prepareDocument) {
+        instrumentalShown = false;
         dbg("NativeSpicyShellView.renderDocument", "doc=" + (document == null ? "null" : document.fetchSource + "/" + document.type + "/" + document.lines.size()));
         updateToggleVisuals();
         ensureLyricsColumnScaffold();
@@ -2268,29 +2391,22 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // tick would otherwise do it a frame or two into the fade, which reads as the lyrics
         // sliding into position as they appear instead of simply appearing where they belong.
         placeScrollAtRowInstantly(focus);
-        float speedMul = cascadeSpeedMultiplier();
-        float duration = 0.62f / speedMul;
+        float timeScale = 1f / cascadeSpeedMultiplier();
         for (int i : rowMountController.mountedIndices()) {
             if (i < 0 || i >= document.appliedLines.size()) continue;
             AppliedLine line = document.appliedLines.get(i);
             if (line == null) continue;
             View row = rowMountController.attachedRowView(line);
             if (row == null || row.getHeight() <= 0) continue;
-            // This should read as a fade with barely-there lift, not a rise that travels any real
-            // distance - a small, tight range keeps every row's motion nearly identical regardless
-            // of its own height, so the reveal reads as one soft fade-in rather than rows visibly
-            // "popping" up from different starting points.
-            // Capped at 8dp for a more subtle and smooth appearance.
-            float travel = Math.max(dp(4), Math.min(dp(8), row.getHeight() * 0.08f));
-            int distance = focus < 0 ? i : Math.round(cascadeDistance(line, i, focus));
-            // A visible lag reads as janky rather than deliberate once the rise distance above is
-            // this subtle - keep the whole column's stagger tight enough that it reads as
-            // nearly-simultaneous instead of a wave with a felt time gap between rows.
-            // Keep the reveal nearly simultaneous, but give neighbouring rows a readable order
-            // instead of making the whole column flash in one frame.
-            float delay = Math.min(8, distance) * 0.026f / speedMul;
-            loadEntrances.put(line, new LoadEntrance(travel, delay, duration));
-            LyricsLineViewState.setEntranceProgress(line, 0f);
+            // Proportional to the row within a tight band: every row travels a similar, clearly
+            // visible distance regardless of whether it wraps to two lines.
+            float travel = Math.max(dp(18), Math.min(dp(30), row.getHeight() * 0.4f));
+            float distance = focus < 0 ? i : cascadeDistance(line, i, focus);
+            // Outward from the focused row with a shrinking gap, like the line slide's stagger.
+            float delay = Math.min(LOAD_REVEAL_MAX_DELAY_SEC, LOAD_REVEAL_STAGGER_SEC
+                    * (1f - (float) Math.pow(0.88f, distance)) / (1f - 0.88f)) * timeScale;
+            loadEntrances.put(line, new LoadEntrance(travel, delay, timeScale));
+            LyricsLineViewState.setEntranceProgress(line, 0f, dp(LOAD_REVEAL_BLUR_DP));
             applyLoadEntranceFrame(row, 0f, travel);
             row.setHasTransientState(true);
         }
@@ -2344,13 +2460,11 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         applyingLyricScroll = false;
     }
 
-    /** Writes one reveal frame. Owns only properties the frame renderer never touches: the row's
-     *  own scale, and its direct children's translation (the Apple slide owns the row's). */
+    /** Writes one reveal frame. Owns only a property the frame renderer never touches: the row's
+     *  direct children's translation (the Apple slide owns the row's own).
+     *  {@code progress} may overshoot 1 slightly: that is the spring settling. */
     private void applyLoadEntranceFrame(View row, float progress, float travelPx) {
         if (row == null) return;
-        float scale = 0.985f + 0.015f * progress;
-        row.setScaleX(scale);
-        row.setScaleY(scale);
         float childOffset = travelPx * (1f - progress);
         ViewGroup rowGroup = row instanceof ViewGroup ? (ViewGroup) row : null;
         int rowChildCount = rowGroup == null ? 0 : rowGroup.getChildCount();
@@ -2384,18 +2498,27 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 entrance.delayRemaining = 0f;
             }
             entrance.elapsed += step;
-            float t = Math.min(1f, entrance.elapsed / entrance.duration);
-            // Decelerating quintic: leaves 0 with real speed and arrives with none, so the reveal
-            // never looks like it stops short or lands with a bump.
-            float progress = 1f - (float) Math.pow(1f - t, 5d);
-            if (t >= 1f) {
+            float t = entrance.elapsed / entrance.timeScale;
+            if (t >= LOAD_REVEAL_DURATION_SEC) {
                 finishLoadEntrance(line, row, entrance);
                 it.remove();
                 continue;
             }
-            LyricsLineViewState.setEntranceProgress(line, progress);
-            applyLoadEntranceFrame(row, progress, entrance.travelPx);
+            float fadeT = Math.min(1f, t / LOAD_REVEAL_FADE_SEC);
+            float fade = 1f - (1f - fadeT) * (1f - fadeT) * (1f - fadeT);
+            LyricsLineViewState.setEntranceProgress(line, fade, (1f - fade) * dp(LOAD_REVEAL_BLUR_DP));
+            applyLoadEntranceFrame(row, loadRevealSpring(t), entrance.travelPx);
         }
+    }
+
+    /** Step response of the reveal spring at {@code t} seconds: 0 at rest below, 1 in place. */
+    private static float loadRevealSpring(float t) {
+        double omega = 2d * Math.PI * LOAD_REVEAL_FREQUENCY_HZ;
+        double zeta = LOAD_REVEAL_DAMPING;
+        double omegaD = omega * Math.sqrt(1d - zeta * zeta);
+        double envelope = Math.exp(-zeta * omega * t);
+        return (float) (1d - envelope * (Math.cos(omegaD * t)
+                + zeta * omega / omegaD * Math.sin(omegaD * t)));
     }
 
     private void finishLoadEntrance(AppliedLine line, View row, LoadEntrance entrance) {
@@ -2578,19 +2701,529 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         return com.eza.spicyex.lyrics.LyricsDisplayMode.isJapaneseLine(line);
     }
 
+    // -- translation / reading reflow ------------------------------------------------------
+
+    private static final long REFLOW_SETTLE_MS = 450L;
+    private static final float REFLOW_STAGGER_SEC = 0.03f;
+    private static final float REFLOW_MAX_DELAY_SEC = 0.18f;
+    private static final int SECONDARY_REVEAL_RISE_DP = 8;
+    private static final int SECONDARY_REVEAL_BLUR_DP = 6;
+    private static final long SECONDARY_REVEAL_MS = 560L;
+    private static final long SECONDARY_HIDE_MS = 160L;
+    private static final android.animation.TimeInterpolator SECONDARY_REVEAL_EASE =
+            new android.view.animation.PathInterpolator(0.2f, 0.8f, 0.2f, 1f);
+
+    /**
+     * Runs a rebuild that adds, removes or changes translation/reading rows without the column
+     * teleporting. Every mounted row slides from where it was drawn to where it now sits, on the
+     * same spring as a line advance (a FLIP: measure, rebuild, offset each row back to its old
+     * place, let it spring home), and translation/reading text that was not on screen before
+     * fades, rises and sharpens into place instead of popping in.
+     */
+    private void rebuildWithReflow(Runnable rebuild) {
+        if (document == null || lyricsScroll == null || !lyricsScroll.isLaidOut()
+                || !loadEntrances.isEmpty()) {
+            rebuild.run();
+            styleRowsNow();
+            return;
+        }
+        // Keyed by row index, not row object: a full re-render rebuilds every AppliedLine, and an
+        // identity-keyed map then matched nothing - no row got a spring and all of them jumped.
+        // Layout positions in scroll-content coordinates: independent of the scroll (a fling in
+        // progress keeps carrying the rows) and of any cascade translation already running on them
+        // (that motion carries on; only the layout change is added on top of it).
+        Map<Integer, Float> origins = new java.util.HashMap<>();
+        Map<Integer, java.util.Set<String>> shown = new java.util.HashMap<>();
+        for (int i : rowMountController.mountedIndices()) {
+            if (i < 0 || i >= document.appliedLines.size()) continue;
+            AppliedLine line = document.appliedLines.get(i);
+            View row = line == null ? null : rowMountController.attachedRowView(line);
+            if (row == null || row.getHeight() <= 0) continue;
+            origins.put(i, contentTop(row));
+            java.util.Set<String> signatures = new java.util.HashSet<>();
+            for (View view : LyricsLineViewState.secondaryViews(line)) signatures.add(viewSignature(view));
+            shown.put(i, signatures);
+        }
+        // A reflow still settling from a previous toggle must not also react to this rebuild's
+        // layout change: it and this rebuild's own anchoring would both correct the scroll, and the
+        // column jumped by twice the change.
+        reflowTrackUntil = 0L;
+        reflowTops.clear();
+        reflowAnchorLine = null;
+        int rowCount = document.appliedLines.size();
+        int focus = followState.activeIndex();
+        // The anchor is the line at the screen's focus position - the one being sung while the view
+        // follows the song, otherwise (reading ahead, dragging) whichever line sits at the focus
+        // point. Its layout position before the rebuild lets the scroll follow it exactly, so the
+        // space for translations opens and closes around the focus, not from the top down.
+        int anchorIndex = focus;
+        View focusRowBefore = anchorIndex >= 0 && anchorIndex < rowCount
+                ? rowMountController.attachedRowView(document.appliedLines.get(anchorIndex)) : null;
+        if (focusRowBefore == null || followState.isHoldingNow() || !isRowOnScreen(focusRowBefore)) {
+            int atFocus = nearestAppliedLineIndexAt(lyricsScroll.getHeight() * resolveFocusAnchorFraction());
+            if (atFocus >= 0) {
+                anchorIndex = atFocus;
+                focusRowBefore = rowMountController.attachedRowView(document.appliedLines.get(anchorIndex));
+            }
+        }
+        final int anchor = anchorIndex;
+        float focusTopBefore = focusRowBefore == null || focusRowBefore.getHeight() <= 0
+                ? Float.NaN : contentTop(focusRowBefore);
+        LyricsDocument before = document;
+        // Until the one-shot below has anchored, the regular scroll anchor must stay out: with no
+        // cascade running it held the sung line through the same layout change, and the reflow's
+        // own anchoring then moved the column a second time - the line jumped by the full change.
+        reflowPending = true;
+        rebuild.run();
+        styleRowsNow();
+        // Running cascades (a line advance, an earlier reflow) are kept: the reflow below adds its
+        // own displacement to them instead of cutting them off mid-motion.
+        if (document != before || origins.isEmpty() || document.appliedLines.size() != rowCount) {
+            reflowPending = false;
+            clearRowCascade();
+            return;
+        }
+        lyricsScroll.getViewTreeObserver().addOnPreDrawListener(
+                new android.view.ViewTreeObserver.OnPreDrawListener() {
+                    @Override
+                    public boolean onPreDraw() {
+                        android.view.ViewTreeObserver observer = lyricsScroll.getViewTreeObserver();
+                        if (observer.isAlive()) observer.removeOnPreDrawListener(this);
+                        reflowPending = false;
+                        if (document == before) {
+                            int anchored = anchorScrollToFocus(anchor, focusTopBefore);
+                            applyReflow(origins, shown, focus, anchored);
+                            startReflowTracking(anchor);
+                        }
+                        return true;
+                    }
+                });
+    }
+
+    /**
+     * Gives freshly rebuilt rows their dim, blur and scale right away. A rebuild replaces the row
+     * views, and the new ones carry no style until the renderer's next vsync pass; when the
+     * rebuild lands between frames the traversal in between drew them once at full brightness
+     * and sharp - the single flash as a translation's space opened up.
+     */
+    private void styleRowsNow() {
+        try {
+            if (document == null || renderConfig == null || demoModeActive
+                    || document.appliedLines == null || document.appliedLines.isEmpty()) return;
+            if (staticDoc) {
+                frameRenderer.applyStatic(document, rowMountController.mountedIndices(), mountedRowsHost);
+                return;
+            }
+            SpotifyTrack track = host.getCurrentTrackSafely();
+            if (track == null) return;
+            long lyricPos = adjustedLyricPositionMs(
+                    playbackClock.getPosition(track, host.isPlayerActuallyPlaying()));
+            frameRenderer.applySynced(document, rowMountController.mountedIndices(), mountedRowsHost,
+                    renderConfig, lyricPos, followState.activeIndex(), 0.001f,
+                    followState.isHoldingNow());
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * Keeps the line being sung where it is on screen across a translation/reading rebuild:
+     * rows above it gaining or losing text move its layout position, and the scroll follows by the
+     * same amount before the first frame is drawn. The FLIP pass that runs next measures screen
+     * positions, so the focused row gets (almost) no offset and keeps its own ongoing motion, and
+     * only the rows around it part or close. An in-flight follow glide is shifted along with it.
+     */
+    /** @return the scroll change it applied (0 when none), for the reflow to compensate. */
+    private int anchorScrollToFocus(int focus, float focusTopBefore) {
+        if (Float.isNaN(focusTopBefore) || lyricsScroll == null || document == null
+                || focus < 0 || focus >= document.appliedLines.size()) return 0;
+        View row = rowMountController.attachedRowView(document.appliedLines.get(focus));
+        if (row == null || row.getHeight() <= 0) return 0;
+        int shift = Math.round(contentTop(row) - focusTopBefore);
+        if (shift == 0) return 0;
+        // The end-of-content limit still reflects the old layout; near the end of a song it
+        // clamped this scroll, and the whole column slid by the part that was cut off.
+        updateScrollEndLimit();
+        int beforeScroll = lyricsScroll.getScrollY();
+        applyingLyricScroll = true;
+        lyricsScroll.scrollTo(0, Math.max(0, beforeScroll + shift));
+        applyingLyricScroll = false;
+        int applied = lyricsScroll.getScrollY() - beforeScroll;
+        if (scrollSpring != null) scrollSpring.shift(applied);
+        return applied;
+    }
+
+    private boolean isRowOnScreen(View row) {
+        if (row == null || lyricsScroll == null || row.getHeight() <= 0) return false;
+        float top = contentTop(row) + row.getTranslationY() - lyricsScroll.getScrollY();
+        return top + row.getHeight() > 0 && top < lyricsScroll.getHeight();
+    }
+
+    private void applyReflow(Map<Integer, Float> origins,
+                             Map<Integer, java.util.Set<String>> shown, int focus, int anchoredScroll) {
+        float speedMul = cascadeSpeedMultiplier();
+        float frequency = ROW_CASCADE_FREQUENCY_HZ * speedMul * elasticFrequencyMultiplier();
+        float damping = elasticDamping(ROW_CASCADE_DAMPING);
+        float stagger = REFLOW_STAGGER_SEC / speedMul;
+        float maxDelay = REFLOW_MAX_DELAY_SEC / speedMul;
+        int viewport = lyricsScroll.getHeight();
+        for (int i : rowMountController.mountedIndices()) {
+            if (i < 0 || i >= document.appliedLines.size()) continue;
+            AppliedLine line = document.appliedLines.get(i);
+            View row = line == null ? null : rowMountController.attachedRowView(line);
+            if (row == null) continue;
+            float rows = focus < 0 ? 0f : cascadeDistance(line, i, focus);
+            float delay = Math.min(maxDelay, rows * stagger);
+            Float from = origins.get(i);
+            // Always, not only with the Apple slide on: making room for a translation or reading
+            // is layout moving under the reader, and springing it reads as the lines parting
+            // rather than the column jumping.
+            RowCascade existing = rowCascades.get(line);
+            if (from != null && row.getHeight() > 0) {
+                // Undo this row's layout move on screen for now (and the anchor scroll, which moved
+                // every row), then let it spring home.
+                float top = contentTop(row);
+                float offset = (from - top) + anchoredScroll;
+                if (Math.abs(offset) < viewport) {
+                    if (existing != null) {
+                        if (Math.abs(offset) >= 0.5f) existing.bump(offset);
+                        existing.followLayout = true;
+                        existing.layoutTop = top;
+                        row.setTranslationY(existing.spring.position());
+                    } else if (Math.abs(offset) >= 0.5f) {
+                        RowCascade cascade = new RowCascade(offset, LyricCascadeProfile.forRow(
+                                rows, frequency, damping, stagger, maxDelay));
+                        cascade.followLayout = true;
+                        cascade.layoutTop = top;
+                        rowCascades.put(line, cascade);
+                        row.setTranslationY(offset);
+                    }
+                }
+            } else if (existing != null) {
+                // A remounted row starts with no translation; put it back where its motion is.
+                row.setTranslationY(existing.spring.position());
+            }
+            java.util.Set<String> before = shown.get(i);
+            for (View view : LyricsLineViewState.secondaryViews(line)) {
+                if (before == null || !before.contains(viewSignature(view))) {
+                    revealSecondaryView(view, delay);
+                }
+            }
+        }
+        if (reflowLayoutListener == null) {
+            reflowLayoutListener = () -> {
+                followReflowLayout();
+                return true;
+            };
+            lyricsScroll.getViewTreeObserver().addOnPreDrawListener(reflowLayoutListener);
+        }
+        frameScheduler.requestFrame();
+    }
+
+    private android.view.ViewTreeObserver.OnPreDrawListener reflowLayoutListener;
+
+    /**
+     * A rebuilt row rarely lands in one layout pass: spacer heights, wrapping and secondary text
+     * settle over the next few frames. Each of those moves would show as a jump under a spring
+     * that only knew the first pass's position, which is the stutter a translation toggle had.
+     * Runs before every draw and folds any further layout move of a reflowing row into its spring,
+     * so the row keeps gliding from where it is actually drawn.
+     */
+    // After a reflow the layout keeps settling for a few frames: rebuilt rows re-measure, readings
+    // and translations finish laying out, and the spacers standing in for unmounted rows are
+    // re-estimated. Each of those passes moved everything under the reader - the column wobbled
+    // and could drift far from the line being sung. For a short while after the reflow every
+    // pass is absorbed: the anchor line is held in place through the scroll, and any other row
+    // that moved relative to it takes that movement into its spring (getting one if it had none).
+    private static final long REFLOW_TRACK_MS = 1200L;
+    private long reflowTrackUntil;
+    private AppliedLine reflowAnchorLine;
+    private float reflowAnchorTop = Float.NaN;
+    private final Map<AppliedLine, Float> reflowTops = new java.util.IdentityHashMap<>();
+
+    private void startReflowTracking(int anchorIndex) {
+        if (document == null || lyricsScroll == null) return;
+        reflowTops.clear();
+        for (int i : rowMountController.mountedIndices()) {
+            if (i < 0 || i >= document.appliedLines.size()) continue;
+            AppliedLine line = document.appliedLines.get(i);
+            View row = line == null ? null : rowMountController.attachedRowView(line);
+            if (row != null) reflowTops.put(line, contentTop(row));
+        }
+        reflowAnchorLine = anchorIndex >= 0 && anchorIndex < document.appliedLines.size()
+                ? document.appliedLines.get(anchorIndex) : null;
+        View anchorRow = reflowAnchorLine == null ? null : rowMountController.attachedRowView(reflowAnchorLine);
+        reflowAnchorTop = anchorRow == null ? Float.NaN : contentTop(anchorRow);
+        reflowTrackUntil = SystemClock.uptimeMillis() + REFLOW_TRACK_MS;
+        reflowActiveIndex = followState.activeIndex();
+    }
+
+    /**
+     * Tracking only covers the rebuild's own layout settling. A line advance while it runs moves
+     * the mounted window and its spacers - the normal scroll anchoring handles that; following
+     * it here as "layout settling" threw the column a whole screen away from the sung line.
+     */
+    private int reflowActiveIndex = -1;
+    private boolean reflowPending;
+
+    private boolean reflowTracking() {
+        if (reflowTrackUntil == 0L) return false;
+        if (SystemClock.uptimeMillis() >= reflowTrackUntil || document == null
+                || followState.activeIndex() != reflowActiveIndex) {
+            reflowTrackUntil = 0L;
+            return false;
+        }
+        return true;
+    }
+
+    private void followReflowLayout() {
+        if (!reflowTracking()) {
+            if (!reflowTops.isEmpty()) reflowTops.clear();
+            reflowAnchorLine = null;
+            return;
+        }
+        // 1. The anchor line stays where it is on screen: follow its layout move with the scroll.
+        int applied = 0;
+        View anchorRow = reflowAnchorLine == null ? null : rowMountController.attachedRowView(reflowAnchorLine);
+        if (anchorRow != null && !Float.isNaN(reflowAnchorTop)) {
+            float top = contentTop(anchorRow);
+            int shift = Math.round(top - reflowAnchorTop);
+            if (shift != 0 && !followState.isHoldingNow()) {
+                updateScrollEndLimit();
+                int beforeScroll = lyricsScroll.getScrollY();
+                applyingLyricScroll = true;
+                lyricsScroll.scrollTo(0, Math.max(0, beforeScroll + shift));
+                applyingLyricScroll = false;
+                applied = lyricsScroll.getScrollY() - beforeScroll;
+                if (scrollSpring != null) scrollSpring.shift(applied);
+            }
+            reflowAnchorTop = top;
+        }
+        // 2. Every other row: whatever it moved beyond that goes into its spring.
+        float speedMul = cascadeSpeedMultiplier();
+        for (int i : rowMountController.mountedIndices()) {
+            if (i < 0 || i >= document.appliedLines.size()) continue;
+            AppliedLine line = document.appliedLines.get(i);
+            View row = line == null ? null : rowMountController.attachedRowView(line);
+            if (row == null) continue;
+            float top = contentTop(row);
+            Float last = reflowTops.put(line, top);
+            if (last == null || line == reflowAnchorLine) continue;
+            float moved = (top - last) - applied;
+            if (Math.abs(moved) <= 0.5f) continue;
+            RowCascade cascade = rowCascades.get(line);
+            if (cascade == null) {
+                cascade = new RowCascade(-moved, LyricCascadeProfile.forRow(0f,
+                        ROW_CASCADE_FREQUENCY_HZ * speedMul * elasticFrequencyMultiplier(),
+                        elasticDamping(ROW_CASCADE_DAMPING), 0f, 0f));
+                cascade.followLayout = true;
+                rowCascades.put(line, cascade);
+            } else {
+                cascade.bump(-moved);
+                cascade.followLayout = true;
+            }
+            row.setTranslationY(cascade.spring.position());
+        }
+        frameScheduler.requestFrame();
+    }
+
+    /** A row's layout position in scroll-content coordinates: moves with layout, not scrolling. */
+    /** Row the viewport is pinned to across layout changes, and where it sat last frame. */
+    private AppliedLine scrollAnchorLine;
+    private float scrollAnchorTop = Float.NaN;
+
+    /**
+     * Scroll anchoring, as browsers do it: when a layout pass moves the row the column is focused
+     * on - rows above it re-measuring as readings and translations arrive, a wrap re-plan, the
+     * virtual spacers above the mount window being replaced by real rows - the scroll position
+     * moves by the same amount before that frame is drawn, so the focused row stays exactly where
+     * it was on screen. Without this each of those passes showed as the lyrics jumping, then the
+     * follow logic scrolling back, several times while a song loaded. Deliberate scrolls change
+     * scrollY, not the row's layout position, so they are never counteracted.
+     */
+    /** Tells the scroll view where the content ends: the last lyric line resting on the focus
+     *  position, not the source credit and bottom padding below it scrolling on past. */
+    private void updateScrollEndLimit() {
+        if (!(lyricsScroll instanceof com.eza.spicyex.lyrics.ElasticScrollView)) return;
+        com.eza.spicyex.lyrics.ElasticScrollView scroll =
+                (com.eza.spicyex.lyrics.ElasticScrollView) lyricsScroll;
+        int limit = Integer.MAX_VALUE;
+        if (document != null && document.appliedLines != null && !document.appliedLines.isEmpty()
+                && scrollController != null) {
+            View last = rowMountController.attachedRowView(
+                    document.appliedLines.get(document.appliedLines.size() - 1));
+            if (last != null && last.getHeight() > 0) {
+                limit = Math.max(0, scrollController.centeredScrollTarget(last, dp(56)));
+            }
+        }
+        scroll.setScrollEndLimit(limit);
+    }
+
+
+    private void markTranslationToggled() {
+        secondaryRowUpdater.markTranslationToggled();
+    }
+
+    private void holdScrollAnchor() {
+        updateScrollEndLimit();
+        // Runs after layout, before the draw: rows just (re)built get their scale pivot before
+        // they are ever drawn - otherwise their first frame shrinks toward the centre and the
+        // next snaps back to the edge (the sideways jitter when translations/readings toggle).
+        if (document != null && document.appliedLines != null) {
+            for (int i : rowMountController.mountedIndices()) {
+                if (i >= 0 && i < document.appliedLines.size()) {
+                    LyricsLineViewState.ensureScalePivots(document.appliedLines.get(i));
+                }
+            }
+        }
+        AppliedLine line = null;
+        View row = null;
+        if (running && document != null && document.appliedLines != null
+                && !followState.isHoldingNow() && rowCascades.isEmpty() && !reflowTracking()
+                && !reflowPending) {
+            int index = followState.activeIndex() >= 0 ? followState.activeIndex() : loadEntranceAnchor;
+            if (index >= 0 && index < document.appliedLines.size()) {
+                line = document.appliedLines.get(index);
+                row = rowMountController.attachedRowView(line);
+            }
+        }
+        if (row == null || row.getHeight() <= 0) {
+            scrollAnchorLine = null;
+            scrollAnchorTop = Float.NaN;
+            return;
+        }
+        float top = contentTop(row);
+        if (line == scrollAnchorLine && !Float.isNaN(scrollAnchorTop)) {
+            int shift = Math.round(top - scrollAnchorTop);
+            if (shift != 0) {
+                int before = lyricsScroll.getScrollY();
+                applyingLyricScroll = true;
+                lyricsScroll.scrollTo(0, Math.max(0, before + shift));
+                applyingLyricScroll = false;
+                if (scrollSpring != null) scrollSpring.shift(lyricsScroll.getScrollY() - before);
+            }
+        }
+        scrollAnchorLine = line;
+        scrollAnchorTop = top;
+    }
+
+    private float contentTop(View row) {
+        View host = (View) row.getParent();
+        return row.getTop() + (host == null ? 0 : host.getTop());
+    }
+
+    /** What a translation/reading view is showing, to tell a new one from one that was there. */
+    private static String viewSignature(View view) {
+        if (view instanceof TextView) return String.valueOf(((TextView) view).getText());
+        StringBuilder out = new StringBuilder(view.getClass().getSimpleName());
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                out.append('|').append(viewSignature(group.getChildAt(i)));
+            }
+        }
+        return out.toString();
+    }
+
+    private void revealSecondaryView(View view, float delaySeconds) {
+        view.animate().cancel();
+        view.setAlpha(0f);
+        view.setTranslationY(-dp(SECONDARY_REVEAL_RISE_DP));
+        boolean blur = Build.VERSION.SDK_INT >= 31;
+        float blurPx = dp(SECONDARY_REVEAL_BLUR_DP);
+        if (blur) setBlur(view, blurPx);
+        view.animate().alpha(1f).translationY(0f)
+                .setStartDelay(Math.round(delaySeconds * 1000f))
+                .setDuration(SECONDARY_REVEAL_MS)
+                .setInterpolator(SECONDARY_REVEAL_EASE)
+                .setUpdateListener(blur
+                        ? animation -> setBlur(view, blurPx * (1f - animation.getAnimatedFraction()))
+                        : null)
+                .withEndAction(() -> {
+                    if (blur) setBlur(view, 0f);
+                })
+                .start();
+    }
+
+    private static void setBlur(View view, float radiusPx) {
+        if (Build.VERSION.SDK_INT < 31) return;
+        view.setRenderEffect(radiusPx < 0.5f ? null : android.graphics.RenderEffect.createBlurEffect(
+                radiusPx, radiusPx, android.graphics.Shader.TileMode.DECAL));
+    }
+
+    /** Fades the given rows out before a rebuild removes them, so hiding translations reads as
+     *  them leaving rather than vanishing. */
+    private Runnable pendingSecondaryRebuild;
+    private List<View> pendingLeavingViews = java.util.Collections.emptyList();
+
+    private void hideThenRebuild(List<View> leaving, Runnable rebuild) {
+        // A toggle while the previous one is still fading out replaces it: one rebuild for the
+        // latest state, and anything that was fading out comes back (it may be staying after all;
+        // if not, the rebuild removes it).
+        if (pendingSecondaryRebuild != null) {
+            handler.removeCallbacks(pendingSecondaryRebuild);
+            pendingSecondaryRebuild = null;
+            for (View view : pendingLeavingViews) {
+                view.animate().cancel();
+                view.animate().alpha(1f).translationY(0f).setStartDelay(0L)
+                        .setDuration(SECONDARY_HIDE_MS).setInterpolator(SECONDARY_REVEAL_EASE)
+                        .setUpdateListener(null).start();
+            }
+            pendingLeavingViews = java.util.Collections.emptyList();
+        }
+        if (leaving.isEmpty()) {
+            rebuildWithReflow(rebuild);
+            return;
+        }
+        LyricsDocument before = document;
+        for (View view : leaving) {
+            view.animate().cancel();
+            view.animate().alpha(0f).translationY(-dp(SECONDARY_REVEAL_RISE_DP) / 2f)
+                    .setStartDelay(0L).setDuration(SECONDARY_HIDE_MS)
+                    .setInterpolator(SECONDARY_REVEAL_EASE).setUpdateListener(null).start();
+        }
+        pendingLeavingViews = leaving;
+        pendingSecondaryRebuild = () -> {
+            pendingSecondaryRebuild = null;
+            pendingLeavingViews = java.util.Collections.emptyList();
+            if (!running) return;
+            if (document == before) rebuildWithReflow(rebuild);
+            else rebuild.run();
+        };
+        handler.postDelayed(pendingSecondaryRebuild, SECONDARY_HIDE_MS);
+    }
+
+    private List<View> mountedTranslationViews() {
+        List<View> views = new java.util.ArrayList<>();
+        if (document == null) return views;
+        for (int i : rowMountController.mountedIndices()) {
+            if (i < 0 || i >= document.appliedLines.size()) continue;
+            View view = LyricsLineViewState.translationView(document.appliedLines.get(i));
+            if (view != null && view.isAttachedToWindow()) views.add(view);
+        }
+        return views;
+    }
+
     private void refreshSecondaryRows(String message) {
         LyricsDocument snapshot = document;
         if (snapshot == null || snapshot.appliedLines == null || snapshot.appliedLines.isEmpty()) {
             if (!isBlank(message)) setTextIfChanged(status, message);
             return;
         }
-        boolean structureChanged = secondaryRowUpdater.refresh(snapshot, showRomanization(), showTranslation(), japaneseReadingMode());
+        rebuildWithReflow(this::rebuildSecondaryRowsInPlace);
+        if (!isBlank(message)) setTextIfChanged(status, message);
+    }
+
+    /** Adds, removes or updates translation/reading rows on the rows already mounted. */
+    private void rebuildSecondaryRowsInPlace() {
+        LyricsDocument snapshot = document;
+        if (snapshot == null || snapshot.appliedLines == null || snapshot.appliedLines.isEmpty()) return;
+        boolean structureChanged = secondaryRowUpdater.refresh(snapshot, showRomanization(),
+                showTranslation(), japaneseReadingMode());
         if (structureChanged) {
             invalidateRowHeightPrefix();
             rowMountController.markDirty();
             renderWindowForActive(currentWindowAnchor());
         }
-        if (!isBlank(message)) setTextIfChanged(status, message);
     }
 
     private void clearRenderedLineViews() {
@@ -2646,22 +3279,51 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
 
     /** Long-press-to-share: quotes the nearest lyric row, or falls back to a plain track card
      *  when there's no usable line under the touch (no document, or an empty/dot row). */
+    /** The mounted lyric row actually under a scroll-view touch Y (with a little slack), or -1. */
+    private int appliedLineIndexUnder(float yInScroll) {
+        if (document == null || document.appliedLines == null || scrollController == null) return -1;
+        int contentY = scrollController.contentYForTouch(yInScroll);
+        int slack = dp(8);
+        for (int i : rowMountController.mountedIndices()) {
+            if (i < 0 || i >= document.appliedLines.size()) continue;
+            AppliedLine line = document.appliedLines.get(i);
+            View row = line == null ? null : rowMountController.attachedRowView(line);
+            if (row == null || row.getHeight() <= 0) continue;
+            int center = scrollController.rowCenterInContent(row);
+            int half = row.getHeight() / 2 + slack;
+            if (contentY >= center - half && contentY <= center + half) return i;
+        }
+        return -1;
+    }
+
     private void shareLyricLineAt(float yInScroll) {
         SpotifyTrack track = currentTrackThrottled();
         if (track == null) return;
+        // Only a press on a lyric line opens the sheet. The nearest-row lookup used to pick a line
+        // however far away the touch was, so holding the empty space below the last line (or the
+        // credits) opened it too.
+        if (document != null && document.appliedLines != null && !document.appliedLines.isEmpty()
+                && appliedLineIndexUnder(yInScroll) < 0) {
+            return;
+        }
         // Don't share during ads - only share actual songs
         if (isAdTrack(track)) return;
-        if (shareCardController == null) shareCardController = new LyricsShareCardController(activity);
+        if (shareCardController == null) {
+            shareCardController = new LyricsShareCardController(activity);
+            shareCardController.setBackgroundSnapshot(
+                    (w, h) -> ambientController.snapshotBackground(w, h));
+        }
         Bitmap art = SpotifyArtworkCache.snapshotLarge(track.imageId, track.uri, dp(420));
         if (art == null && track.imageId != null && !track.imageId.isEmpty()) {
             art = TrackInfoReadoutController.ART_NETWORK_CACHE.get(track.imageId);
             if (art == null) TrackInfoReadoutController.fetchArtworkFromNetwork(track.imageId);
         }
-        int index = nearestAppliedLineIndexAt(yInScroll);
-        AppliedLine line = (index >= 0 && index < document.appliedLines.size())
+        int index = appliedLineIndexUnder(yInScroll);
+        AppliedLine line = (document != null && index >= 0 && index < document.appliedLines.size())
                 ? document.appliedLines.get(index) : null;
         if (line != null && line.text != null && !line.text.trim().isEmpty()) {
-            shareCardController.showForLine(this, document, track, art, index);
+            shareCardController.showForLine(this, document, track, art, index,
+                    rowMountController.attachedRowView(line));
         } else {
             shareCardController.showTrackCard(this, track, art);
         }
@@ -2827,7 +3489,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         if (instant || Math.abs(delta) <= 2) {
             boolean moved = Math.abs(delta) > 2;
             returnToCurrentPending = false;
-            pendingArrivalCascade = false;
             scrollSpring = null;
             clearScrollSubpixel();
             applyingLyricScroll = true;
@@ -2845,7 +3506,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             // already the "spring" motion, not something that also needed a scroll under it.
             // Hand the cascade the delta the ScrollView ACTUALLY moved, not the requested one:
             returnToCurrentPending = false;
-            pendingArrivalCascade = false;
             scrollSpring = null;
             clearScrollSubpixel();
             // Prime the row offsets before moving the ScrollView. Applying the compensation after
@@ -2868,14 +3528,16 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // stopped animating and hard-cut between lines. It also restarts its own interpolation from
         // scratch on every call, where retargeting an in-flight spring keeps the existing velocity
         // and absorbs a second jump arriving mid-glide instead of snapping.
-        clearRowCascade();
+        // Reflow springs (a translation/reading appearing) are layout motion independent of the
+        // scroll; they carry on under the glide rather than snapping.
+        clearRowCascadeExceptReflow();
         if (scrollSpring != null) {
             scrollSpring.setGoal(target);
             return;
         }
         // A return to the playing line after the user has scrolled away is the one jump that is a
         // deliberate, user-asked-for move rather than the screen quietly keeping up with the song,
-        // so it gets its own, livelier profile and lands with a cascade instead of just stopping.
+        // so it gets its own, livelier profile, launched with real speed.
         boolean returning = returnToCurrentPending;
         returnToCurrentPending = false;
         // Bound how far the glide actually travels. Resuming follow after reading ahead, or a
@@ -2909,7 +3571,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                     Math.abs(target - start) * RETURN_LAUNCH_VELOCITY_PER_PX,
                     RETURN_MAX_LAUNCH_VELOCITY_PX_PER_SEC));
         }
-        pendingArrivalCascade = returning && slideAnimationEnabled;
     }
 
     /** Stiffer for a short hop, softer for a long one. A single frequency either made adjacent
@@ -2967,7 +3628,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             // A finger landed on the list mid-glide without moving it yet, so the scroll listener
             // never fired. Drop the spring rather than scrolling out from under the touch.
             scrollSpring = null;
-            pendingArrivalCascade = false;
             clearScrollSubpixel();
             return;
         }
@@ -2976,10 +3636,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         if (scrollSpring.isAtRest(1f, 4f)) {
             scrollSpring = null;
             applyScrollPosition(Math.round(value));
-            if (pendingArrivalCascade) {
-                pendingArrivalCascade = false;
-                startArrivalCascade();
-            }
         }
     }
 
@@ -3027,97 +3683,44 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         return ROW_CASCADE_MAX_OFFSET_PX;
     }
 
-    /**
-     * The settle a return lands with: rows arrive slightly behind the column and catch up in a
-     * wave outward from the line playback is on.
-     *
-     * <p>Without it the return spring simply stopped, and after all that travel the column just
-     * froze - the motion had no ending, only an absence of further motion. Handing the last stretch
-     * to the same per-row cascade that carries ordinary line advances gives the arrival somewhere
-     * to resolve to, and ties the two motions into one vocabulary instead of two unrelated ones.
-     */
-    private void startArrivalCascade() {
-        if (document == null || rowMountController == null) return;
-        int viewport = lyricsScroll == null ? 0 : lyricsScroll.getHeight();
-        float offset = viewport > 0 ? viewport * ARRIVAL_CASCADE_OFFSET_FRACTION
-                : dp(ARRIVAL_CASCADE_FALLBACK_DP);
-        startRowCascade(offset);
-    }
-
-    /** How far behind the column the rows start an arrival settle, as a share of the viewport. */
-    private static final float ARRIVAL_CASCADE_OFFSET_FRACTION = 0.06f;
-    private static final int ARRIVAL_CASCADE_FALLBACK_DP = 44;
-
     private void startRowCascade(float scrollDelta) {
         if (document == null || document.appliedLines == null || Math.abs(scrollDelta) < 0.5f) return;
         if (Math.abs(scrollDelta) > glideCapPx()) return;
-        boolean apple = renderConfig != null && renderConfig.appleStyle;
-        boolean landscape = isLandscape();
         int activeIndex = followState.activeIndex();
         float speedMul = cascadeSpeedMultiplier();
-        // Most of the wave now lives in the per-row launch velocity (see LyricCascadeProfile), not
-        // in this delay. A stagger long enough to be felt on its own is also long enough to read as
-        // rows stopping and restarting, and on a phone rendering at 30fps a few tens of
-        // milliseconds is under one frame, so a delay-driven wave collapses onto frame boundaries
-        // and degenerates into lockstep jumps. Keep it short: it orders the rows, the velocities
-        // shape them.
-        float stagger = (apple ? (landscape ? 0.026f : 0.020f) : ROW_CASCADE_STAGGER_SEC) / speedMul;
-        float maxDelay = (apple ? (landscape ? 0.13f : 0.10f) : ROW_CASCADE_MAX_DELAY_SEC) / speedMul;
-        // Genuinely underdamped, which is the whole character of the Apple slide: the focused row
-        // travels past its resting place by a few pixels and settles back out of it, so the line
-        // dips as it arrives instead of merely translating into position.
-        //
-        // This was previously ~1.35Hz at 0.985 damping - an overshoot of well under a tenth of a
-        // pixel, i.e. a plain exponential ease, which is exactly the "flat" motion this is meant to
-        // have character instead of. That tuning was chasing a "mechanical bounce" that the springs
-        // were not actually producing: VsyncFrameScheduler was reporting a frame delta of zero
-        // whenever the scroll listener asked for a frame, so every spring stepped a fixed 1/60s of
-        // simulated time per real frame - double speed on a 120Hz panel (snap, then twitch) and
-        // half speed on a phone dropping frames (sluggish stutter). With the delta fixed at the
-        // source, the spring can be tuned for how it should look rather than around that.
-        float baseFrequency = (apple ? (landscape ? 1.88f : 2.05f) : ROW_CASCADE_FREQUENCY_HZ)
-                * speedMul * elasticFrequencyMultiplier();
-        float baseDamping = apple
-                ? elasticDamping(landscape ? 0.74f : 0.70f)
-                : ROW_CASCADE_DAMPING;
+        float stagger = ROW_CASCADE_STAGGER_SEC / speedMul;
+        float maxDelay = ROW_CASCADE_MAX_DELAY_SEC / speedMul;
+        float frequency = ROW_CASCADE_FREQUENCY_HZ * speedMul * elasticFrequencyMultiplier();
+        float damping = elasticDamping(ROW_CASCADE_DAMPING);
+        // Rows the move leaves behind wait their turn; the focus and everything ahead of it leave
+        // together. Scrolling forward that is the rows below the focus, scrolling back the rows
+        // above it.
+        float direction = Math.signum(scrollDelta);
         for (int i : rowMountController.mountedIndices()) {
             if (i < 0 || i >= document.appliedLines.size()) continue;
             AppliedLine line = document.appliedLines.get(i);
             View row = rowMountController.attachedRowView(line);
             if (row == null) continue;
-            float distance = cascadeDistance(line, i, activeIndex);
-            // Every row starts displaced by the FULL scroll delta, with no per-row weighting.
-            // The ScrollView has already carried the content the other way by exactly this much,
-            // so an offset of exactly the delta is what leaves the column visually untouched at
-            // t=0; any other amplitude is a hard jump of the difference, applied on the very frame
-            // the scroll lands - and the springs then start from a column that has already torn.
-            // Weighting it per row (the focused line at 1.14x, its neighbours at 1.0x, the rest at
-            // 0.78x, all scaled by 0.72) therefore didn't make the wave softer - it tore the column
-            // into three groups that each popped by a different fraction of a line before any
-            // spring had run, which is the step every lyric transition was being seen as. The wave
-            // lives in the stagger, the launch velocity and the per-row spring, all of which are
-            // continuous at t=0.
+            float trailing = direction * signedCascadeDistance(line, i, activeIndex);
+            // Every row starts displaced by the FULL scroll delta: the ScrollView has already
+            // carried the content the other way by exactly this much, so this is what leaves the
+            // column visually untouched at t=0. Any per-row amplitude is a hard jump of the
+            // difference on the very frame the scroll lands.
             float initialOffset = scrollDelta;
-            LyricCascadeProfile profile = LyricCascadeProfile.forRow(
-                    scrollDelta, distance, baseFrequency, baseDamping, stagger, maxDelay);
-            // A lyric can advance again before the previous cascade has settled. Retargeting with
-            // a brand new spring resets its phase every time, which was the source of the visible
-            // Apple slide hitch. But dropping this row from the new wave entirely (the old fix)
-            // just traded that hitch for a different one: while its still-cascading neighbors keep
-            // drifting, this row quietly finishes its earlier, smaller decay and sits still - so
-            // the column visibly stops moving as one piece. Folding the new wave's displacement
-            // into the row's current position keeps its existing velocity/phase (no hitch) while
-            // still carrying it along with the rest of the wave (no premature stop).
+            // A lyric can advance again before the previous cascade has settled. Folding the new
+            // displacement into the row's running spring keeps its velocity and phase, where a new
+            // spring would restart it from a standstill and hitch.
             RowCascade existing = rowCascades.get(line);
             if (existing != null) {
-                existing.bump(initialOffset, profile.launchVelocityPxPerSec);
+                existing.bump(initialOffset);
                 // Re-assert the position on this frame too. The bumped row is skipped by
                 // stepRowCascade() while it is still inside its stagger delay, so without this the
                 // View keeps last frame's translation and the scroll jump shows through on it.
                 row.setTranslationY(existing.spring.position());
                 continue;
             }
-            rowCascades.put(line, new RowCascade(initialOffset, profile));
+            rowCascades.put(line, new RowCascade(initialOffset, LyricCascadeProfile.forRow(
+                    trailing, frequency, damping, stagger, maxDelay)));
             row.setTranslationY(initialOffset);
         }
     }
@@ -3130,6 +3733,11 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
      * one step apart.
      */
     private float cascadeDistance(AppliedLine line, int rowIndex, int activeIndex) {
+        return Math.abs(signedCascadeDistance(line, rowIndex, activeIndex));
+    }
+
+    /** Source lines from the focused one to this row; positive below it, negative above. */
+    private float signedCascadeDistance(AppliedLine line, int rowIndex, int activeIndex) {
         if (activeIndex < 0 || document == null || document.appliedLines == null
                 || activeIndex >= document.appliedLines.size()) {
             return 0f;
@@ -3144,10 +3752,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             int lineIndex = document.lines.indexOf(line.sourceLine);
             int activeLineIndex = document.lines.indexOf(active.sourceLine);
             if (lineIndex >= 0 && activeLineIndex >= 0) {
-                return Math.abs(lineIndex - activeLineIndex);
+                return lineIndex - activeLineIndex;
             }
         }
-        return Math.abs(rowIndex - activeIndex);
+        return rowIndex - activeIndex;
     }
 
     private void stepRowCascade(float deltaSeconds) {
@@ -3192,13 +3800,27 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 step = Math.min(deltaSeconds, -cascade.delayRemaining);
                 cascade.delayRemaining = 0f;
             }
-            cascade.releaseLaunchVelocity();
             float value = cascade.spring.step(Math.max(0.001f, Math.min(0.05f, step)));
             row.setTranslationY(value);
-            if (cascade.spring.isAtRest(0.5f, 2f)) {
+            // A reflowing row is kept a little past rest: its layout can still settle, and that
+            // late move has to be caught by followReflowLayout() rather than show as a jump.
+            if (cascade.spring.isAtRest(0.5f, 2f)
+                    && (!cascade.followLayout || now - cascade.startedAtMs > REFLOW_SETTLE_MS)) {
                 row.setTranslationY(0f);
                 it.remove();
             }
+        }
+    }
+
+    private void clearRowCascadeExceptReflow() {
+        if (rowCascades.isEmpty()) return;
+        java.util.Iterator<Map.Entry<AppliedLine, RowCascade>> it = rowCascades.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<AppliedLine, RowCascade> entry = it.next();
+            if (entry.getValue().followLayout) continue;
+            View row = LyricsLineViewState.rowView(entry.getKey());
+            if (row != null) row.setTranslationY(0f);
+            it.remove();
         }
     }
 
@@ -3247,6 +3869,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             View child = rowGroup.getChildAt(childIndex);
             child.animate().cancel();
             child.setTranslationY(0f);
+            child.setAlpha(1f);
+            if (Build.VERSION.SDK_INT >= 31) child.setRenderEffect(null);
         }
     }
 
@@ -4018,39 +4642,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         try {
-            if (ev != null && chromeViews != null && chromeViews.settingsButton != null
-                    && (ev.getActionMasked() == MotionEvent.ACTION_DOWN
-                    || ev.getActionMasked() == MotionEvent.ACTION_UP
-                    || ev.getActionMasked() == MotionEvent.ACTION_CANCEL)) {
-                View settings = chromeViews.settingsButton;
-                int[] location = new int[2];
-                settings.getLocationOnScreen(location);
-                float x = ev.getRawX();
-                float y = ev.getRawY();
-                boolean inside = x >= location[0] && x < location[0] + settings.getWidth()
-                        && y >= location[1] && y < location[1] + settings.getHeight();
-                if (inside) {
-                    String top = "none";
-                    for (int i = getChildCount() - 1; i >= 0; i--) {
-                        View child = getChildAt(i);
-                        if (child == null || child.getVisibility() != View.VISIBLE
-                                || child.getAlpha() <= 0.01f) continue;
-                        int[] childLocation = new int[2];
-                        child.getLocationOnScreen(childLocation);
-                        if (x >= childLocation[0] && x < childLocation[0] + child.getWidth()
-                                && y >= childLocation[1] && y < childLocation[1] + child.getHeight()) {
-                            top = child.getClass().getSimpleName() + "#" + i
-                                    + (child.getTag() == null ? "" : " tag=" + child.getTag());
-                            break;
-                        }
-                    }
-                    XpLog.log(TAG + " settings touch action=" + ev.getActionMasked()
-                            + " inside=true top=" + top
-                            + " editor=" + (findViewWithTag(LyricsLayoutEditController.OVERLAY_TAG) != null)
-                            + " buttonVisible=" + settings.getVisibility()
-                            + " buttonEnabled=" + settings.isEnabled());
-                }
-            }
             if (ev != null && ev.getActionMasked() == MotionEvent.ACTION_DOWN
                     && trackInfoController != null
                     && !trackInfoController.containsArtTouch(ev.getRawX(), ev.getRawY())) {

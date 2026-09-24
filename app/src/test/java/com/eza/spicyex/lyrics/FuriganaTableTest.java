@@ -153,7 +153,7 @@ public class FuriganaTableTest {
     private static Map<String, List<String>> loadReference() {
         HashMap<String, List<String>> out = new HashMap<>();
         try (InputStream in = JapaneseReadingEngine.class
-                .getResourceAsStream("JmdictFurigana.txt.gz")) {
+                .getResourceAsStream("/jmdict/JmdictFurigana.txt.gz")) {
             if (in == null) return out;
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(
                     new java.util.zip.GZIPInputStream(in), StandardCharsets.UTF_8))) {

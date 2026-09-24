@@ -30,6 +30,9 @@ public class References {
     public static WeakReference<Object> playerStateWrapper = new WeakReference<>(null);
     /** Strong playback snapshots keep background track detection alive while Spotify UI is idle. */
     public static volatile Object playerStateStrong;
+    /** Artist of the most recently read track, for features that need more than the name. */
+    public static volatile String lastTrackUri = "";
+    public static volatile String lastArtistUri = "";
     public static volatile Object playerStateWrapperStrong;
     /**
      * Legacy compatibility mirror of the currently captured Spotify access token. Never
@@ -105,6 +108,12 @@ public class References {
                             "artist_name", "ad_advertiser_name", "artist_name:0", "artist", "subtitle", "advertiser_name", "ad_advertiser");
                     String album = firstNonBlankMeta(md,
                             "album_title", "ad_advertiser_name", "album", "context_title", "advertiser_name", "ad_album_title");
+
+                    String artistUri = firstNonBlankMeta(md, "artist_uri", "artist_uri:0");
+                    if (artistUri != null && !artistUri.isEmpty()) {
+                        lastTrackUri = uri == null ? "" : uri;
+                        lastArtistUri = artistUri;
+                    }
 
                     String color = md.get("extracted_color");
 

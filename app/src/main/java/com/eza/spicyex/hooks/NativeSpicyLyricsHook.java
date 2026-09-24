@@ -37,8 +37,14 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
     private final LyricsActivityTakeoverHook activityTakeoverHook =
             new LyricsActivityTakeoverHook(this, nowPlayingInjector);
     private volatile float audioReactiveLevel;
+    private volatile float audioBeat;
+    private volatile float[] audioSpectrum = new float[AudioReactiveController.BANDS];
     private final AudioReactiveController audioReactiveController =
-            new AudioReactiveController(level -> audioReactiveLevel = level);
+            new AudioReactiveController((loudness, beat, spectrum) -> {
+                audioReactiveLevel = loudness;
+                audioBeat = beat;
+                audioSpectrum = spectrum;
+            });
     private final PlaybackBridge playbackBridge = new PlaybackBridge();
     private final LyricsFetchCoordinator lyricsFetchCoordinator =
             new LyricsFetchCoordinator(
@@ -210,6 +216,10 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
         return playbackBridge.isPlayerActuallyPlaying();
     }
 
+    boolean isPlayerStatePaused() {
+        return playbackBridge.isPlayerStatePaused();
+    }
+
     @Override
     public LyricsSessionManager.SessionSubscription subscribeLyricsSession(
             LyricsSessionManager.Listener listener) {
@@ -238,11 +248,22 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
         lyricsSessionManager.restoreLayer(layer);
     }
 
-    /** Smoothed 0..1 real audio level from AudioReactiveController; 0 whenever no session is
-     *  attached (feature off, nothing playing, or the device refused the Visualizer). */
+    /** 0..1 loudness of what Spotify is playing (AudioReactiveController); 0 while not listening. */
     @Override
     public float currentAudioLevel() {
         return audioReactiveLevel;
+    }
+
+    @Override
+    public float currentAudioBeat() {
+        // Read live from the beat timeline, not the ~30Hz analysis callback: kicks are ~10ms
+        // events and the frame loop wants the value for the audio being heard this frame.
+        return audioReactiveController.beatNow();
+    }
+
+    @Override
+    public float[] currentAudioSpectrum() {
+        return audioSpectrum;
     }
 
     @Override

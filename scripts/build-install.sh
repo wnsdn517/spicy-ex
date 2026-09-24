@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/env bash
+#!/usr/bin/env bash
 # Build the debug APK and install it to the connected device in one step, with clean output.
 #
 # Usage: scripts/build-install.sh [--no-install] [--test] [--serial SERIAL] [--install-sdk]
@@ -30,9 +30,6 @@ GRADLE_ARGS=()
 if [ "$(uname -m 2>/dev/null || true)" = "aarch64" ] && command -v aapt2 >/dev/null 2>&1; then
   GRADLE_ARGS+=("-Pandroid.aapt2FromMavenOverride=$(command -v aapt2)")
   GRADLE_ARGS+=("-PSPICY_COMPILE_SDK=${SPICY_COMPILE_SDK:-34}")
-  # The phone build must remain usable even before GitHub model-pack download succeeds.  Keep
-  # the normal desktop/release default unchanged, but embed the dictionaries in Termux builds.
-  GRADLE_ARGS+=("-PexternalLanguageModels=${SPICY_EXTERNAL_MODELS:-false}")
 fi
 while [ "$#" -gt 0 ]; do
   arg="$1"
@@ -107,7 +104,11 @@ fi
 SDK_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
 if [ -z "$SDK_DIR" ] && [ -f "$ROOT_DIR/local.properties" ]; then
   SDK_DIR="$(sed -n 's/^sdk.dir=//p' "$ROOT_DIR/local.properties" | head -n 1)"
-  SDK_DIR="$(printf '%b' "$SDK_DIR")"
+  # Java properties escape ':' and '\'; drop the escaping backslash from each pair.
+  SDK_DIR="$(printf '%s' "$SDK_DIR" | sed 's/\\\(.\)/\1/g')"
+  if command -v cygpath >/dev/null 2>&1; then
+    SDK_DIR="$(cygpath -u "$SDK_DIR")"
+  fi
 fi
 if [ -z "$SDK_DIR" ]; then
   for candidate in "$HOME/Android" "$HOME/Android/Sdk" "$HOME/Android/sdk" /usr/lib/android-sdk /opt/android-sdk; do
@@ -286,11 +287,10 @@ else
 fi
 rm -f "$INSTALL_LOG"
 
-# External model packs are intentionally kept out of the APK.  On a rooted phone, install the
-# exact pack produced from this checkout into Spotify's sandbox as part of the same operation;
-# otherwise the UI can report a successful APK install while the reading engine has no dictionaries
-# to open.  SPICY_EXTERNAL_MODELS=true keeps the old download-only behavior for release builds.
-if [ "$USE_ROOT_INSTALL" -eq 1 ] && [ "${SPICY_EXTERNAL_MODELS:-false}" != "true" ]; then
+# Language models are never inside the APK.  On a rooted phone, install the exact pack produced
+# from this checkout into Spotify's sandbox as part of the same operation, so the reading engine
+# has its dictionaries without waiting for the in-app download.
+if [ "$USE_ROOT_INSTALL" -eq 1 ]; then
   MODEL_TASK=":app:packageLanguageModelPack"
   MODEL_LOG="$(mktemp)"
   echo "==> Packaging language models ($MODEL_TASK)"

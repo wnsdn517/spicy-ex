@@ -13,7 +13,10 @@ import com.eza.spicyex.xposed.XpHooks;
 import com.eza.spicyex.xposed.XpLog;
 
 /**
- * Spotify's own ad tracks use a "spotify:ad:..." URI (confirmed against the decompiled APK's
+ * What happens while an ad plays: nothing, silence, or soft music in its place
+ * ({@link com.eza.spicyex.Settings#AD_MODE}).
+ *
+ * <p>Spotify's own ad tracks use a "spotify:ad:..." URI (confirmed against the decompiled APK's
  * smali - it's a real, stable scheme Spotify itself branches on, not a guess). There's no way to
  * intercept or silence the ad's own audio stream directly, so instead this hooks Spotify's
  * {@link AudioTrack} volume calls and clamps only the ad track to silence. The phone's global
@@ -42,8 +45,14 @@ final class AdMuteController {
     /** Spotify may reuse the same AudioTrack after an ad. Keep the last non-ad gain so a mute
      *  applied during the ad cannot remain stuck when Spotify skips its next setVolume call. */
     private final Map<AudioTrack, Volume> normalVolumes = new WeakHashMap<>();
+    private final AdMusicPlayer music = new AdMusicPlayer();
+    /** Our own volume writes (the fade back in after an ad) must not be remembered as Spotify's. */
+    private final ThreadLocal<Boolean> ownVolumeWrite = new ThreadLocal<>();
     private volatile boolean adActive;
     private boolean started;
+    private int restoreGeneration;
+    private static final long RESTORE_FADE_MS = 900L;
+    private static final long RESTORE_FADE_STEP_MS = 30L;
 
     AdMuteController(NativeSpicyLyricsHook host, Context context) {
         this.host = host;
@@ -65,21 +74,52 @@ final class AdMuteController {
 
     private void check() {
         try {
-            boolean enabled = Boolean.TRUE.equals(config.get(com.eza.spicyex.Settings.AUTO_MUTE_ADS));
-            if (!enabled) {
-                if (adActive) {
-                    adActive = false;
-                    restoreNormalVolumes();
-                }
+            String mode = config.get(com.eza.spicyex.Settings.AD_MODE);
+            if (com.eza.spicyex.Settings.AD_MODE_OFF.equals(mode)) {
+                if (adActive) endAd();
                 return;
             }
             SpotifyTrack track = host.getCurrentTrackSafely();
-            boolean isAd = track != null && track.uri != null && track.uri.startsWith(AD_URI_PREFIX);
-            boolean wasAd = adActive;
-            adActive = isAd;
-            if (wasAd && !isAd) restoreNormalVolumes();
+            // Between two tracks - notably between two ads in one break - there is briefly no
+            // track at all. Hold the current state through that gap instead of ending the ad and
+            // starting it again, which would restart the music and let a blip of volume through.
+            if (track == null || track.uri == null || track.uri.isEmpty()) return;
+            boolean isAd = track.uri.startsWith(AD_URI_PREFIX);
+            if (isAd && !adActive) startAd();
+            else if (!isAd && adActive) endAd();
+            if (adActive) updateMusic(mode);
         } catch (Throwable t) {
             XpLog.log(TAG + " check failed: " + t);
+        }
+    }
+
+    private void startAd() {
+        adActive = true;
+        restoreGeneration++; // cancels a fade back in still running from the previous ad
+        synchronized (normalVolumes) {
+            for (AudioTrack track : normalVolumes.keySet()) setOwnVolume(track, 0f, 0f);
+        }
+    }
+
+    private void endAd() {
+        adActive = false;
+        music.fadeOutAndStop();
+        fadeInNormalVolumes();
+    }
+
+    private void updateMusic(String mode) {
+        if (!com.eza.spicyex.Settings.AD_MODE_MUSIC.equals(mode)) {
+            if (music.isPlaying()) music.fadeOutAndStop();
+            return;
+        }
+        // The media session does not reliably report an ad as playing (outside the lyrics screen
+        // nothing else corrected for that, so the music sat at zero gain). Only an explicit
+        // pause in Spotify's own PlayerState holds it.
+        if (host.isPlayerStatePaused()) {
+            music.hold();
+        } else {
+            music.setTheme(config.get(com.eza.spicyex.Settings.AD_MUSIC_THEME));
+            music.fadeIn();
         }
     }
 
@@ -93,8 +133,12 @@ final class AdMuteController {
         try {
             XpHooks.findAfter(AudioTrack.class, "play", "adMute:AudioTrack#play", param -> {
                 AudioTrack audioTrack = (AudioTrack) param.thisObject;
+                if (AdMusicPlayer.isOwnTrack(audioTrack)) return;
                 if (adActive) {
-                    audioTrack.setVolume(0f);
+                    // Spotify may never have set this track's volume; its normal level is then
+                    // full volume, and it must be known or the fade back in has nothing to reach.
+                    rememberVolumeIfMissing(audioTrack, 1f, 1f);
+                    setOwnVolume(audioTrack, 0f, 0f);
                 } else {
                     restoreNormalVolume(audioTrack);
                 }
@@ -102,6 +146,7 @@ final class AdMuteController {
             XpHooks.findBefore(AudioTrack.class, "setVolume", "adMute:AudioTrack#setVolume",
                     param -> {
                         AudioTrack audioTrack = (AudioTrack) param.thisObject;
+                        if (isOwnWrite(audioTrack)) return;
                         float requested = ((Float) param.args[0]);
                         if (!adActive) {
                             rememberVolume(audioTrack, requested, requested);
@@ -113,6 +158,7 @@ final class AdMuteController {
             XpHooks.findBefore(AudioTrack.class, "setStereoVolume",
                     "adMute:AudioTrack#setStereoVolume", param -> {
                         AudioTrack audioTrack = (AudioTrack) param.thisObject;
+                        if (isOwnWrite(audioTrack)) return;
                         float left = ((Float) param.args[0]);
                         float right = ((Float) param.args[1]);
                         if (adActive) {
@@ -141,9 +187,26 @@ final class AdMuteController {
         }
     }
 
-    private void restoreNormalVolumes() {
-        synchronized (normalVolumes) {
-            for (AudioTrack track : normalVolumes.keySet()) restoreNormalVolume(track);
+    private boolean isOwnWrite(AudioTrack track) {
+        return AdMusicPlayer.isOwnTrack(track) || Boolean.TRUE.equals(ownVolumeWrite.get());
+    }
+
+    /** Brings Spotify's audio back over {@link #RESTORE_FADE_MS} instead of cutting it in. */
+    private void fadeInNormalVolumes() {
+        int generation = ++restoreGeneration;
+        long steps = RESTORE_FADE_MS / RESTORE_FADE_STEP_MS;
+        for (long step = 1; step <= steps; step++) {
+            float fraction = step / (float) steps;
+            float eased = fraction * fraction * (3f - 2f * fraction);
+            main.postDelayed(() -> {
+                if (generation != restoreGeneration || adActive) return;
+                synchronized (normalVolumes) {
+                    for (Map.Entry<AudioTrack, Volume> entry : normalVolumes.entrySet()) {
+                        Volume volume = entry.getValue();
+                        setOwnVolume(entry.getKey(), volume.left * eased, volume.right * eased);
+                    }
+                }
+            }, step * RESTORE_FADE_STEP_MS);
         }
     }
 
@@ -154,14 +217,22 @@ final class AdMuteController {
             volume = normalVolumes.get(track);
         }
         if (volume == null) return;
+        setOwnVolume(track, volume.left, volume.right);
+    }
+
+    private void setOwnVolume(AudioTrack track, float left, float right) {
+        if (track == null) return;
+        ownVolumeWrite.set(Boolean.TRUE);
         try {
-            track.setStereoVolume(volume.left, volume.right);
+            track.setStereoVolume(left, right);
         } catch (Throwable ignored) {
             try {
-                track.setVolume(Math.max(volume.left, volume.right));
+                track.setVolume(Math.max(left, right));
             } catch (Throwable ignoredAgain) {
                 // The AudioTrack may have been released during the ad transition.
             }
+        } finally {
+            ownVolumeWrite.set(Boolean.FALSE);
         }
     }
 

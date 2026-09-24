@@ -33,6 +33,7 @@ public final class SpotifyPlusConfig {
         this.appContext = appContext;
         SettingsStore.migrateLikedSongsButton(hostPrefs);
         SettingsStore.migrateLineBlurLevel(hostPrefs);
+        SettingsStore.migrateAdMode(hostPrefs);
     }
 
     public static SpotifyPlusConfig from(Context context) {
@@ -47,18 +48,10 @@ public final class SpotifyPlusConfig {
 
     public <T> T get(Settings.Setting<T> setting) {
         try {
-            Object value = null;
-            // Per-orientation: try orientation-suffixed key first, then fall back to base key.
-            if (appContext != null) {
-                String oKey = Settings.orientationKey(appContext, setting);
-                if (oKey != null) {
-                    value = readRaw(oKey, setting);
-                }
-            }
-            // Fall back to base (unsuffixed) key
-            if (value == null) {
-                value = readRaw(setting.key, setting);
-            }
+            String landscapeKey = Settings.landscapeKey(appContext, setting);
+            String key = landscapeKey != null && hostPrefs.contains(landscapeKey)
+                    ? landscapeKey : setting.key;
+            Object value = readRaw(key, setting);
             if (value == null) value = setting.defaultValue;
             return setting.coerce(value);
         } catch (ClassCastException | IllegalArgumentException invalidStoredValue) {

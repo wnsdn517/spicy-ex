@@ -6,8 +6,8 @@ import static com.eza.spicyex.hooks.NativeLyricsUtils.topSystemPadding;
 
 import android.app.Activity;
 import android.graphics.Color;
-import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
@@ -52,14 +52,15 @@ final class LyricsLayoutEditController {
     private static final int HANDLE_SIZE_DP = 22;
     /** Extra grab margin around the corner grip's drawn bracket. */
     private static final int HANDLE_TOUCH_PAD_DP = 10;
+    /** Touch box of the Apple-style resize grip; the element's corner sits GRIP_OUTSIDE_DP in
+     *  from its bottom-right, so most of the box (and the drawn arc) lies inside the element. */
+    private static final int GRIP_BOX_DP = 56;
+    private static final int GRIP_OUTSIDE_DP = 12;
     private static final int TEXT_COLOR = Color.rgb(232, 232, 238);
     private static final int ACCENT_COLOR = Color.rgb(30, 215, 96);
-    /** Outline/label color for a capturable element that is not the current selection - the same
-     *  muted tone already used throughout this file's option-row labels. */
-    private static final int GRAY_COLOR = 0x99FFFFFF;
     /** Outline color actually painted on an UNSELECTED capture. Every capturable element is
-     *  outlined at all times so the editor reads as one visual language, but at the full-strength
-     *  gray above, seven simultaneous boxes plus a per-lyric-row grid buried the one box the user
+     *  outlined at all times so the editor reads as one visual language, but at full-strength
+     *  gray, seven simultaneous boxes plus a per-lyric-row grid buried the one box the user
      *  was actually editing. Unselected outlines are therefore drawn as a faint hairline: still
      *  legible as "this is tappable", no longer competing with the selection. */
     private static final int GRAY_IDLE_COLOR = 0x3DFFFFFF;
@@ -170,7 +171,7 @@ final class LyricsLayoutEditController {
                 Settings.ENABLE_GLOW_BLUR, Settings.LINE_SYNC_FILL,
                 Settings.ANIMATION_STYLE, Settings.LOAD_LIFT_ANIMATION,
                 Settings.APPLE_CASCADE_SPEED, Settings.APPLE_SPRING_STRENGTH,
-                Settings.NATIVE_SPICY_ROMANIZATION, Settings.NATIVE_SPICY_TRANSLATION
+                Settings.FOLLOW_CHIP_ANIMATION, Settings.FOLLOW_CHIP_PROGRESS
         };
 
         /** Which on-screen thing is selected. Artwork and its title/artist text used to be one
@@ -209,14 +210,11 @@ final class LyricsLayoutEditController {
         private final FrameLayout backLayer;
         private final LinearLayout optionsCard;
         private final MaxHeightScrollView optionsScroll;
-        private final LinearLayout panelContainer;
+        private final SheetLayout panelContainer;
+        private final TextView sheetTitle;
 
         private Element selected = Element.ARTWORK;
-        /** Fixed measured height of the bottom sheet. Session-local only, not a setting. */
-        private Integer panelContainerHeight;
         private boolean panelVisible;
-        /** Current bottom-sheet offset. 0 is fully expanded; positive values slide it down. */
-        private float sheetOffset;
         private View artCapture;
         private View artHandle;
         private View trackTextCapture;
@@ -225,7 +223,6 @@ final class LyricsLayoutEditController {
         private View skipCapture;
         private View followCapture;
         private View dockCapture;
-        private View backCapture;
         private boolean demoActive;
         /** Outline -> real view it is tracing. Re-synced every frame by {@link #syncCaptures()}. */
         private final java.util.List<CaptureBinding> captureBindings = new java.util.ArrayList<>();
@@ -234,6 +231,13 @@ final class LyricsLayoutEditController {
          *  itself and must not be pulled back to the real artwork, which does not resize until the
          *  settings write propagates. */
         private boolean resizingArtwork;
+        private boolean resizingTrackText;
+        private View trackTextHandle;
+        /** Live value shown next to whatever is being resized or pinched. */
+        private TextView valueBubble;
+        /** Small "Options" button floating by the selection; the sheet opens only on request, so
+         *  the canvas itself - drag, pinch, grips - stays the primary way to edit. */
+        private TextView optionsPill;
 
         /** One outline and the real on-screen view it traces. */
         private static final class CaptureBinding {
@@ -242,22 +246,26 @@ final class LyricsLayoutEditController {
             /** Corner grip pinned to the capture's bottom-right, or null. */
             final View handle;
             final int handleInsetPx;
+            final Element handleOwner;
 
-            CaptureBinding(View capture, Supplier<View> source, View handle, int handleInsetPx) {
+            CaptureBinding(View capture, Supplier<View> source, View handle, int handleInsetPx,
+                           Element handleOwner) {
                 this.capture = capture;
                 this.source = source;
                 this.handle = handle;
                 this.handleInsetPx = handleInsetPx;
+                this.handleOwner = handleOwner;
             }
         }
 
         private void bindCapture(View capture, Supplier<View> source) {
-            bindCapture(capture, source, null, 0);
+            bindCapture(capture, source, null, 0, null);
         }
 
-        private void bindCapture(View capture, Supplier<View> source, View handle, int handleInsetPx) {
+        private void bindCapture(View capture, Supplier<View> source, View handle, int handleInsetPx,
+                                 Element handleOwner) {
             if (capture == null || source == null) return;
-            captureBindings.add(new CaptureBinding(capture, source, handle, handleInsetPx));
+            captureBindings.add(new CaptureBinding(capture, source, handle, handleInsetPx, handleOwner));
         }
 
         /**
@@ -284,6 +292,7 @@ final class LyricsLayoutEditController {
                 View capture = binding.capture;
                 if (capture == null || capture.getParent() == null) continue;
                 if (resizingArtwork && capture == artCapture) continue;
+                if (resizingTrackText && capture == trackTextCapture) continue;
                 View source;
                 try {
                     source = binding.source.get();
@@ -318,9 +327,9 @@ final class LyricsLayoutEditController {
         private void syncHandle(CaptureBinding binding, FrameLayout.LayoutParams captureLp) {
             View handle = binding.handle;
             if (handle == null || handle.getParent() == null) return;
-            // The grip only means anything while the artwork is the selection; showing it always
-            // put a bright green bracket on screen competing with whatever was being edited.
-            int wanted = selected == Element.ARTWORK ? View.VISIBLE : View.GONE;
+            // A grip only means anything while its element is the selection; showing it always
+            // put a bright handle on screen competing with whatever was being edited.
+            int wanted = selected == binding.handleOwner ? View.VISIBLE : View.GONE;
             if (handle.getVisibility() != wanted) handle.setVisibility(wanted);
             if (wanted != View.VISIBLE) return;
             ViewGroup.LayoutParams raw = handle.getLayoutParams();
@@ -385,9 +394,9 @@ final class LyricsLayoutEditController {
             this.dockLayer = new FrameLayout(activity);
             this.backLayer = new FrameLayout(activity);
             this.optionsCard = new LinearLayout(activity);
-            this.optionsScroll = new SheetScrollView(activity);
-            this.panelContainer = new LinearLayout(activity);
-            this.panelContainer.setOrientation(LinearLayout.VERTICAL);
+            this.optionsScroll = new MaxHeightScrollView(activity);
+            this.panelContainer = new SheetLayout(activity);
+            this.sheetTitle = text("", 17, TEXT_COLOR, true);
             this.overlay.setTag(OVERLAY_TAG);
         }
 
@@ -529,19 +538,23 @@ final class LyricsLayoutEditController {
             panelContainer.setElevation(dp(16));
 
             panelContainer.removeAllViews();
-            panelContainer.addView(panelDragHandle(), panelDragHandleLp());
-            // The old fixed-height options + bottom action row reserved a second empty region
-            // below short panels. The sheet now wraps its actual scroll content; editor actions
-            // live in the top chrome instead, so there is no artificial lower blank area.
+            panelContainer.addView(sheetGrabber(), sheetGrabberLp());
+            // Names what the sheet is editing: selection is tap-driven on the real screen, so
+            // without it the only cue is which outline happens to be green.
+            sheetTitle.setSingleLine(true);
+            sheetTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams titleLp = matchWrap(6);
+            titleLp.leftMargin = dp(20);
+            titleLp.rightMargin = dp(20);
+            panelContainer.addView(sheetTitle, titleLp);
+            // Editor actions live in the top chrome, so the sheet is only as tall as its options.
             panelContainer.addView(optionsScroll, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             overlay.addView(panelContainer, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            applyPanelLayout();
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM));
             panelVisible = false;
-            sheetOffset = 0f;
-            panelContainer.setTranslationY(0f);
             panelContainer.setVisibility(View.INVISIBLE);
 
             refreshArtwork();
@@ -569,8 +582,6 @@ final class LyricsLayoutEditController {
                 refreshFollowChip();
                 refreshDock();
                 refreshBackButton();
-                panelContainerHeight = null;
-                applyPanelLayout();
             });
             startCaptureSync();
         }
@@ -659,99 +670,6 @@ final class LyricsLayoutEditController {
             return button;
         }
 
-        private LinearLayout.LayoutParams iconButtonLp(int leftMarginDp) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(36), dp(36));
-            lp.leftMargin = dp(leftMarginDp);
-            return lp;
-        }
-
-        private static final Element[] SWITCHABLE_ELEMENTS = {
-                Element.ARTWORK, Element.TRACK_TEXT, Element.TEXT, Element.BACKGROUND,
-                Element.FOCUS, Element.SKIP, Element.FOLLOW, Element.DOCK
-        };
-
-        /** Named chips instead of icons - this is the one place every element (including Artwork
-         *  when its own position is "Off" and there's nothing left on screen to tap) is always
-         *  reachable by name, scrolling if it doesn't fit. Words read faster than guessing at an
-         *  icon's meaning, and there's no separate top bar duplicating this any more. */
-        private LinearLayout elementSwitcherRow() {
-            LinearLayout row = new LinearLayout(activity);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            TextView selectedChip = null;
-            for (Element element : SWITCHABLE_ELEMENTS) {
-                TextView chip = chip(labelFor(element));
-                chip.setTextSize(11);
-                chip.setPadding(dp(3), dp(7), dp(3), dp(7));
-                boolean isSelected = selected == element;
-                paintChip(chip, isSelected);
-                chip.setOnClickListener(v -> selectElement(element));
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                lp.rightMargin = dp(4);
-                row.addView(chip, lp);
-                if (isSelected) selectedChip = chip;
-            }
-            android.widget.HorizontalScrollView scroller = new android.widget.HorizontalScrollView(activity);
-            scroller.setHorizontalScrollBarEnabled(false);
-            scroller.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-            // A plain flat row gave no hint that 8 tabs exist beyond whatever fits on screen -
-            // fading edges at least signal "there's more this way" even before the first swipe.
-            scroller.setHorizontalFadingEdgeEnabled(true);
-            scroller.setFadingEdgeLength(dp(18));
-            scroller.addView(row, new ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            LinearLayout wrapper = new LinearLayout(activity);
-            wrapper.addView(scroller, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            // Tapping a real on-screen element (not this strip) can select a tab that's currently
-            // scrolled out of view, leaving no visible cue of where you are among the 8 - center
-            // whichever chip is selected once its width is known.
-            TextView toCenter = selectedChip;
-            if (toCenter != null) {
-                toCenter.post(() -> {
-                    int target = toCenter.getLeft() - (scroller.getWidth() - toCenter.getWidth()) / 2;
-                    scroller.smoothScrollTo(Math.max(0, target), 0);
-                });
-            }
-            return wrapper;
-        }
-
-        /** Editor-level actions: cancel (discard changes) and save (apply & close). All changes
-         *  apply live as they're made, so save just closes the editor. */
-        private LinearLayout actionIconsRow() {
-            LinearLayout row = new LinearLayout(activity);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(8), dp(12), dp(8), dp(12));
-
-            // Cancel button (left side)
-            row.addView(iconButton(ActionIconDrawable.Kind.CLOSE, 0x99FFFFFF,
-                    s("cancel", "Cancel"), this::close), iconButtonLp(0));
-
-            // Reset sits beside Cancel so it is discoverable as an editor-level action. It uses
-            // refresh geometry because the action restores defaults rather than deleting content.
-            row.addView(iconButton(ActionIconDrawable.Kind.REFRESH, 0xB3FFFFFF,
-                    s("reset", "Reset"), this::onResetClicked), iconButtonLp(4));
-
-            TextView title = text(s("layout_editor_title", "Layout editor"), 15, TEXT_COLOR, true);
-            title.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            titleLp.leftMargin = dp(10);
-            row.addView(title, titleLp);
-
-            // Spacer to push save button to the right
-            LinearLayout spacer = new LinearLayout(activity);
-            LinearLayout.LayoutParams spacerLp = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            row.addView(spacer, spacerLp);
-
-            // Save button (right side)
-            row.addView(iconButton(ActionIconDrawable.Kind.CHECK, ACCENT_COLOR,
-                    s("save", "Save"), this::close), iconButtonLp(0));
-            return row;
-        }
-
         // -- artwork element --------------------------------------------------
 
         /** Rebuilds the capture outline + resize handle anchored to whichever art frame is
@@ -811,17 +729,17 @@ final class LyricsLayoutEditController {
             // Touch box extends a bit past the drawn bracket's vertex for grabbability
             // (HANDLE_SIZE_DP is the bracket's own arm length) - the vertex itself sits at the
             // real frame corner, with both arms drawn extending down-right from it.
-            int touchPad = dp(HANDLE_TOUCH_PAD_DP);
-            View handle = new CornerGripView(activity, touchPad);
-            int handleSize = dp(HANDLE_SIZE_DP) + touchPad;
+            int handleSize = dp(GRIP_BOX_DP);
+            int cornerOffset = handleSize - dp(GRIP_OUTSIDE_DP);
+            View handle = new CornerGripView(activity, cornerOffset, dp(radiusDp));
             FrameLayout.LayoutParams handleLp = new FrameLayout.LayoutParams(
                     handleSize, handleSize, Gravity.TOP | Gravity.START);
-            handleLp.leftMargin = pos[0] + frame.getWidth() - touchPad;
-            handleLp.topMargin = pos[1] + frame.getHeight() - touchPad;
+            handleLp.leftMargin = pos[0] + frame.getWidth() - cornerOffset;
+            handleLp.topMargin = pos[1] + frame.getHeight() - cornerOffset;
             handle.setVisibility(selected == Element.ARTWORK ? View.VISIBLE : View.GONE);
             artLayer.addView(handle, handleLp);
             artHandle = handle;
-            bindCapture(capture, artFrameSupplier, handle, touchPad);
+            bindCapture(capture, artFrameSupplier, handle, cornerOffset, Element.ARTWORK);
             installResizeDrag();
         }
 
@@ -912,10 +830,14 @@ final class LyricsLayoutEditController {
                             if (!resizingArtwork) return true;
                             float dxDp = (event.getRawX() - startRawX[0]) / density;
                             float dyDp = (event.getRawY() - startRawY[0]) / density;
+                            // The outline grows from its top-left, so moving the corner by the
+                            // finger's diagonal travel keeps the grip under the finger. (An
+                            // acceleration curve used to be applied here; it made the corner run
+                            // ahead of the finger on anything but a tiny drag.)
                             float dragDp = (dxDp + dyDp) / 2f;
-                            float acceleratedDragDp = dragDp * (1f + Math.abs(dragDp) * 0.015f);
-                            int newSizeDp = clamp(Math.round(startSizeDp[0] + acceleratedDragDp), min, max);
+                            int newSizeDp = clamp(Math.round(startSizeDp[0] + dragDp), min, max);
                             applyResizePreview(dp(newSizeDp));
+                            showValueBubble(newSizeDp + " dp", artCapture);
                             // Plain writes, not put(): the visual feedback here is entirely local,
                             // nothing reads the real frame back mid-drag, so there's no need to
                             // force an early re-apply - the real artwork frame catches up on its
@@ -927,6 +849,7 @@ final class LyricsLayoutEditController {
                         case MotionEvent.ACTION_UP:
                         case MotionEvent.ACTION_CANCEL: {
                             resizingArtwork = false;
+                            hideValueBubble();
                             // Re-apply for real, then let the per-frame capture sync settle the
                             // outline onto wherever the artwork actually ended up - no rebuild
                             // needed, and no window where the outline shows the old size.
@@ -979,9 +902,9 @@ final class LyricsLayoutEditController {
             ViewGroup.LayoutParams rawHandle = handle.getLayoutParams();
             if (!(rawHandle instanceof FrameLayout.LayoutParams)) return;
             FrameLayout.LayoutParams handleLp = (FrameLayout.LayoutParams) rawHandle;
-            int touchPad = dp(HANDLE_TOUCH_PAD_DP);
-            handleLp.leftMargin = lp.leftMargin + newSizePx - touchPad;
-            handleLp.topMargin = lp.topMargin + newSizePx - touchPad;
+            int cornerOffset = dp(GRIP_BOX_DP) - dp(GRIP_OUTSIDE_DP);
+            handleLp.leftMargin = lp.leftMargin + newSizePx - cornerOffset;
+            handleLp.topMargin = lp.topMargin + newSizePx - cornerOffset;
             handle.setLayoutParams(handleLp);
         }
 
@@ -1029,8 +952,82 @@ final class LyricsLayoutEditController {
             capture.setOnClickListener(v -> selectElement(Element.TRACK_TEXT));
             trackTextLayer.addView(capture, lp);
             trackTextCapture = capture;
-            bindCapture(capture, trackTextFrameSupplier);
+            int handleSize = dp(GRIP_BOX_DP);
+            int cornerOffset = handleSize - dp(GRIP_OUTSIDE_DP);
+            View handle = new CornerGripView(activity, cornerOffset, dp(10));
+            FrameLayout.LayoutParams handleLp = new FrameLayout.LayoutParams(
+                    handleSize, handleSize, Gravity.TOP | Gravity.START);
+            handleLp.leftMargin = pos[0] + frame.getWidth() - cornerOffset;
+            handleLp.topMargin = pos[1] + frame.getHeight() - cornerOffset;
+            handle.setVisibility(selected == Element.TRACK_TEXT ? View.VISIBLE : View.GONE);
+            trackTextLayer.addView(handle, handleLp);
+            trackTextHandle = handle;
+            bindCapture(capture, trackTextFrameSupplier, handle, cornerOffset, Element.TRACK_TEXT);
+            installTrackTextResizeDrag(handle);
             paintCapture(trackTextCapture, selected == Element.TRACK_TEXT);
+        }
+
+        /** Same corner-grip gesture as the artwork's, scaling the title/artist text instead. The
+         *  real readout re-lays out from the preference write, and the outline follows it through
+         *  the capture sync, so what is under the finger is always the real text size. */
+        private void installTrackTextResizeDrag(View handle) {
+            int min = Settings.TRACK_INFO_TEXT_SIZE_CUSTOM.minValue;
+            int max = Settings.TRACK_INFO_TEXT_SIZE_CUSTOM.maxValue;
+            float[] startRaw = new float[2];
+            float[] startSize = new float[2];
+            int[] startPercent = new int[1];
+            int[] lastPercent = new int[1];
+            handle.setOnTouchListener((v, event) -> {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startRaw[0] = event.getRawX();
+                        startRaw[1] = event.getRawY();
+                        View capture = trackTextCapture;
+                        startSize[0] = capture == null ? 0f : capture.getWidth();
+                        startSize[1] = capture == null ? 0f : capture.getHeight();
+                        startPercent[0] = currentTrackTextSizePercent();
+                        lastPercent[0] = startPercent[0];
+                        resizingTrackText = true;
+                        return true;
+                    case MotionEvent.ACTION_MOVE: {
+                        // Text scales about its top-left, so the size that puts the corner under
+                        // the finger is the start size times how far the corner moved relative
+                        // to the block's own width and height.
+                        float w = Math.max(dp(40), startSize[0]);
+                        float h = Math.max(dp(20), startSize[1]);
+                        float ratio = ((w + event.getRawX() - startRaw[0]) / w
+                                + (h + event.getRawY() - startRaw[1]) / h) / 2f;
+                        int percent = clamp(Math.round(startPercent[0] * Math.max(0.1f, ratio)),
+                                min, max);
+                        if (percent != lastPercent[0]) {
+                            lastPercent[0] = percent;
+                            writer.put(Settings.TRACK_INFO_TEXT_SIZE_ADAPTIVE, false);
+                            writer.put(Settings.TRACK_INFO_TEXT_SIZE, "Custom");
+                            writer.put(Settings.TRACK_INFO_TEXT_SIZE_CUSTOM, percent);
+                            if (applyPreferences != null) applyPreferences.run();
+                        }
+                        showValueBubble(percent + "%", trackTextCapture);
+                        return true;
+                    }
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        resizingTrackText = false;
+                        hideValueBubble();
+                        selectElement(Element.TRACK_TEXT);
+                        return true;
+                    default:
+                        return false;
+                }
+            });
+        }
+
+        private int currentTrackTextSizePercent() {
+            String mode = store.get(Settings.TRACK_INFO_TEXT_SIZE);
+            if ("Small".equals(mode)) return 85;
+            if ("Large".equals(mode)) return 120;
+            if ("XLarge".equals(mode)) return 145;
+            if ("Custom".equals(mode)) return safeGet(Settings.TRACK_INFO_TEXT_SIZE_CUSTOM);
+            return 100;
         }
 
         // -- lyrics-text element -----------------------------------------------
@@ -1102,11 +1099,13 @@ final class LyricsLayoutEditController {
                             Settings.LYRICS_TEXT_SIZE_CUSTOM.maxValue);
                     writer.put(Settings.LYRICS_TEXT_SIZE, "custom");
                     writer.put(Settings.LYRICS_TEXT_SIZE_CUSTOM, pinchSize[0]);
+                    showValueBubble(pinchSize[0] + "%", null);
                     return true;
                 }
 
                 @Override
                 public void onScaleEnd(android.view.ScaleGestureDetector detector) {
+                    hideValueBubble();
                     if (selected == Element.TEXT) selectElement(Element.TEXT);
                 }
             });
@@ -1367,7 +1366,6 @@ final class LyricsLayoutEditController {
                     s("save", "Save"), this::close);
             backLayer.addView(cancel, editorActionLp(pos[0], pos[1], buttonSize));
             backLayer.addView(save, editorActionLp(pos[0] + buttonSize + dp(6), pos[1], buttonSize));
-            backCapture = cancel;
         }
 
         private FrameLayout.LayoutParams editorActionLp(int left, int top, int size) {
@@ -1398,7 +1396,6 @@ final class LyricsLayoutEditController {
             layer.addView(capture, lp);
             bindCapture(capture, supplier);
             paintCapture(capture, selected == element);
-            if (panelVisible) overlay.post(this::avoidPanelOverlap);
             return capture;
         }
 
@@ -1412,9 +1409,13 @@ final class LyricsLayoutEditController {
         }
 
         private void selectElement(Element element, boolean revealPanel) {
+            // Option callbacks re-select the current element to rebuild rows that depend on the
+            // value just changed. That must read as the row updating in place: keep the list's
+            // scroll position and leave the sheet exactly where it is.
             int previousScrollY = optionsScroll.getScrollY();
-            boolean wasSelected = panelVisible && selected == element;
+            boolean rebuildOnly = selected == element && panelVisible;
             selected = element;
+            sheetTitle.setText(labelFor(element));
             optionsCard.removeAllViews();
             endGroup(); // the cards just removed above are gone; never append into a stale one
             repaintAllCaptures();
@@ -1445,73 +1446,87 @@ final class LyricsLayoutEditController {
                     buildDockOptions();
                     break;
             }
-            // Rebuilding the option rows must not throw away the user's panel position.
-            optionsScroll.post(() -> optionsScroll.scrollTo(0, Math.max(0, previousScrollY)));
-            afterNextLayout(() -> {
-                if (revealPanel) {
-                    if (wasSelected) {
-                        hidePanelSheet(true);
-                        overlay.postDelayed(() -> showPanelSheet(true), 150L);
-                    } else {
-                        showPanelSheet(true);
-                    }
-                }
-                avoidPanelOverlap();
-            });
-        }
-
-        /** The sheet owns the bottom edge. It is allowed to cover the selected element: selecting
-         *  that element is what opened the sheet, and moving the sheet around made its position
-         *  unpredictable while editing. */
-        private void avoidPanelOverlap() {
-            if (!panelVisible || panelContainer.getVisibility() != View.VISIBLE) return;
-            setSheetOffset(sheetOffset, false);
-        }
-
-        private void showPanelSheet(boolean animate) {
-            panelVisible = true;
-            panelContainer.animate().cancel();
-            panelContainer.setVisibility(View.VISIBLE);
-            panelContainer.setAlpha(1f);
-            final float hidden = sheetHiddenOffset();
-            if (animate) {
-                if (panelContainer.getTranslationY() <= 0f) panelContainer.setTranslationY(hidden);
-                sheetOffset = panelContainer.getTranslationY();
-                panelContainer.animate().translationY(0f).setDuration(260L)
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f))
-                        .withEndAction(() -> sheetOffset = 0f).start();
+            if (rebuildOnly) {
+                optionsScroll.scrollTo(0, previousScrollY);
+                optionsScroll.post(() -> optionsScroll.scrollTo(0, previousScrollY));
             } else {
-                setSheetOffset(0f, false);
+                optionsScroll.scrollTo(0, 0);
             }
-            panelContainer.post(() -> setSheetOffset(0f, false));
+            // The sheet opens from the floating Options button (or stays open if it already is);
+            // selecting only shows the element's handles, so the canvas is where editing happens.
+            if (!panelVisible) afterNextLayout(this::showOptionsPill);
         }
 
-        private void hidePanelSheet(boolean animate) {
-            panelVisible = false;
-            panelContainer.animate().cancel();
-            final float hidden = sheetHiddenOffset();
-            if (!animate) {
-                panelContainer.setVisibility(View.INVISIBLE);
-                panelContainer.setAlpha(1f);
-                sheetOffset = hidden;
-                panelContainer.setTranslationY(0f);
-                return;
+        private void showOptionsPill() {
+            if (panelVisible || overlay.getParent() == null) return;
+            if (optionsPill == null) {
+                TextView pill = new TextView(activity);
+                pill.setText(s("options_button", "Options") + "  \u2303");
+                pill.setTextColor(Color.WHITE);
+                pill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+                pill.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                pill.setGravity(Gravity.CENTER);
+                pill.setPadding(dp(16), dp(8), dp(16), dp(8));
+                GradientDrawable bg = new GradientDrawable();
+                bg.setColor(Color.argb(235, 34, 34, 38));
+                bg.setStroke(dp(1), Color.argb(70, 255, 255, 255));
+                bg.setCornerRadius(dp(20));
+                pill.setBackground(bg);
+                pill.setElevation(dp(6));
+                NativeIconButtons.applyPressScale(pill);
+                pill.setOnClickListener(v -> {
+                    hideOptionsPill();
+                    showPanelSheet(true);
+                });
+                overlay.addView(pill, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.TOP | Gravity.START));
+                optionsPill = pill;
             }
-            panelContainer.animate().translationY(hidden).setDuration(220L)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f))
-                    .withEndAction(() -> {
-                panelContainer.setVisibility(View.INVISIBLE);
-                panelContainer.setAlpha(1f);
-                sheetOffset = hidden;
-                panelContainer.setTranslationY(0f);
-            }).start();
+            TextView pill = optionsPill;
+            pill.bringToFront();
+            pill.setVisibility(View.VISIBLE);
+            pill.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+            int w = pill.getMeasuredWidth();
+            int h = pill.getMeasuredHeight();
+            int overlayW = Math.max(1, overlay.getWidth());
+            int overlayH = Math.max(1, overlay.getHeight());
+            View anchor = anchorFor(selected);
+            int x;
+            int y;
+            if (anchor != null && anchor.getWidth() > 0 && anchor.getParent() != null) {
+                int[] pos = relativePosition(anchor, overlay);
+                x = pos[0] + anchor.getWidth() / 2 - w / 2;
+                y = pos[1] + anchor.getHeight() + dp(12);
+                if (y + h > overlayH - dp(24)) y = pos[1] - h - dp(12);
+            } else {
+                // Lyrics, background and focus span the screen: park the button bottom-center.
+                x = overlayW / 2 - w / 2;
+                y = overlayH - h - dp(40);
+            }
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) pill.getLayoutParams();
+            lp.leftMargin = clamp(x, dp(12), Math.max(dp(12), overlayW - w - dp(12)));
+            lp.topMargin = clamp(y, dp(12), Math.max(dp(12), overlayH - h - dp(12)));
+            pill.setLayoutParams(lp);
+            pill.setAlpha(0f);
+            pill.setScaleX(0.9f);
+            pill.setScaleY(0.9f);
+            pill.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180)
+                    .setInterpolator(SHEET_EASE).start();
         }
 
-        private View captureFor(Element element) {
+        private void hideOptionsPill() {
+            if (optionsPill != null) {
+                optionsPill.animate().cancel();
+                optionsPill.setVisibility(View.GONE);
+            }
+        }
+
+        private View anchorFor(Element element) {
+            if (element == null) return null;
             switch (element) {
                 case ARTWORK: return artCapture;
                 case TRACK_TEXT: return trackTextCapture;
-                case FOCUS: return focusHandle;
                 case SKIP: return skipCapture;
                 case FOLLOW: return followCapture;
                 case DOCK: return dockCapture;
@@ -1519,10 +1534,241 @@ final class LyricsLayoutEditController {
             }
         }
 
-        private static Rect screenRect(View view) {
-            int[] loc = new int[2];
-            view.getLocationOnScreen(loc);
-            return new Rect(loc[0], loc[1], loc[0] + view.getWidth(), loc[1] + view.getHeight());
+        /** Live readout (e.g. "120 dp", "115%") floating above what is being resized, or centered
+         *  near the top for screen-wide gestures like the lyrics pinch. */
+        private void showValueBubble(String value, View anchor) {
+            if (valueBubble == null) {
+                TextView bubble = new TextView(activity);
+                bubble.setTextColor(Color.WHITE);
+                bubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+                bubble.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                bubble.setPadding(dp(12), dp(6), dp(12), dp(6));
+                GradientDrawable bg = new GradientDrawable();
+                bg.setColor(Color.argb(220, 20, 20, 24));
+                bg.setCornerRadius(dp(14));
+                bubble.setBackground(bg);
+                bubble.setElevation(dp(8));
+                overlay.addView(bubble, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                        Gravity.TOP | Gravity.START));
+                valueBubble = bubble;
+            }
+            TextView bubble = valueBubble;
+            if (!value.contentEquals(bubble.getText())) bubble.setText(value);
+            bubble.bringToFront();
+            bubble.setVisibility(View.VISIBLE);
+            bubble.setAlpha(1f);
+            bubble.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+            int w = bubble.getMeasuredWidth();
+            int h = bubble.getMeasuredHeight();
+            int x;
+            int y;
+            if (anchor != null && anchor.getParent() != null && anchor.getWidth() > 0) {
+                FrameLayout.LayoutParams alp = anchor.getLayoutParams() instanceof FrameLayout.LayoutParams
+                        ? (FrameLayout.LayoutParams) anchor.getLayoutParams() : null;
+                int ax = alp != null ? alp.leftMargin : relativePosition(anchor, overlay)[0];
+                int ay = alp != null ? alp.topMargin : relativePosition(anchor, overlay)[1];
+                int aw = alp != null && alp.width > 0 ? alp.width : anchor.getWidth();
+                x = ax + aw / 2 - w / 2;
+                y = ay - h - dp(10);
+                if (y < dp(12)) y = ay + dp(10);
+            } else {
+                x = overlay.getWidth() / 2 - w / 2;
+                y = dp(96);
+            }
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) bubble.getLayoutParams();
+            int nx = clamp(x, dp(8), Math.max(dp(8), overlay.getWidth() - w - dp(8)));
+            if (lp.leftMargin != nx || lp.topMargin != y) {
+                lp.leftMargin = nx;
+                lp.topMargin = y;
+                bubble.setLayoutParams(lp);
+            }
+        }
+
+        private void hideValueBubble() {
+            if (valueBubble == null) return;
+            TextView bubble = valueBubble;
+            bubble.animate().alpha(0f).setDuration(160)
+                    .withEndAction(() -> bubble.setVisibility(View.GONE)).start();
+        }
+
+        // -- bottom sheet -------------------------------------------------------
+
+        /** iOS sheet presentation curve: quick departure, long soft landing, no overshoot. */
+        private static final android.animation.TimeInterpolator SHEET_EASE =
+                new android.view.animation.PathInterpolator(0.32f, 0.72f, 0f, 1f);
+        /** Release speed past which a downward flick dismisses regardless of distance. */
+        private static final int SHEET_DISMISS_VELOCITY_DP = 900;
+        /** Share of its height the sheet must be pulled down to dismiss on a slow release. */
+        private static final float SHEET_DISMISS_FRACTION = 0.3f;
+
+        private void showPanelSheet(boolean animate) {
+            panelVisible = true;
+            hideOptionsPill();
+            if (panelContainer.getVisibility() != View.VISIBLE) {
+                panelContainer.setTranslationY(sheetHiddenOffset());
+                panelContainer.setVisibility(View.VISIBLE);
+            }
+            animateSheetTo(0f, 0f, animate, null);
+        }
+
+        private void hidePanelSheet(boolean animate) {
+            hidePanelSheet(animate, 0f);
+        }
+
+        private void hidePanelSheet(boolean animate, float velocityPxPerSec) {
+            panelVisible = false;
+            animateSheetTo(sheetHiddenOffset(), velocityPxPerSec, animate, () -> {
+                panelContainer.setVisibility(View.INVISIBLE);
+                if (!panelVisible) showOptionsPill();
+            });
+        }
+
+        /** Where the sheet goes when the finger lets go: a flick or a long enough pull closes it,
+         *  anything else springs it back open. */
+        private void settleSheet(float velocityPxPerSec) {
+            float offset = panelContainer.getTranslationY();
+            boolean dismiss = velocityPxPerSec > dp(SHEET_DISMISS_VELOCITY_DP)
+                    || (velocityPxPerSec > -dp(SHEET_DISMISS_VELOCITY_DP) / 3f
+                        && offset > sheetHiddenOffset() * SHEET_DISMISS_FRACTION);
+            if (dismiss) {
+                hidePanelSheet(true, velocityPxPerSec);
+            } else {
+                animateSheetTo(0f, velocityPxPerSec, true, null);
+            }
+        }
+
+        /** One animation path for open, close and snap-back. The duration follows the remaining
+         *  distance and the speed the finger left with, so a flick carries straight on instead of
+         *  slowing down to a fixed-length glide. */
+        private void animateSheetTo(float target, float velocityPxPerSec, boolean animate,
+                Runnable endAction) {
+            panelContainer.animate().cancel();
+            if (!animate) {
+                panelContainer.setTranslationY(target);
+                if (endAction != null) endAction.run();
+                return;
+            }
+            float distance = Math.abs(target - panelContainer.getTranslationY());
+            long duration = 340L;
+            float speed = Math.abs(velocityPxPerSec);
+            if (speed > 1f) {
+                // The curve leaves ~2.3x faster than its average speed; this matches the finger.
+                duration = Math.round(1000f * 2.3f * distance / speed);
+            }
+            duration = Math.max(160L, Math.min(360L, duration));
+            panelContainer.animate().translationY(target)
+                    .setDuration(duration).setInterpolator(SHEET_EASE)
+                    .withEndAction(endAction).start();
+        }
+
+        private float sheetHiddenOffset() {
+            return Math.max(dp(120), panelContainer.getHeight());
+        }
+
+        /**
+         * The options sheet. A downward drag moves it with the finger - from the grabber and title
+         * at any time, from the option list once that list has nothing left to scroll up to,
+         * including mid-gesture: scroll the list back to its top and keep pulling, and the same
+         * gesture carries on into dragging the sheet, as on iOS.
+         *
+         * <p>Handled in dispatchTouchEvent rather than onInterceptTouchEvent because the list
+         * blocks interception as soon as it starts scrolling, which is exactly the moment the
+         * hand-off has to happen.
+         */
+        private final class SheetLayout extends LinearLayout {
+            private final int touchSlop;
+            private android.view.VelocityTracker velocity;
+            private float downRawX;
+            private float downRawY;
+            private float lastRawY;
+            /** Downward travel since the list was last able to scroll further up. */
+            private float pull;
+            private boolean dragging;
+            private boolean fromHeader;
+            /** A slider claimed this gesture on DOWN; never steal it. */
+            private boolean childLocked;
+            private boolean disallowRequested;
+
+            SheetLayout(Activity activity) {
+                super(activity);
+                setOrientation(VERTICAL);
+                // Swallow taps on the sheet's own padding so they never fall through to the
+                // element outlines underneath it.
+                setClickable(true);
+                touchSlop = android.view.ViewConfiguration.get(activity).getScaledTouchSlop();
+            }
+
+            @Override
+            public void requestDisallowInterceptTouchEvent(boolean disallow) {
+                if (disallow) disallowRequested = true;
+                super.requestDisallowInterceptTouchEvent(disallow);
+            }
+
+            @Override
+            public boolean dispatchTouchEvent(MotionEvent event) {
+                int action = event.getActionMasked();
+                float rawY = event.getRawY();
+                trackVelocity(event, action == MotionEvent.ACTION_DOWN);
+                if (action == MotionEvent.ACTION_DOWN) {
+                    dragging = false;
+                    pull = 0f;
+                    downRawX = event.getRawX();
+                    downRawY = lastRawY = rawY;
+                    fromHeader = event.getY() < optionsScroll.getTop();
+                    disallowRequested = false;
+                    super.dispatchTouchEvent(event);
+                    childLocked = disallowRequested;
+                    return true;
+                }
+                float dy = rawY - lastRawY;
+                lastRawY = rawY;
+                if (dragging) {
+                    if (action == MotionEvent.ACTION_MOVE) {
+                        setTranslationY(Math.max(0f,
+                                Math.min(sheetHiddenOffset(), getTranslationY() + dy)));
+                    } else if (action == MotionEvent.ACTION_UP
+                            || action == MotionEvent.ACTION_CANCEL) {
+                        dragging = false;
+                        settleSheet(action == MotionEvent.ACTION_UP ? releaseVelocity() : 0f);
+                    }
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_MOVE && !childLocked) {
+                    boolean listAtTop = !optionsScroll.canScrollVertically(-1);
+                    if ((fromHeader || listAtTop) && dy > 0f) {
+                        pull += dy;
+                    } else if (dy < 0f || !listAtTop) {
+                        pull = 0f;
+                    }
+                    float sideways = Math.abs(event.getRawX() - downRawX);
+                    if (pull > touchSlop && sideways < Math.abs(rawY - downRawY)) {
+                        dragging = true;
+                        animate().cancel();
+                        MotionEvent cancel = MotionEvent.obtain(event);
+                        cancel.setAction(MotionEvent.ACTION_CANCEL);
+                        super.dispatchTouchEvent(cancel);
+                        cancel.recycle();
+                        return true;
+                    }
+                }
+                return super.dispatchTouchEvent(event);
+            }
+
+            /** Tracks in screen coordinates: the sheet itself moves under the finger. */
+            private void trackVelocity(MotionEvent event, boolean reset) {
+                if (velocity == null) velocity = android.view.VelocityTracker.obtain();
+                if (reset) velocity.clear();
+                MotionEvent screen = MotionEvent.obtain(event);
+                screen.setLocation(event.getRawX(), event.getRawY());
+                velocity.addMovement(screen);
+                screen.recycle();
+            }
+
+            private float releaseVelocity() {
+                velocity.computeCurrentVelocity(1000);
+                return velocity.getYVelocity();
+            }
         }
 
         /** Recolors every currently-built capture outline for the current selection - green when
@@ -1556,7 +1802,7 @@ final class LyricsLayoutEditController {
         }
 
         /** Recolors a capture's outline stroke: {@link #ACCENT_COLOR} when it is the current
-         *  selection, {@link #GRAY_COLOR} otherwise - every capturable element shows an outline at
+         *  selection, {@link #GRAY_IDLE_COLOR} otherwise - every capturable element shows an outline at
          *  all times now, not just the one currently selected, so it reads as one consistent
          *  selected/unselected visual language across the whole editor. */
         private static void paintCapture(View capture, boolean selected) {
@@ -1662,6 +1908,11 @@ final class LyricsLayoutEditController {
         private static final int FILE_PICKER_REQUEST_CODE = 10234;
 
         private void buildTextOptions() {
+            // Animation style first: it decides which of the groups below exist, so changing it
+            // must only ever change what is under the finger, never what is above it.
+            buildAnimationOptions();
+
+            addDivider();
             addSectionLabel(Settings.LYRICS_TEXT_SIZE, 10);
             addOption(presetSliderRow(Settings.LYRICS_TEXT_SIZE, Settings.LYRICS_TEXT_SIZE_CUSTOM,
                     "custom", new String[]{"small", "normal", "large", "xlarge"},
@@ -1716,13 +1967,27 @@ final class LyricsLayoutEditController {
                 addOption(text(s("blur_intensity_hint", "Blur intensity - how much stronger "
                         + "the blur gets on lines further from the current one"),
                         12, 0x7AFFFFFF, false), matchWrap(6));
-                addOption(dragRow(
-                        Settings.LYRICS_BLUR_INTENSITY.minValue, Settings.LYRICS_BLUR_INTENSITY.maxValue,
-                        safeGet(Settings.LYRICS_BLUR_INTENSITY), "%",
-                        value -> writer.put(Settings.LYRICS_BLUR_INTENSITY, value)),
-                        matchWrap(14));
+                addOption(settingSlider(Settings.LYRICS_BLUR_INTENSITY, "%", null), matchWrap(14));
             }
+            endGroup();
+        }
 
+        /** Animation style and everything that depends on it, in the order they appear. */
+        private void buildAnimationOptions() {
+            beginGroup(strings.setting(Settings.ANIMATION_STYLE));
+            addOption(chipRow(Settings.ANIMATION_STYLE,
+                    new String[]{"Gradient wash", "Spotlight", "Apple Music"},
+                    () -> selectElement(Element.TEXT)), matchWrap(8));
+            addOption(toggleRow(Settings.LOAD_LIFT_ANIMATION,
+                    strings.setting(Settings.LOAD_LIFT_ANIMATION), null), matchWrap(12));
+            if (isAppleStyle()) {
+                addOption(text(strings.setting(Settings.APPLE_CASCADE_SPEED),
+                        12, GROUP_TITLE_COLOR, true), matchWrap(8));
+                addOption(settingSlider(Settings.APPLE_CASCADE_SPEED, "%", null), matchWrap(12));
+                addOption(text(strings.setting(Settings.APPLE_SPRING_STRENGTH),
+                        12, GROUP_TITLE_COLOR, true), matchWrap(8));
+                addOption(settingSlider(Settings.APPLE_SPRING_STRENGTH, "%", null), matchWrap(12));
+            }
             if (!isAppleStyle()) {
                 addDivider();
                 addSectionLabel(Settings.WORD_BOUNCE, 10);
@@ -1741,26 +2006,18 @@ final class LyricsLayoutEditController {
                         new String[]{"Top to bottom", "Left to right (block)", "Left to right (sentence)"},
                         () -> selectElement(Element.TEXT)), matchWrap(0));
             }
-
-            beginGroup(strings.setting(Settings.ANIMATION_STYLE));
-            addOption(chipRow(Settings.ANIMATION_STYLE,
-                    new String[]{"Gradient wash", "Spotlight", "Apple Music"},
-                    () -> selectElement(Element.TEXT)), matchWrap(8));
-            addOption(toggleRow(Settings.LOAD_LIFT_ANIMATION,
-                    strings.setting(Settings.LOAD_LIFT_ANIMATION), null), matchWrap(12));
-            if (isAppleStyle()) {
-                addOption(text(strings.setting(Settings.APPLE_CASCADE_SPEED),
-                        12, GROUP_TITLE_COLOR, true), matchWrap(8));
-                addOption(dragRow(50, 200, store.get(Settings.APPLE_CASCADE_SPEED), "%",
-                        value -> writer.put(Settings.APPLE_CASCADE_SPEED, value)), matchWrap(12));
-                addOption(text(strings.setting(Settings.APPLE_SPRING_STRENGTH),
-                        12, GROUP_TITLE_COLOR, true), matchWrap(8));
-                addOption(dragRow(Settings.APPLE_SPRING_STRENGTH.minValue,
-                        Settings.APPLE_SPRING_STRENGTH.maxValue,
-                        store.get(Settings.APPLE_SPRING_STRENGTH), "%",
-                        value -> writer.put(Settings.APPLE_SPRING_STRENGTH, value)), matchWrap(12));
-            }
             endGroup();
+        }
+
+        /** A slider for an integer setting, with a magnetic detent at the setting's default so it
+         *  is always easy to get back to. */
+        private LinearLayout settingSlider(Settings.IntegerSetting setting, String unit,
+                Runnable onChanged) {
+            return dragRow(setting.minValue, setting.maxValue, safeGet(setting), unit,
+                    setting.defaultValue, value -> {
+                        if (onChanged == null) writer.put(setting, value);
+                        else put(setting, value, onChanged);
+                    });
         }
 
         private void addSectionLabel(Settings.Setting<?> setting, int bottomDp) {
@@ -1981,10 +2238,7 @@ final class LyricsLayoutEditController {
                 beginGroup(strings.setting(Settings.BACKGROUND_RENDER_QUALITY));
                 addOption(text(s("background_quality_hint", "Lower trades a softer/grainier "
                         + "look for less sustained GPU load."), 12, 0x80FFFFFF, false), matchWrap(4));
-                addOption(dragRow(
-                        Settings.BACKGROUND_RENDER_QUALITY.minValue, Settings.BACKGROUND_RENDER_QUALITY.maxValue,
-                        safeGet(Settings.BACKGROUND_RENDER_QUALITY), "%",
-                        value -> writer.put(Settings.BACKGROUND_RENDER_QUALITY, value)),
+                addOption(settingSlider(Settings.BACKGROUND_RENDER_QUALITY, "%", null),
                         matchWrap(12));
             }
 
@@ -1992,12 +2246,7 @@ final class LyricsLayoutEditController {
             // Force-dark is one control: 0-100% intensity. The legacy boolean remains enabled
             // internally for compatibility, but is no longer exposed as a separate button.
             beginGroup(strings.setting(Settings.FORCE_DARK_BACKGROUND));
-            int darkenValue = safeGet(Settings.EXTRA_DARK_BACKGROUND);
-            addOption(dragRow(
-                    Settings.EXTRA_DARK_BACKGROUND.minValue, Settings.EXTRA_DARK_BACKGROUND.maxValue,
-                    darkenValue, "%",
-                    value -> writer.put(Settings.EXTRA_DARK_BACKGROUND, value)),
-                    matchWrap(12));
+            addOption(settingSlider(Settings.EXTRA_DARK_BACKGROUND, "%", null), matchWrap(12));
 
             endGroup();
         }
@@ -2041,32 +2290,17 @@ final class LyricsLayoutEditController {
                         selectElement(Element.FOLLOW);
                     }), matchWrap(12));
 
+            // Only how the chip looks lives here; when follow resumes is behaviour, and stays in
+            // the Settings panel.
             endGroup();
-            beginGroup(strings.setting(Settings.AUTO_RESUME_FOLLOW));
-            addOption(toggleRow(Settings.AUTO_RESUME_FOLLOW, "Enable", () -> selectElement(Element.FOLLOW)), matchWrap(12));
-
-            endGroup();
-            beginGroup(strings.setting(Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS));
-            addOption(intStepperRow(Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS,
-                    () -> selectElement(Element.FOLLOW)), matchWrap(12));
-
-            endGroup();
-            beginGroup(strings.setting(Settings.FOLLOW_CHIP_ANIMATION));
-            addOption(toggleRow(Settings.FOLLOW_CHIP_ANIMATION, "Enabled", () -> selectElement(Element.FOLLOW)), matchWrap(12));
-
-            endGroup();
-            beginGroup(strings.setting(Settings.FOLLOW_CHIP_PROGRESS));
-            addOption(toggleRow(Settings.FOLLOW_CHIP_PROGRESS, "Show progress", () -> selectElement(Element.FOLLOW)), matchWrap(0));
+            beginGroup(s("follow_chip_look", "Chip"));
+            addOption(toggleRow(Settings.FOLLOW_CHIP_ANIMATION,
+                    strings.setting(Settings.FOLLOW_CHIP_ANIMATION), null), matchWrap(6));
+            addOption(toggleRow(Settings.FOLLOW_CHIP_PROGRESS,
+                    strings.setting(Settings.FOLLOW_CHIP_PROGRESS), null), matchWrap(0));
         }
 
         private void buildDockOptions() {
-            beginGroup("Top bar controls");
-            addOption(toggleRow(Settings.NATIVE_SPICY_ROMANIZATION,
-                    strings.setting(Settings.NATIVE_SPICY_ROMANIZATION), null), matchWrap(10));
-            addOption(toggleRow(Settings.NATIVE_SPICY_TRANSLATION,
-                    strings.setting(Settings.NATIVE_SPICY_TRANSLATION), null), matchWrap(12));
-            endGroup();
-
             beginGroup(strings.setting(Settings.LIKED_SONGS_BUTTON));
             addOption(chipRow(Settings.LIKED_SONGS_BUTTON,
                     new String[]{"Off", "Heart", "Star"},
@@ -2094,177 +2328,22 @@ final class LyricsLayoutEditController {
                     }), matchWrap(0));
         }
 
-        // -- movable options panel -----------------------------------------------
-
-        private static final int PANEL_MIN_TOP_DP = 72;
-        private static final int PANEL_BOTTOM_MARGIN_DP = 0;
-        private static final int PANEL_SIDE_MARGIN_DP = 0;
-        /** Opening height as a fraction of the overlay - a plain WRAP_CONTENT panel only shows a
-         *  couple of rows before the user has to find and drag panelBottomResizeHandle just to see
-         *  the rest of that element's options, every single time the editor opens. Slightly under
-         *  MaxHeightScrollView's own 0.6 cap so the action-icon row and both drag handles still fit
-         *  comfortably above/below it. */
-        private static final float DEFAULT_PANEL_HEIGHT_FRACTION = 0.55f;
-
-        private LinearLayout.LayoutParams panelDragHandleLp() {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(36), dp(4));
+        private LinearLayout.LayoutParams sheetGrabberLp() {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(36), dp(5));
             lp.gravity = Gravity.CENTER_HORIZONTAL;
-            lp.topMargin = dp(10);
-            lp.bottomMargin = dp(8);
+            lp.topMargin = dp(8);
+            lp.bottomMargin = dp(10);
             return lp;
         }
 
-        /** Apple-style grabber: the sheet follows the finger, then snaps to expanded, peek, or
-         *  dismissed instead of retaining an arbitrary top margin. */
-        private View panelDragHandle() {
+        /** Purely visual: the whole sheet header is the drag target (see SheetLayout). */
+        private View sheetGrabber() {
             View handle = new View(activity);
             GradientDrawable bg = new GradientDrawable();
-            bg.setColor(0x33FFFFFF);
-            bg.setCornerRadius(dp(2));
+            bg.setColor(0x4DFFFFFF);
+            bg.setCornerRadius(dp(3));
             handle.setBackground(bg);
-            installPanelDrag(handle);
             return handle;
-        }
-
-        private void installPanelDrag(View handle) {
-            int slopPx = dp(8);
-            float[] startRawY = new float[1];
-            float[] startOffset = new float[1];
-            boolean[] dragging = new boolean[1];
-            handle.setOnTouchListener((v, event) -> {
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        startRawY[0] = event.getRawY();
-                        startOffset[0] = sheetOffset;
-                        dragging[0] = false;
-                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
-                        return true;
-                    case MotionEvent.ACTION_MOVE: {
-                        float dy = event.getRawY() - startRawY[0];
-                        if (!dragging[0] && Math.abs(dy) > slopPx) dragging[0] = true;
-                        if (dragging[0]) {
-                            setSheetOffset(startOffset[0] + dy, false);
-                        }
-                        return true;
-                    }
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL: {
-                        if (dragging[0]) {
-                            closeOrShrinkPanel(startRawY[0], event.getRawY());
-                        }
-                        return true;
-                    }
-                    default:
-                        return false;
-                }
-            });
-        }
-
-        /** Lets a downward swipe that starts on the options themselves pull the sheet with the
-         *  finger once the list is already at its top, matching the native Apple sheet gesture. */
-        private final class SheetScrollView extends MaxHeightScrollView {
-            private float downY;
-            private float lastY;
-            private boolean sheetDragging;
-
-            SheetScrollView(Activity activity) { super(activity); }
-
-            @Override
-            public boolean onInterceptTouchEvent(MotionEvent event) {
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        downY = lastY = event.getRawY();
-                        sheetDragging = false;
-                        break;
-                    case MotionEvent.ACTION_MOVE:
-                        float dy = event.getRawY() - downY;
-                        if (!sheetDragging && dy > dp(8) && getScrollY() <= 0) {
-                            sheetDragging = true;
-                            requestDisallowInterceptTouchEvent(true);
-                            return true;
-                        }
-                        break;
-                    case MotionEvent.ACTION_CANCEL:
-                    case MotionEvent.ACTION_UP:
-                        sheetDragging = false;
-                        break;
-                }
-                return super.onInterceptTouchEvent(event);
-            }
-
-            @Override
-            public boolean onTouchEvent(MotionEvent event) {
-                if (sheetDragging) {
-                    float y = event.getRawY();
-                    if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
-                        setSheetOffset(sheetOffset + y - lastY, false);
-                        lastY = y;
-                        return true;
-                    }
-                    if (event.getActionMasked() == MotionEvent.ACTION_UP
-                            || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
-                        closeOrShrinkPanel(downY, y);
-                        sheetDragging = false;
-                        return true;
-                    }
-                    return true;
-                }
-                return super.onTouchEvent(event);
-            }
-        }
-
-        private void closeOrShrinkPanel(float startRawY, float currentRawY) {
-            float dy = currentRawY - startRawY;
-            if (sheetOffset >= sheetPeekOffset() + dp(36) || dy > dp(72)) {
-                hidePanelSheet(true);
-            } else if (dy > dp(28)) {
-                snapSheetTo(sheetPeekOffset());
-            } else {
-                snapSheetTo(0f);
-            }
-        }
-
-        private float sheetHiddenOffset() {
-            return Math.max(dp(120), panelContainer.getHeight());
-        }
-
-        private float sheetPeekOffset() {
-            return Math.max(0f, sheetHiddenOffset() - dp(104));
-        }
-
-        private void setSheetOffset(float offset, boolean animate) {
-            float clamped = Math.max(0f, Math.min(sheetHiddenOffset(), offset));
-            sheetOffset = clamped;
-            if (animate) {
-                panelContainer.animate().cancel();
-                panelContainer.animate().translationY(clamped).setDuration(220L)
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f)).start();
-            } else {
-                panelContainer.setTranslationY(clamped);
-            }
-        }
-
-        private void snapSheetTo(float offset) {
-            setSheetOffset(offset, true);
-        }
-
-        /** Keeps the sheet anchored to the bottom. Its vertical position is exclusively owned by
-         *  translationY, which makes layout, drag, and show/hide animations share one state. */
-        private void applyPanelLayout() {
-            ViewGroup.LayoutParams raw = panelContainer.getLayoutParams();
-            FrameLayout.LayoutParams lp = raw instanceof FrameLayout.LayoutParams
-                    ? (FrameLayout.LayoutParams) raw
-                    : new FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
-            lp.height = panelContainerHeight != null ? panelContainerHeight : ViewGroup.LayoutParams.WRAP_CONTENT;
-            lp.leftMargin = dp(PANEL_SIDE_MARGIN_DP);
-            lp.rightMargin = dp(PANEL_SIDE_MARGIN_DP);
-            lp.gravity = Gravity.BOTTOM;
-            lp.topMargin = 0;
-            lp.bottomMargin = dp(PANEL_BOTTOM_MARGIN_DP);
-            panelContainer.setLayoutParams(lp);
-            if (panelVisible) panelContainer.post(() -> setSheetOffset(sheetOffset, false));
         }
 
         // -- shared row builders ------------------------------------------------
@@ -2340,15 +2419,6 @@ final class LyricsLayoutEditController {
                     dp(68), ViewGroup.LayoutParams.WRAP_CONTENT);
             row.addView(toggle, toggleLp);
             return row;
-        }
-
-        private LinearLayout dragRow(int min, int max, int initial, String unit, IntConsumer onChange) {
-            return dragRow(min, max, initial, unit, null, onChange);
-        }
-
-        private LinearLayout intStepperRow(Settings.IntegerSetting setting, Runnable onChanged) {
-            int current = safeGet(setting);
-            return dragRow(setting.minValue, setting.maxValue, current, "s", value -> put(setting, value, onChanged));
         }
 
         /** @param detent an optional value (typically the setting's own default) the thumb
@@ -2671,10 +2741,18 @@ final class LyricsLayoutEditController {
             String[] presetValues = {"small", "normal", "large", "xlarge"};
             int[] presetPercents = {90, 100, 120, 150};
             String mode = store.get(Settings.LYRICS_TEXT_SIZE);
+            int percent = safeGet(Settings.LYRICS_TEXT_SIZE_CUSTOM);
             for (int i = 0; i < presetValues.length; i++) {
-                if (presetValues[i].equalsIgnoreCase(mode)) return presetPercents[i];
+                if (presetValues[i].equalsIgnoreCase(mode)) percent = presetPercents[i];
             }
-            return safeGet(Settings.LYRICS_TEXT_SIZE_CUSTOM);
+            // Landscape shows the portrait size scaled to fit until it gets its own value (see
+            // LyricsShellSettings#lyricsTextSizeMultiplier); start the pinch from what is shown.
+            String landscapeKey = Settings.landscapeKey(activity, Settings.LYRICS_TEXT_SIZE);
+            if (landscapeKey != null && !activity.getSharedPreferences("SpotifyPlus",
+                    android.content.Context.MODE_PRIVATE).contains(landscapeKey)) {
+                percent = Math.round(percent * com.eza.spicyex.lyrics.LyricsShellSettings.LANDSCAPE_FIT_SCALE);
+            }
+            return percent;
         }
     }
 
@@ -2707,29 +2785,43 @@ final class LyricsLayoutEditController {
      *  bounds stay the touch target; only the bracket itself is painted. */
     private static final class CornerGripView extends View {
         private final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-        private final int vertexOffset;
+        private final android.graphics.Paint shade = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.RectF oval = new android.graphics.RectF();
+        private final int cornerOffset;
+        private final float cornerRadiusPx;
 
-        CornerGripView(Activity activity, int vertexOffset) {
+        /** iOS Control Center's resize grip: a thick, soft-white arc lying along the inside of the
+         *  element's rounded bottom-right corner. {@code cornerOffset} is where that corner sits
+         *  in this view (both axes); {@code cornerRadiusPx} is the element's own corner radius, so
+         *  the arc follows its curve. The whole view is the touch target. */
+        CornerGripView(Activity activity, int cornerOffset, float cornerRadiusPx) {
             super(activity);
-            this.vertexOffset = vertexOffset;
+            this.cornerOffset = cornerOffset;
+            this.cornerRadiusPx = cornerRadiusPx;
             paint.setStyle(android.graphics.Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(3));
+            paint.setStrokeWidth(dp(6));
             paint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
-            paint.setStrokeJoin(android.graphics.Paint.Join.ROUND);
-            paint.setColor(ACCENT_COLOR);
+            paint.setColor(Color.argb(240, 255, 255, 255));
+            shade.setStyle(android.graphics.Paint.Style.STROKE);
+            shade.setStrokeWidth(dp(9));
+            shade.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+            shade.setColor(Color.argb(70, 0, 0, 0));
+            shade.setMaskFilter(new android.graphics.BlurMaskFilter(dp(3),
+                    android.graphics.BlurMaskFilter.Blur.NORMAL));
             setLayerType(LAYER_TYPE_SOFTWARE, null);
         }
 
         @Override
         protected void onDraw(android.graphics.Canvas canvas) {
             super.onDraw(canvas);
-            int arm = dp(HANDLE_SIZE_DP);
-            float v = vertexOffset;
-            android.graphics.Path path = new android.graphics.Path();
-            path.moveTo(v, v + arm);
-            path.lineTo(v, v);
-            path.lineTo(v + arm, v);
-            canvas.drawPath(path, paint);
+            float stroke = paint.getStrokeWidth();
+            // Concentric with the element's corner curve, pulled in so the stroke sits just inside
+            // the outline; tiny radii still get a readable arc.
+            float r = Math.max(dp(14), Math.min(dp(30), cornerRadiusPx)) - stroke / 2f - dp(2);
+            float c = cornerOffset - stroke / 2f - dp(2);
+            oval.set(c - 2f * r, c - 2f * r, c, c);
+            canvas.drawArc(oval, 8f, 74f, false, shade);
+            canvas.drawArc(oval, 8f, 74f, false, paint);
         }
     }
 

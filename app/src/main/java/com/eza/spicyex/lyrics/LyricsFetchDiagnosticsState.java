@@ -94,6 +94,7 @@ public final class LyricsFetchDiagnosticsState {
         if (fetchSource.contains("lrclib")) return "lrclib";
         if (fetchSource.contains("netease")) return "netease";
         if (fetchSource.contains("qq")) return "qq_music";
+        if (fetchSource.contains("musixmatch")) return "musixmatch";
         if (fetchSource.contains("native")) return "native";
         if (fetchSource.contains("spicy")) return "spicy";
 

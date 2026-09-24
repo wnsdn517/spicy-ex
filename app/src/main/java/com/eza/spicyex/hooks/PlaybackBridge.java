@@ -156,11 +156,21 @@ final class PlaybackBridge {
     /** Whether the current PlaybackState advertises ACTION_SEEK_TO right now - see
      *  {@link #seekSpotifyTo}. False whenever no session is captured yet, same as every other
      *  capability check here. */
+    // canSeek() is polled from the lyrics frame loop; each read is a binder call into
+    // system_server, so it is re-read at most every CAN_SEEK_TTL_MS (still fast enough to catch
+    // an ad starting).
+    private static final long CAN_SEEK_TTL_MS = 400L;
+    private long canSeekReadAt = Long.MIN_VALUE / 2;
+    private boolean canSeekCached;
+
     boolean canSeek() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - canSeekReadAt < CAN_SEEK_TTL_MS) return canSeekCached;
+        canSeekReadAt = now;
         MediaController controller = transportController();
-        if (controller == null) return false;
-        PlaybackState state = controller.getPlaybackState();
-        return state != null && (state.getActions() & PlaybackState.ACTION_SEEK_TO) != 0;
+        PlaybackState state = controller == null ? null : controller.getPlaybackState();
+        canSeekCached = state != null && (state.getActions() & PlaybackState.ACTION_SEEK_TO) != 0;
+        return canSeekCached;
     }
 
     /** Toggles play/pause through Spotify's own MediaSession transport. Null-safe: false when
@@ -334,6 +344,24 @@ final class PlaybackBridge {
         }
         if (!found.isEmpty()) pausedAccessorCache = found.toArray(new Method[0]);
         return pausedAccessorCache;
+    }
+
+    /** True only when Spotify's own PlayerState says paused. Unlike isPlayerActuallyPlaying this
+     *  ignores the media session, which does not always report ads as playing. */
+    boolean isPlayerStatePaused() {
+        try {
+            Object state = References.playerState == null ? null : References.playerState.get();
+            if (state == null) return false;
+            for (Method paused : pausedAccessors(state.getClass())) {
+                try {
+                    Object result = paused.invoke(state);
+                    if (result instanceof Boolean && (Boolean) result) return true;
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
     }
 
     boolean isPlayerActuallyPlaying() {

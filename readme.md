@@ -59,13 +59,12 @@ JAVA_HOME=/path/to/jdk21 ./gradlew :app:testDebugUnitTest
 
 The single APK includes transliteration, translation, language dictionaries, extra fonts, and Spotify Connect support.
 
-Language models can be delivered separately to keep the APK small. Create the
-versioned model archive with `:app:packageLanguageModelPack`, publish it over
-HTTPS, then build with `-PexternalLanguageModels=true`,
-`-PLANGUAGE_MODEL_PACK_URL=...`, and its SHA-256 in
-`-PLANGUAGE_MODEL_PACK_SHA256=...`. The app downloads the archive in the
-background and keeps the packaged models as a fallback when external mode is
-not enabled.
+Language models (kuromoji, CharSoup, JMdict) are not in the APK; they are
+delivered as a separate pack that the app downloads from Settings. Create the
+versioned archive with `:app:packageLanguageModelPack` (JMdict sources live in
+`app/language-models/`), publish it over HTTPS, and point builds at it with
+`-PLANGUAGE_MODEL_PACK_URL=...` and its SHA-256 in
+`-PLANGUAGE_MODEL_PACK_SHA256=...`.
 
 Docs-only changes do not require unit/device testing. Device behavior remains the final validation path for UI, hook, and Spotify-host integration changes.
 

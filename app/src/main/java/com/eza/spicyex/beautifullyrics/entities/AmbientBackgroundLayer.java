@@ -27,6 +27,10 @@ public interface AmbientBackgroundLayer {
     default void setAudioLevel(float level0to1) {
     }
 
+    /** 0..1 loudness of what is playing right now (not just the kicks); UI thread. */
+    default void setAudioEnergy(float loudness0to1) {
+    }
+
     /** Stops frames and releases texture references. The layer can be reused. */
     void release();
 

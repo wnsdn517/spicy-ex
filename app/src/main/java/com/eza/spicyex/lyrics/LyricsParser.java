@@ -32,7 +32,10 @@ public final class LyricsParser implements LyricsRepository.Parser {
     // English-language tracks, as a bare label line ("Composed by :") followed by a *separate*
     // line holding just the names ("Jeff Bhasker/Philip Lawrence/...").
     private static final Pattern QQ_CREDIT_LABEL = Pattern.compile(
-            "^(?:作?词|作?曲|作?詞|编曲|編曲|监制|監製|監制|制作人|製作人|出品|发行|發行|OP|SP"
+            "^(?:作?词|作?曲|作?詞|编曲|編曲|监制|監製|監制|制作人|製作人|制作|製作|出品|发行|發行|OP|SP"
+                    + "|混音|混缩|母带|母帶|和声|和聲|吉他|贝斯|貝斯|鼓|弦乐|弦樂|录音|錄音|演唱|原唱"
+                    + "|键盘|鍵盤|钢琴|鋼琴|配唱|企划|企劃|统筹|統籌|策划|策劃|出品人|版权|版權"
+                    + "|Vocals?|Guitar|Bass|Drums|Keyboards?|Piano|Mix(?:ing)?|Master(?:ing)?|Recording"
                     + "|Lyrics?(?:\\s+by)?|Music(?:\\s+by)?|Words(?:\\s+by)?"
                     + "|Composed\\s+by|Arranged\\s+by|Produced\\s+by|Written\\s+by|Mixed\\s+by"
                     + "|Lyricist|Composer|Arranger|Producer)\\s*[:：]\\s*(.*)$",
@@ -100,6 +103,149 @@ public final class LyricsParser implements LyricsRepository.Parser {
         return doc;
     }
 
+    /**
+     * Musixmatch {@code macro.subtitles.get} response (ported from Lyricify Lyrics Helper's
+     * MusixmatchParser, Apache-2.0): word-level {@code track.richsync.get} when present, else the
+     * line-synced LRC subtitle, else plain lyrics.
+     *
+     * <p>Richsync lines are {@code {ts, te, l: [{c, o}], x}} - line start/end in seconds, and each
+     * fragment's text with its offset from the line start. Whitespace comes as its own fragment;
+     * it stays in the line text for spacing but is not a timed syllable. A fragment ends where the
+     * next one starts, the last where the line does.
+     */
+    @Override
+    public LyricsDocument parseMusixmatchLyrics(Context context, SpotifyTrack track, String body) {
+        JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+        JsonObject calls = objectAt(root, "message", "body", "macro_calls");
+        if (calls == null) return null;
+
+        LyricsDocument doc = new LyricsDocument();
+        doc.trackId = trackIdFromUri(track == null ? "" : track.uri);
+        doc.durationMs = track == null ? 0 : Math.max(0, track.duration);
+        doc.fetchSource = "musixmatch";
+        doc.provider = "Musixmatch";
+        doc.language = "";
+
+        JsonObject matched = objectAt(calls, "matcher.track.get", "message", "body", "track");
+        if (matched != null && matched.has("instrumental") && matched.get("instrumental").isJsonPrimitive()
+                && matched.get("instrumental").getAsInt() == 1) {
+            InstrumentalTracks.mark(doc.trackId);
+        }
+
+        JsonObject richsync = mxmBody(calls, "track.richsync.get");
+        String richBody = richsync == null ? null
+                : Json.optString(objectAt(richsync, "richsync"), "richsync_body");
+        if (!isBlank(richBody)) {
+            doc.type = "Syllable";
+            JsonArray lines = JsonParser.parseString(richBody).getAsJsonArray();
+            for (JsonElement element : lines) {
+                if (!element.isJsonObject()) continue;
+                JsonObject line = element.getAsJsonObject();
+                double lineStart = line.has("ts") ? line.get("ts").getAsDouble() : 0d;
+                double lineEnd = line.has("te") ? line.get("te").getAsDouble() : lineStart;
+                JsonArray fragments = line.has("l") && line.get("l").isJsonArray()
+                        ? line.getAsJsonArray("l") : new JsonArray();
+                JsonArray syllables = new JsonArray();
+                StringBuilder providerLine = new StringBuilder();
+                for (int i = 0; i < fragments.size(); i++) {
+                    JsonObject fragment = fragments.get(i).getAsJsonObject();
+                    String rawText = cleanInvisiblesPreserveEdges(Json.optString(fragment, "c"));
+                    if (rawText.isEmpty()) continue;
+                    providerLine.append(rawText);
+                    String text = rawText.trim();
+                    if (text.isEmpty()) continue;
+                    double start = lineStart + (fragment.has("o") ? fragment.get("o").getAsDouble() : 0d);
+                    double end = lineEnd;
+                    for (int j = i + 1; j < fragments.size(); j++) {
+                        JsonObject next = fragments.get(j).getAsJsonObject();
+                        if (next.has("o")) {
+                            end = lineStart + next.get("o").getAsDouble();
+                            break;
+                        }
+                    }
+                    JsonObject syllable = new JsonObject();
+                    syllable.addProperty("Text", text);
+                    syllable.addProperty("StartTime", start);
+                    syllable.addProperty("EndTime", Math.max(end, start + 0.001d));
+                    syllables.add(syllable);
+                }
+                if (syllables.size() == 0) continue;
+                long lineStartMs = Math.round(lineStart * 1000d);
+                long lineEndMs = Math.round(lineEnd * 1000d);
+                ParsedSyllableLine parsed = parseSyllableLine(syllables, providerLine.toString(),
+                        lineStartMs, lineEndMs, "mxm-" + lineStartMs);
+                if (parsed == null || isBlank(parsed.text)) continue;
+                LyricsLine syncedLine = new LyricsLine();
+                syncedLine.text = parsed.text;
+                syncedLine.startMs = lineStartMs;
+                syncedLine.endMs = lineEndMs;
+                syncedLine.syllables = parsed.segments;
+                applySecondaryText(syncedLine, new JsonObject());
+                doc.lines.add(syncedLine);
+            }
+            if (!doc.lines.isEmpty()) {
+                finalizeParsedDocument(context, doc);
+                return doc;
+            }
+        }
+
+        JsonObject subtitles = mxmBody(calls, "track.subtitles.get");
+        JsonArray subtitleList = subtitles != null && subtitles.has("subtitle_list")
+                && subtitles.get("subtitle_list").isJsonArray()
+                ? subtitles.getAsJsonArray("subtitle_list") : null;
+        if (subtitleList != null && subtitleList.size() > 0) {
+            String lrc = Json.optString(objectAt(subtitleList.get(0).getAsJsonObject(), "subtitle"),
+                    "subtitle_body");
+            if (!isBlank(lrc)) {
+                doc.type = "Line";
+                parseLrcLines(lrc, doc);
+                if (!doc.lines.isEmpty()) {
+                    finalizeParsedDocument(context, doc);
+                    return doc;
+                }
+            }
+        }
+
+        JsonObject lyrics = mxmBody(calls, "track.lyrics.get");
+        String plain = lyrics == null ? null : Json.optString(objectAt(lyrics, "lyrics"), "lyrics_body");
+        if (!isBlank(plain)) {
+            // Free-tier bodies end with a "******* This Lyrics is NOT for Commercial use *******"
+            // notice and a tracking id; neither is lyrics.
+            StringBuilder cleaned = new StringBuilder();
+            for (String row : plain.split("\\r?\\n")) {
+                String trimmed = row.trim();
+                if (trimmed.startsWith("*******") || trimmed.matches("\\(\\d+\\)")) continue;
+                cleaned.append(row).append('\n');
+            }
+            doc.type = "Static";
+            parsePlainLines(cleaned.toString(), doc);
+        }
+        finalizeParsedDocument(context, doc);
+        return doc;
+    }
+
+    /** {@code call.message.body} when {@code call.message.header.status_code} is 200. */
+    private static JsonObject mxmBody(JsonObject calls, String name) {
+        JsonObject call = objectAt(calls, name);
+        JsonObject header = objectAt(call, "message", "header");
+        if (header == null || !header.has("status_code")) return null;
+        try {
+            if (header.get("status_code").getAsInt() != 200) return null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+        return objectAt(call, "message", "body");
+    }
+
+    private static JsonObject objectAt(JsonObject root, String... path) {
+        JsonObject current = root;
+        for (String key : path) {
+            if (current == null || !current.has(key) || !current.get(key).isJsonObject()) return null;
+            current = current.getAsJsonObject(key);
+        }
+        return current;
+    }
+
     @Override
     public LyricsDocument parseLrclibLyrics(Context context, SpotifyTrack track, String body) {
         JsonElement root = JsonParser.parseString(body);
@@ -127,6 +273,11 @@ public final class LyricsParser implements LyricsRepository.Parser {
         doc.provider = "LRCLIB";
         doc.language = "";
 
+        JsonElement instrumental = best.get("instrumental");
+        if (instrumental != null && instrumental.isJsonPrimitive()
+                && instrumental.getAsJsonPrimitive().isBoolean() && instrumental.getAsBoolean()) {
+            InstrumentalTracks.mark(doc.trackId);
+        }
         String synced = Json.optString(best, "syncedLyrics");
         if (!isBlank(synced)) {
             doc.type = "Line";
@@ -161,6 +312,11 @@ public final class LyricsParser implements LyricsRepository.Parser {
         doc.provider = "NetEase";
         doc.language = "";
         doc.type = "Line";
+        // NetEase LRC opens with credit lines ("[00:00.000] 作词 : ...") exactly like QQ's; they
+        // were rendered as the first lyric lines.
+        String[] credits = new String[1];
+        synced = stripCreditLines(synced, credits);
+        doc.songWriters = credits[0] == null ? "" : credits[0];
         parseLrcLines(synced, doc);
 
         JsonObject tlyricObject = Json.optObject(object, "tlyric");
@@ -905,6 +1061,43 @@ public final class LyricsParser implements LyricsRepository.Parser {
             applySecondaryText(line, new JsonObject());
             doc.lines.add(line);
         }
+        collapseShortLrcGaps(doc);
+    }
+
+    /**
+     * LRC files mark the end of a sung line with an empty timestamp ("[00:20.779]"). Every one of
+     * those became an interlude row, so a 1.5s breath between two lines showed the interlude dots.
+     * An empty line now ends the line before it, and stays an interlude only when the silence up
+     * to the next line is long enough to be one ({@link LyricTimeline#INTERLUDE_SHOW_THRESHOLD_MS}).
+     */
+    static void collapseShortLrcGaps(LyricsDocument doc) {
+        java.util.List<LyricsLine> lines = doc.lines;
+        LyricsLine previousVocal = null;
+        for (int i = 0; i < lines.size(); i++) {
+            LyricsLine line = lines.get(i);
+            if (!line.interlude) {
+                previousVocal = line;
+                continue;
+            }
+            if (previousVocal != null && previousVocal.endMs <= previousVocal.startMs
+                    && line.startMs > previousVocal.startMs) {
+                previousVocal.endMs = line.startMs;
+            }
+            long nextStart = -1;
+            for (int j = i + 1; j < lines.size(); j++) {
+                if (!lines.get(j).interlude) {
+                    nextStart = lines.get(j).startMs;
+                    break;
+                }
+            }
+            // No vocal after it: the song's tail, handled by the end-of-song interlude rule.
+            boolean tooShort = nextStart < 0
+                    || nextStart - line.startMs < LyricTimeline.INTERLUDE_SHOW_THRESHOLD_MS;
+            if (tooShort && previousVocal != null) {
+                lines.remove(i);
+                i--;
+            }
+        }
     }
 
     private void parsePlainLines(String plain, LyricsDocument doc) {
@@ -1364,6 +1557,14 @@ public final class LyricsParser implements LyricsRepository.Parser {
     }
 
     private void finalizeParsedDocument(Context context, LyricsDocument doc) {
+        // A provider's "instrumental, enjoy" placeholder is not lyrics: record the track as an
+        // instrumental and hand back an empty document, so another source still gets a chance
+        // and, if none has lyrics, the screen says "Instrumental" rather than showing the note.
+        if (doc != null && InstrumentalTracks.isPlaceholderOnly(doc.lines)) {
+            InstrumentalTracks.mark(doc.trackId);
+            doc.lines.clear();
+            return;
+        }
         if (finalizer != null) finalizer.finalizeParsedDocument(context, doc);
     }
 

@@ -110,9 +110,12 @@ public final class LyricAnimations {
         return -0.04f * wave * wave;
     }
 
-    /** Apple lift: quarter-sine rise to -0.04em, holding at the top while sung. */
+    /** Apple lift height. 0.04em (~3px at lyric size) was too small to read as a lift at all. */
+    public static final float APPLE_LIFT_EM = 0.07f;
+
+    /** Apple lift: quarter-sine rise to -{@link #APPLE_LIFT_EM}, holding at the top while sung. */
     public static float appleLiftYOffsetSpline(float t) {
-        return -0.04f * (float) Math.sin(clamp01(t) * (Math.PI / 2d));
+        return -APPLE_LIFT_EM * (float) Math.sin(clamp01(t) * (Math.PI / 2d));
     }
 
     /** Spicy 6 GlowRange: 0 -> 0, 0.15 -> 1, 0.6 -> 1, 1 -> 0. */

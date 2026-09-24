@@ -44,10 +44,15 @@ final class LyricsShellEmptyStateController {
         showLoading(lyricsScroll, lyricsColumn, message, 0);
     }
 
-    /** Ad placeholder: a compact ad badge, with mute status shown only when auto-mute is enabled. */
-    void showAdPlaceholder(ScrollView lyricsScroll, LinearLayout lyricsColumn, String message) {
+    /**
+     * Ads carry no lyrics: a compact card with an "AD" badge in their place, saying what happens
+     * to the ad's audio (muted / replaced with music / plays) and that lyrics come back after it.
+     */
+    void showAdState(ScrollView lyricsScroll, LinearLayout lyricsColumn) {
         stateToken++;
         lyricsColumn.removeAllViews();
+        com.eza.spicyex.SettingsUiStrings strings = com.eza.spicyex.UiLanguage.strings(activity,
+                config.get(Settings.UI_LANGUAGE));
 
         LinearLayout card = new LinearLayout(activity);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -55,33 +60,32 @@ final class LyricsShellEmptyStateController {
         card.setAlpha(0f);
         card.setTranslationY(dp(12));
         GradientDrawable cardBg = new GradientDrawable();
-        cardBg.setColor(0x14000000);
-        cardBg.setCornerRadius(dp(18));
+        cardBg.setColor(0x1A000000);
+        cardBg.setCornerRadius(dp(20));
         cardBg.setStroke(dp(1), 0x26FFFFFF);
         card.setBackground(cardBg);
-        card.setPadding(dp(20), dp(18), dp(20), dp(18));
+        card.setPadding(dp(20), dp(20), dp(20), dp(20));
 
-        TextView badge = textFactory.createText(activity, "AD", 13, Color.argb(255, 214, 214, 230),
+        TextView badge = textFactory.createText(activity, "AD", 13, Color.rgb(20, 20, 24),
                 textFactory.resolveTypeface(true));
         badge.setGravity(Gravity.CENTER);
-        badge.setLetterSpacing(0.10f);
+        badge.setLetterSpacing(0.12f);
         GradientDrawable badgeBg = new GradientDrawable();
-        badgeBg.setColor(0x1AFFFFFF);
-        badgeBg.setCornerRadius(dp(10));
+        badgeBg.setColor(Color.rgb(255, 205, 80));
+        badgeBg.setCornerRadius(dp(8));
         badge.setBackground(badgeBg);
-        card.addView(badge, new LinearLayout.LayoutParams(dp(48), dp(28)));
+        card.addView(badge, new LinearLayout.LayoutParams(dp(46), dp(26)));
 
-        TextView label = textFactory.createText(
-                activity,
-                message,
-                16,
-                Color.WHITE,
-                textFactory.resolveTypeface(false));
+        TextView label = textFactory.createText(activity,
+                strings.get("lyrics_ad_title", "Advertisement"), 20, Color.WHITE,
+                textFactory.resolveTypeface(true));
         label.setGravity(Gravity.CENTER);
         label.setPadding(0, dp(12), 0, 0);
         card.addView(label);
 
-        boolean muted = Boolean.TRUE.equals(config.get(Settings.AUTO_MUTE_ADS));
+        String mode = config.get(Settings.AD_MODE);
+        boolean muted = Settings.AD_MODE_MUTE.equals(mode);
+        boolean music = Settings.AD_MODE_MUSIC.equals(mode);
         LinearLayout statusRow = new LinearLayout(activity);
         statusRow.setGravity(Gravity.CENTER);
         if (muted) {
@@ -89,45 +93,49 @@ final class LyricsShellEmptyStateController {
             muteIcon.setImageDrawable(new ActionIconDrawable(
                     ActionIconDrawable.Kind.VOLUME_OFF, Color.rgb(204, 204, 214),
                     activity.getResources().getDisplayMetrics().density));
-            statusRow.addView(muteIcon, new LinearLayout.LayoutParams(dp(16), dp(16)));
+            LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(16), dp(16));
+            iconLp.topMargin = dp(8);
+            iconLp.rightMargin = dp(6);
+            statusRow.addView(muteIcon, iconLp);
         }
-        TextView hint = textFactory.createText(
-                activity,
-                muted ? "Ad audio muted · lyrics resume after the ad"
-                        : "Lyrics resume after the ad",
-                12,
-                Color.rgb(178, 178, 188),
+        String hintText = muted ? strings.get("lyrics_ad_muted", "Ad audio muted · lyrics resume after the ad")
+                : music ? strings.get("lyrics_ad_music", "Playing music instead · lyrics resume after the ad")
+                : strings.get("lyrics_ad_resume", "Lyrics resume after the ad");
+        TextView hint = textFactory.createText(activity, hintText, 13, Color.rgb(190, 190, 200),
                 textFactory.resolveTypeface(false));
         hint.setGravity(Gravity.CENTER);
-        hint.setPadding(muted ? dp(6) : 0, dp(8), 0, 0);
+        hint.setPadding(0, dp(8), 0, 0);
         statusRow.addView(hint);
         card.addView(statusRow);
 
         LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        cardLp.topMargin = dp(72);
-        cardLp.leftMargin = dp(18);
-        cardLp.rightMargin = dp(18);
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cardLp.topMargin = dp(96);
+        cardLp.leftMargin = dp(24);
+        cardLp.rightMargin = dp(24);
         lyricsColumn.addView(card, cardLp);
+        card.animate().alpha(1f).translationY(0f).setDuration(220)
+                .setInterpolator(new AccelerateDecelerateInterpolator()).start();
 
-        card.animate().alpha(1f).translationY(0f).setDuration(180).setInterpolator(
-                new AccelerateDecelerateInterpolator()).start();
-
-        ValueAnimator pulse = ValueAnimator.ofFloat(0.9f, 1f);
-        pulse.setDuration(1200);
+        // A slow breath on the badge; runs only while the card is on screen.
+        ValueAnimator pulse = ValueAnimator.ofFloat(0.72f, 1f);
+        pulse.setDuration(1300);
         pulse.setRepeatCount(ValueAnimator.INFINITE);
         pulse.setRepeatMode(ValueAnimator.REVERSE);
         pulse.setInterpolator(new AccelerateDecelerateInterpolator());
-        pulse.addUpdateListener(a -> {
-            float v = (float) a.getAnimatedValue();
-            badge.setAlpha(v);
-            badge.setScaleX(v);
-            badge.setScaleY(v);
-        });
-        pulse.start();
-        card.setTag(pulse);
+        pulse.addUpdateListener(a -> badge.setAlpha((float) a.getAnimatedValue()));
+        badge.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View v) {
+                pulse.start();
+            }
 
+            @Override
+            public void onViewDetachedFromWindow(View v) {
+                pulse.cancel();
+            }
+        });
+        if (badge.isAttachedToWindow()) pulse.start();
         lyricsScroll.post(() -> lyricsScroll.scrollTo(0, 0));
     }
 
@@ -204,6 +212,59 @@ final class LyricsShellEmptyStateController {
         // The loading state should sit around the viewport midpoint; if the lyric area has
         // already shifted past halfway, keep the start flush with the top instead of overshooting.
         return paddingTopPx >= viewportHeightPx / 2 ? 0 : dp(56);
+    }
+
+    /** An instrumental track: a quiet, centred note and label in place of "No lyrics found". */
+    void showInstrumental(LinearLayout lyricsColumn, java.util.function.Supplier<float[]> spectrum) {
+        ++stateToken;
+        lyricsColumn.removeAllViews();
+        LinearLayout box = new LinearLayout(activity);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER_HORIZONTAL);
+        TextView note = textFactory.createText(activity, "\u266B", 56, Color.WHITE,
+                textFactory.resolveTypeface(true));
+        note.setGravity(Gravity.CENTER);
+        note.setPadding(dp(16), dp(72), dp(16), dp(4));
+        box.addView(note, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        String label = com.eza.spicyex.UiLanguage.strings(activity,
+                config.get(com.eza.spicyex.Settings.UI_LANGUAGE))
+                .get("lyrics_instrumental", "Instrumental");
+        TextView title = textFactory.createText(activity, label, 22, Color.WHITE,
+                textFactory.resolveTypeface(true));
+        title.setGravity(Gravity.CENTER);
+        title.setAlpha(0.85f);
+        box.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        com.eza.spicyex.lyrics.InstrumentalVisualizerView visualizer =
+                new com.eza.spicyex.lyrics.InstrumentalVisualizerView(activity, spectrum);
+        LinearLayout.LayoutParams visualizerLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(170));
+        visualizerLp.topMargin = dp(28);
+        visualizerLp.leftMargin = dp(20);
+        visualizerLp.rightMargin = dp(20);
+        box.addView(visualizer, visualizerLp);
+        lyricsColumn.addView(box, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // A slow breath on the note, so the screen reads as music playing rather than an error.
+        android.animation.ObjectAnimator breathe = android.animation.ObjectAnimator.ofFloat(
+                note, View.ALPHA, 0.55f, 1f);
+        breathe.setDuration(1600L);
+        breathe.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        breathe.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        breathe.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+        note.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View v) {
+                breathe.start();
+            }
+
+            @Override
+            public void onViewDetachedFromWindow(View v) {
+                breathe.cancel();
+            }
+        });
+        if (note.isAttachedToWindow()) breathe.start();
     }
 
     void showError(LinearLayout lyricsColumn, String error) {

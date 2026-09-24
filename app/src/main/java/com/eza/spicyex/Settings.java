@@ -113,19 +113,31 @@ public final class Settings {
 
     // Enable/disable dynamic animation for follow chip entrance and exit
     public static final Setting<Boolean> FOLLOW_CHIP_ANIMATION = boolSetting(
-            "lyric_follow_chip_animation", LYRICS, "Follow chip animation", true
+            "lyric_follow_chip_animation", INTERNAL, "Follow chip animation", true
     );
 
     // Show progress bar on follow chip indicating time remaining
     public static final Setting<Boolean> FOLLOW_CHIP_PROGRESS = boolSetting(
-            "lyric_follow_chip_progress", LYRICS, "Follow chip progress bar", true
+            "lyric_follow_chip_progress", INTERNAL, "Follow chip progress bar", true
     );
 
-    // Silently mutes only Spotify's AudioTrack for the duration of a spotify:ad: track; the
-    // phone's global media volume is not changed - see AdMuteController.
-    public static final Setting<Boolean> AUTO_MUTE_ADS = boolSetting(
-            "auto_mute_ads", LYRICS, "Auto-mute ads", false
+    // What to do while a spotify:ad: track plays - see AdMuteController. Mute silences only
+    // Spotify's own AudioTrack (the phone's media volume is untouched); music additionally fades
+    // in soft generated instrumental music for the length of the ad break.
+    public static final String AD_MODE_OFF = "Off";
+    public static final String AD_MODE_MUTE = "Mute";
+    public static final String AD_MODE_MUSIC = "Play music instead";
+    public static final Setting<String> AD_MODE = enumSetting(
+            "ad_mode", LYRICS, "Ads", AD_MODE_OFF,
+            AD_MODE_OFF, AD_MODE_MUTE, AD_MODE_MUSIC
     );
+    // Style of the music that replaces ads (AD_MODE_MUSIC); Random picks one per ad break.
+    public static final Setting<String> AD_MUSIC_THEME = enumSetting(
+            "ad_music_theme", LYRICS, "Ad music style", "Random",
+            "Random", "Lofi", "Cafe jazz", "Bossa nova", "Ambient"
+    );
+    /** Pre-AD_MODE boolean; read once by SettingsStore#migrateAdMode. */
+    public static final String LEGACY_AUTO_MUTE_ADS = "auto_mute_ads";
 
     // Adds a button to Spotify's persistent mini player (every non-lyrics screen) that jumps
     // straight to the native fullscreen lyrics - see LyricsActivityTakeoverHook.
@@ -151,7 +163,7 @@ public final class Settings {
     /** Current source to use for lyrics fetching. */
     public static final Setting<String> LYRICS_SOURCE_OVERRIDE = enumSetting(
             "lyrics_source_override", LYRICS_SOURCES, "Lyrics source", "Auto",
-            "Auto", "Apple Music", "Spicy", "Spotify", "LRCLIB", "NetEase", "QQ Music"
+            "Auto", "Apple Music", "Spicy", "Spotify", "LRCLIB", "NetEase", "QQ Music", "Musixmatch"
     );
 
     /** Optional desktop-captured Spotify token used only by strict Spicy requests. */
@@ -167,6 +179,12 @@ public final class Settings {
     /** Bounded JSON map of spotify track URI to source id; auto is represented by omission. */
     public static final Setting<String> LYRICS_SOURCE_OVERRIDES = internalSetting(
             "lyrics_source_overrides", "Per-track lyric sources", "{}"
+    );
+
+    // Karaoke / off-vocal / instrumental versions have no lyrics of their own; with this on the
+    // text sources are searched for the original song instead (see KaraokeTitles).
+    public static final Setting<Boolean> KARAOKE_ORIGINAL_LYRICS = boolSetting(
+            "lyrics_karaoke_original_lyrics", LYRICS_SOURCES, "Show original lyrics for karaoke versions", true
     );
 
     // Stored values are the exact display labels; allocation is in CacheStoragePolicy.
@@ -457,13 +475,13 @@ public final class Settings {
             "lyrics_track_info_text_size_adaptive", INTERNAL, "Adaptive track info text size", false
     );
 
-    // Separate landscape mode from the Off/Top/Bottom readout: when on and the screen is
-    // genuinely wide (landscape with width/height >= 1.2, so near-square foldable screens stay
-    // stacked), the fullscreen lyrics use a two-column layout with an artwork panel on the
-    // left and the lyrics column on the right. The readout overlays stand down while it is
-    // engaged. Takes effect when the lyrics screen is (re)opened.
+    // Separate wide-screen mode from the Off/Top/Bottom readout: when on and the screen is wide
+    // (width/height >= 1.2) or large and near-square (an unfolded foldable, >= 600dp wide), the
+    // fullscreen lyrics use a two-column layout with an artwork panel on the left and the lyrics
+    // column on the right. The readout overlays stand down while it is engaged. Takes effect when
+    // the lyrics screen is (re)opened; see NativeSpicyShellViewImpl#twoColumnEngaged.
     public static final Setting<Boolean> ADAPTIVE_LANDSCAPE_LAYOUT = boolSetting(
-            "lyrics_adaptive_landscape_layout", TEXT, "Adaptive landscape layout", true
+            "lyrics_adaptive_landscape_layout", TEXT, "Two-column layout on wide screens", true
     );
 
     // Media controls for artwork (two-column panel + readout art, same behavior): Off
@@ -473,13 +491,6 @@ public final class Settings {
     public static final Setting<String> PANEL_MEDIA_CONTROLS = enumSetting(
             "lyrics_panel_media_controls", TEXT, "Panel media controls", "Single tap",
             "Off", "Single tap", "Double tap"
-    );
-
-    // When enabled, visual/layout settings are saved separately for landscape and portrait mode.
-    // Each affected setting uses a key suffixed with "_ls" (landscape) or "_pt" (portrait),
-    // falling back to the unsuffixed base key when no orientation-specific value exists.
-    public static final Setting<Boolean> PER_ORIENTATION_SETTINGS = boolSetting(
-            "lyrics_per_orientation_settings", LYRICS_SCREEN, "Per-orientation settings", false
     );
 
     // --- Animation ---
@@ -516,17 +527,17 @@ public final class Settings {
     // of appearing instantly. Distinct from LINE_SLIDE_ANIMATION, which is the per-scroll-step
     // cascade; this plays once per document, not on every active-line change.
     public static final Setting<Boolean> LOAD_LIFT_ANIMATION = boolSetting(
-            "lyric_load_lift_animation", LYRICS_SCREEN, "Rise in on load", true
+            "lyric_load_lift_animation", INTERNAL, "Rise in on load", true
     );
 
     // Speed multiplier for row cascade and load-lift animations (100 = normal, 50 = half,
     // 200 = double). Applies to all animation styles.
-    public static final Setting<Integer> APPLE_CASCADE_SPEED = intSetting(
-            "apple_cascade_speed", LYRICS_SCREEN, "Slide speed", 100, 50, 200, 5
+    public static final IntegerSetting APPLE_CASCADE_SPEED = intSetting(
+            "apple_cascade_speed", INTERNAL, "Slide speed", 100, 50, 200, 5
     );
 
     public static final IntegerSetting APPLE_SPRING_STRENGTH = intSetting(
-            "apple_spring_strength", LYRICS_SCREEN, "Spring strength", 100, 50, 200, 5
+            "apple_spring_strength", INTERNAL, "Spring strength", 100, 50, 200, 5
     );
 
     // One selector owns both the bounce gate and its scope. Editable from the layout editor's
@@ -594,7 +605,7 @@ public final class Settings {
     );
 
     public static final IntegerSetting EXTRA_DARK_BACKGROUND = intSetting(
-            "lyric_extra_dark_background", INTERNAL, "Force dark background", 35, 0, 100, 5
+            "lyric_extra_dark_background", INTERNAL, "Force dark background", 60, 0, 100, 5
     );
 
     // Only meaningful when BACKGROUND_STYLE is ANIMATED_TEXTURE - the AGSL noise shader renders
@@ -1064,40 +1075,35 @@ public final class Settings {
         return new StringSetting(key, INTERNAL, label, defaultValue, null);
     }
 
-    // --- Per-orientation key helpers ---
+    // --- Landscape layout values ---
 
-    /** Settings that support per-orientation storage. When PER_ORIENTATION_SETTINGS is on,
-     *  these settings use orientation-suffixed keys (_ls/_pt) to store different values
-     *  for landscape and portrait. */
-    public static boolean isPerOrientationCandidate(Setting<?> setting) {
+    /**
+     * Settings whose right value depends on the screen's shape: sizes and positions that fit a
+     * tall screen collide in a wide one (a big top artwork eats most of a landscape height, a
+     * raised focus point sits under the chrome, a chip placement overlaps the side panel).
+     * Everything else - fonts, colours, animation, background - is a taste, not a fit, and stays
+     * shared so it is set once.
+     */
+    public static boolean isOrientationSpecific(Setting<?> setting) {
         return setting == LYRICS_TEXT_SIZE || setting == LYRICS_TEXT_SIZE_CUSTOM
-                || setting == LYRICS_FONT || setting == LYRICS_WEIGHT
                 || setting == LINE_SPACING || setting == LINE_SPACING_CUSTOM
                 || setting == LYRICS_FOCUS_POSITION || setting == LYRICS_FOCUS_POSITION_CUSTOM_PERCENT
-                || setting == TRACK_INFO_POSITION || setting == TRACK_INFO_ART_RADIUS
-                || setting == TRACK_INFO_ART_SIZE || setting == TRACK_INFO_TEXT_SIZE
-                || setting == BACKGROUND_STYLE || setting == BEAT_REACTIVE_BACKGROUND
-                || setting == ANIMATION_STYLE || setting == LINE_SLIDE_ANIMATION
-                || setting == APPLE_CASCADE_SPEED || setting == APPLE_SPRING_STRENGTH
-                || setting == LOAD_LIFT_ANIMATION
-                || setting == ENABLE_LINE_BLUR || setting == LYRICS_BLUR_INTENSITY
-                || setting == ENABLE_GLOW_BLUR || setting == WORD_BOUNCE
-                || setting == WORD_BOUNCE_STYLE || setting == LINE_SYNC_FILL
-                || setting == FORCE_DARK_BACKGROUND || setting == EXTRA_DARK_BACKGROUND
-                || setting == SKIP_CHIP_POSITION || setting == SKIP_CHIP_STYLE
-                || setting == FOLLOW_CHIP_POSITION || setting == FOLLOW_CHIP_STYLE;
+                || setting == TRACK_INFO_POSITION
+                || setting == TRACK_INFO_ART_SIZE || setting == TRACK_INFO_ART_SIZE_CUSTOM_DP
+                || setting == TRACK_INFO_TEXT_SIZE || setting == TRACK_INFO_TEXT_SIZE_CUSTOM
+                || setting == SKIP_CHIP_POSITION || setting == FOLLOW_CHIP_POSITION
+                || setting == CHROME_CLUSTER_POSITION;
     }
 
-    /** Returns the orientation-suffixed key for per-orientation storage.
-     *  Appends "_ls" for landscape, "_pt" for portrait.
-     *  Returns null if per-orientation is not active for this context. */
-    public static String orientationKey(android.content.Context context, Setting<?> setting) {
-        if (!isPerOrientationCandidate(setting)) return null;
-        boolean perOrientation = SpotifyPlusConfig.from(context).get(PER_ORIENTATION_SETTINGS);
-        if (!perOrientation) return null;
-        int orientation = context.getResources().getConfiguration().orientation;
-        String suffix = (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
-                ? "_ls" : "_pt";
-        return setting.key + suffix;
+    /**
+     * Where a landscape value of {@code setting} is stored, or null when the shared key applies
+     * (portrait, or a setting that is not orientation-specific). Portrait keeps the plain key, so
+     * existing values carry over; landscape follows portrait until it is changed while landscape.
+     */
+    public static String landscapeKey(android.content.Context context, Setting<?> setting) {
+        if (context == null || !isOrientationSpecific(setting)) return null;
+        return context.getResources().getConfiguration().orientation
+                == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                ? setting.key + "_ls" : null;
     }
 }

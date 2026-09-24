@@ -12,7 +12,8 @@ import java.util.Locale;
 /** Shared source-selection preferences used by fullscreen and now-playing lyrics. */
 public final class LyricsSourcePreferences {
     public enum Source {
-        APPLE_MUSIC("apple"), SPICY("spicy"), SPOTIFY("spotify"), LRCLIB("lrclib"), NETEASE("netease"), QQ_MUSIC("qq_music");
+        APPLE_MUSIC("apple"), SPICY("spicy"), SPOTIFY("spotify"), LRCLIB("lrclib"), NETEASE("netease"), QQ_MUSIC("qq_music"),
+        MUSIXMATCH("musixmatch");
         public final String id;
         Source(String id) { this.id = id; }
         public static Source parse(String value) {
@@ -51,7 +52,8 @@ public final class LyricsSourcePreferences {
     private static final String OVERRIDE_ORDER = "override_order";
     private static final int MAX_OVERRIDES = 200;
     private static final List<Source> DEFAULT_ORDER = Collections.unmodifiableList(
-            java.util.Arrays.asList(Source.APPLE_MUSIC, Source.QQ_MUSIC, Source.SPOTIFY, Source.NETEASE, Source.LRCLIB));
+            java.util.Arrays.asList(Source.APPLE_MUSIC, Source.QQ_MUSIC, Source.MUSIXMATCH, Source.SPOTIFY,
+                    Source.NETEASE, Source.LRCLIB));
 
     private LyricsSourcePreferences() {}
 

@@ -96,7 +96,8 @@ public final class LyricsLineAnimationState {
         float scaleTarget;
         if (active) {
             float baseScale = 1.0f;
-            float maxScale = spotlight ? 1.08f : 1.05f;
+            // Kept small: the emphasis now goes to held words (GlowFlexbox word emphasis).
+            float maxScale = spotlight ? 1.05f : 1.03f;
             scaleTarget = baseScale + (maxScale - baseScale) * LyricAnimations.easeSinOut(progress);
         } else {
             scaleTarget = 0.95f;

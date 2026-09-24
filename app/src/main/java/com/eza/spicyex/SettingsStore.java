@@ -65,6 +65,21 @@ public final class SettingsStore implements TypedStore {
      * Bool-to-enum migration for the blur level: stored {@code true} keeps the legacy look as
      * {@code Slight}, {@code false} becomes {@code Off}. Already-migrated strings pass through.
      */
+    /** The old "Auto-mute ads" switch becomes the Mute choice of the ad mode. */
+    static synchronized void migrateAdMode(SharedPreferences prefs) {
+        if (!prefs.contains(Settings.LEGACY_AUTO_MUTE_ADS)) return;
+        boolean muted = false;
+        try {
+            muted = prefs.getBoolean(Settings.LEGACY_AUTO_MUTE_ADS, false);
+        } catch (ClassCastException ignored) {
+        }
+        SharedPreferences.Editor editor = prefs.edit().remove(Settings.LEGACY_AUTO_MUTE_ADS);
+        if (muted && !prefs.contains(Settings.AD_MODE.key)) {
+            editor.putString(Settings.AD_MODE.key, Settings.AD_MODE_MUTE);
+        }
+        editor.apply();
+    }
+
     static synchronized void migrateLineBlurLevel(SharedPreferences prefs) {
         if (!prefs.contains(Settings.ENABLE_LINE_BLUR.key)) return;
         Object raw = prefs.getAll().get(Settings.ENABLE_LINE_BLUR.key);
@@ -75,15 +90,10 @@ public final class SettingsStore implements TypedStore {
 
     public <T> T get(Settings.Setting<T> setting) {
         try {
-            // Per-orientation: try orientation-suffixed key first
-            String oKey = Settings.orientationKey(context, setting);
-            if (oKey != null) {
-                Object value = readRaw(oKey, setting);
-                if (value != null) return setting.coerce(value);
-            }
-            // Fall back to base key
-            Object value = readRaw(setting.key, setting);
-            return setting.coerce(value);
+            String landscapeKey = Settings.landscapeKey(context, setting);
+            String key = landscapeKey != null && prefs.contains(landscapeKey)
+                    ? landscapeKey : setting.key;
+            return setting.coerce(readRaw(key, setting));
         } catch (ClassCastException | IllegalArgumentException invalidStoredValue) {
             return setting.defaultValue;
         }
@@ -111,26 +121,27 @@ public final class SettingsStore implements TypedStore {
             // The row is intentionally a tap-to-download action rather than a persisted toggle.
             return;
         }
-        prefs.edit().putBoolean(setting.key, value).apply();
+        prefs.edit().putBoolean(storageKey(setting), value).apply();
     }
 
     @Override
     public void putString(Settings.StringSetting setting, String value) {
-        prefs.edit().putString(setting.key, value).apply();
+        prefs.edit().putString(storageKey(setting), value).apply();
     }
 
     @Override
     public void putInt(Settings.IntegerSetting setting, int value) {
-        prefs.edit().putInt(setting.key, value).apply();
+        prefs.edit().putInt(storageKey(setting), value).apply();
+    }
+
+    /** Landscape edits of a layout-fit setting land on its landscape key; see Settings. */
+    private String storageKey(Settings.Setting<?> setting) {
+        String landscapeKey = Settings.landscapeKey(context, setting);
+        return landscapeKey != null ? landscapeKey : setting.key;
     }
 
     public <T> void put(Settings.Setting<T> setting, T value) {
-        // Per-orientation: write to orientation-suffixed key when active
-        String key = setting.key;
-        if (context != null) {
-            String oKey = Settings.orientationKey(context, setting);
-            if (oKey != null) key = oKey;
-        }
+        String key = storageKey(setting);
         SharedPreferences.Editor editor = prefs.edit();
         if (value instanceof Boolean) {
             editor.putBoolean(key, (Boolean) value);

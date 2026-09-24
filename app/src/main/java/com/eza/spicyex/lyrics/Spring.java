@@ -94,6 +94,12 @@ public class Spring {
         position += delta;
     }
 
+    /** Moves position and goal together: the same motion, relocated by {@code delta}. */
+    public void shift(float delta) {
+        position += delta;
+        goal += delta;
+    }
+
     /** Launches the spring with speed already on it, instead of accelerating up from rest. Units
      *  match {@code position} per second. */
     public void setVelocity(float velocity) {

@@ -190,7 +190,6 @@ public final class LanguageModelPack {
             return;
         }
         transientStatus = new DownloadStatus(Phase.READY, 100, "");
-        downloadStarted = false;
         JapaneseReadingEngine.shared().trimMemory();
         LanguageDetectorManager.shared().trimMemory();
         Runnable listener = readyListener;
@@ -218,13 +217,16 @@ public final class LanguageModelPack {
         }
     }
 
-    private static InputStream packaged(Class<?> owner, String resource) {
-        return owner.getResourceAsStream(resource);
-    }
-
-    static InputStream openOrPackaged(String relativePath, Class<?> owner, String packagedResource) {
+    /**
+     * The pack's copy of a model file, or else the classpath resource of that name. The APK carries
+     * no model files (see app/build.gradle), so on a device that fallback finds nothing; it exists
+     * for JVM tests, where the libraries' own copies and the pack's source folder are on the
+     * classpath.
+     */
+    static InputStream openOrClasspath(String relativePath, String classpathResource) {
         InputStream downloaded = open(relativePath);
-        return downloaded != null ? downloaded : packaged(owner, packagedResource);
+        return downloaded != null ? downloaded
+                : LanguageModelPack.class.getResourceAsStream(classpathResource);
     }
 
     private static File root() {
