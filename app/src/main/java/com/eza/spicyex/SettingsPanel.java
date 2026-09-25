@@ -187,14 +187,16 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     private LinearLayout searchBar;
     private android.widget.EditText searchField;
     private LinearLayout searchResults;
-    private com.eza.spicyex.settings.SettingsSearch searchIndex;
+    private volatile com.eza.spicyex.settings.SettingsSearch searchIndex;
 
     /** A result that opens a Layout Editor rather than a panel row. */
     private static final class EditorTarget {
         final int mode;
+        final Settings.Setting<?> setting;
 
-        EditorTarget(int mode) {
+        EditorTarget(int mode, Settings.Setting<?> setting) {
             this.mode = mode;
+            this.setting = setting;
         }
     }
 
@@ -246,6 +248,15 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         content.addView(searchResults, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        // Reading every language's strings takes a moment: start as soon as the field is
+        // focused, so the first letter typed does not wait for it.
+        searchField.setOnFocusChangeListener((v, focused) -> {
+            if (focused && searchIndex == null) {
+                Thread warm = new Thread(this::searchIndex, "SettingsSearchIndex");
+                warm.setDaemon(true);
+                warm.start();
+            }
+        });
         searchField.setOnEditorActionListener((v, actionId, event) -> {
             hideKeyboard();
             return true;
@@ -260,7 +271,6 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
                 if (sectionsContainer != null) sectionsContainer.setVisibility(searching ? View.GONE : View.VISIBLE);
                 searchResults.setVisibility(searching ? View.VISIBLE : View.GONE);
                 if (!searching) {
-                    searchIndex = null; // settings may change before the next search
                     searchResults.removeAllViews();
                     return;
                 }
@@ -278,7 +288,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     }
 
     /** Everything searchable, built once per search session from what the panel shows now. */
-    private com.eza.spicyex.settings.SettingsSearch searchIndex() {
+    private synchronized com.eza.spicyex.settings.SettingsSearch searchIndex() {
         if (searchIndex != null) return searchIndex;
         List<com.eza.spicyex.settings.SettingsSearch.Entry> entries = new ArrayList<>();
         LinkedHashMap<Settings.Section, List<Settings.Setting<?>>> grouped = groupVisibleSettings();
@@ -287,15 +297,15 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         for (Settings.Section section : sections) {
             String name = uiStrings.section(section);
             entries.add(new com.eza.spicyex.settings.SettingsSearch.Entry(section,
-                    java.util.Arrays.asList(name, section.label), "", section.id,
+                    names(name, SettingsUiResourceNames.section(section), section.label), "", section.id,
                     sectionKeywords(section)));
             List<Settings.Setting<?>> items = grouped.get(section);
             if (items == null) continue;
             for (Settings.Setting<?> setting : items) {
                 if (setting == Settings.LYRICS_SOURCE_OVERRIDE || setting == Settings.LYRICS_SOURCE_ORDER) continue;
                 entries.add(new com.eza.spicyex.settings.SettingsSearch.Entry(setting,
-                        java.util.Arrays.asList(searchTitle(setting), setting.label), name, section.id,
-                        settingKeywords(setting, section)));
+                        names(searchTitle(setting), SettingsUiResourceNames.setting(setting), setting.label),
+                        name, section.id, settingKeywords(setting, section)));
             }
         }
         // What only the Layout Editor edits: found here too, opening the editor.
@@ -307,12 +317,27 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
             extra.add("layout editor");
             extra.add(uiStrings.section(card ? Settings.NOW_PLAYING : Settings.LYRICS_SCREEN));
             entries.add(new com.eza.spicyex.settings.SettingsSearch.Entry(
-                    new EditorTarget(card ? EDITOR_CARD : EDITOR_LYRICS),
-                    java.util.Arrays.asList(searchTitle(setting), setting.label),
+                    new EditorTarget(card ? EDITOR_CARD : EDITOR_LYRICS, setting),
+                    names(searchTitle(setting), SettingsUiResourceNames.setting(setting), setting.label),
                     card ? cardEditor : lyricsEditor, card ? "editor_card" : "editor_lyrics", extra));
         }
-        searchIndex = new com.eza.spicyex.settings.SettingsSearch(entries);
+        // Synonym groups: each language's own words, from its strings file.
+        List<List<String>> concepts = new ArrayList<>();
+        for (String id : com.eza.spicyex.settings.SettingsSearch.CONCEPT_IDS) {
+            concepts.add(com.eza.spicyex.settings.SettingsSearch.mergeTerms(
+                    uiStrings.inEveryLanguage("search_terms_" + id)));
+        }
+        searchIndex = new com.eza.spicyex.settings.SettingsSearch(entries, concepts);
         return searchIndex;
+    }
+
+    /** A name as shown, then as every shipped language has it, then the English built-in. */
+    private List<String> names(String shown, String resource, String builtIn) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        out.add(shown);
+        out.addAll(uiStrings.inEveryLanguage(resource));
+        if (builtIn != null) out.add(builtIn);
+        return new ArrayList<>(out);
     }
 
     private String searchTitle(Settings.Setting<?> setting) {
@@ -337,6 +362,8 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         List<String> extra = new ArrayList<>();
         extra.add(setting.key.replace('_', ' '));
         if (section != null) extra.add(section.label);
+        // Words written for search, in every language that has them.
+        extra.addAll(uiStrings.inEveryLanguage("settings_search_" + setting.key));
         if (setting instanceof Settings.StringSetting && setting.allowedValues != null) {
             for (Object value : setting.allowedValues) {
                 String raw = String.valueOf(value);
@@ -555,6 +582,8 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         sectionsContainer.removeAllViews();
         renderSections(sectionsContainer);
         if (searchBar != null) searchBar.setVisibility(section == null ? View.VISIBLE : View.GONE);
+        // What is visible may change on a page; the next search reindexes.
+        if (section != null) searchIndex = null;
         if (scrollRoot != null) scrollRoot.scrollTo(0, 0);
         sectionsContainer.setTranslationX(style.dp(forward ? 32 : -32));
         sectionsContainer.setAlpha(0f);

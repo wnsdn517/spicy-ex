@@ -3,29 +3,56 @@ package com.eza.spicyex.settings;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * Finds settings from whatever the user types: the name in any of the panel's languages, a word
- * from the setting's options or section, a misspelling of either, or a different word for the
- * same idea ("블러" finds "Line blur", "font" finds "글꼴", "notification bar" finds "Hide status
- * bar").
+ * Finds settings from whatever the user types - in any language, misspelled, in their own words.
  *
- * <p>Pure Java - no Android - so it is unit-tested directly. Text is folded before matching:
- * lower case, accents stripped, and Hangul syllables decomposed into jamo, so a typo inside a
- * Korean syllable costs one edit rather than a whole mismatched character.
+ * <p>Nothing here knows a particular language. The words come from the app's strings: every
+ * setting's name in every language the module ships, its options and section, an optional
+ * description written for search ({@code settings_search_<key>}), and synonym groups
+ * ({@code search_terms_<concept>}) that each translation fills in with its own words. Adding a
+ * language is adding its strings; this file does not change.
  *
- * <p>Scoring, per typed word, best of: substring of the entry (word start scores higher than
- * inside a word), a close misspelling of one of its words or of a word's start (Damerau-
- * Levenshtein, tolerance growing with length), or a synonym - the typed word names a concept
- * (see {@link #CONCEPTS}) the entry also mentions. Matches in the title count more than in the
- * rest. Every typed word must match something, except one when three or more are typed.
+ * <p>What does the work is script-level, and holds for any language:
+ * <ul>
+ * <li>Tokens: text splits into words at spaces, punctuation and script changes. Chinese and
+ *     Japanese have no spaces, so their runs are compared as overlapping character pairs
+ *     (bigrams) - the usual dictionary-free way to search CJK text. A run of Hangul or Latin
+ *     typed without spaces ("이중탭하트", "doubletapheart") is also tried split into known
+ *     words.</li>
+ * <li>Folding: lower case, accents stripped, Hangul taken apart into its letters (jamo), so
+ *     a typo inside a syllable is one letter off and a Korean word typed on an English keyboard
+ *     layout ("qmffj" for 블러) can be recovered.</li>
+ * <li>Word forms: a typed word that starts with a known word ("블러를", "fonts") or shares a
+ *     long start with it ("размытия"/"размытие") counts - particles, plurals, case endings.</li>
+ * <li>Typos: Damerau-Levenshtein, one edit for a word of four letters, two from nine.</li>
+ * <li>Korean initials: "ㄱㅅㅎㄹ" finds "가사 흐림".</li>
+ * <li>Ideas: a typed word naming a synonym group finds entries that mention any other member.</li>
+ * </ul>
+ *
+ * <p>Pure Java - no Android - so it is unit-tested directly.
  */
 public final class SettingsSearch {
+
+    /**
+     * The synonym groups, by id. Their words live in the strings files as
+     * {@code search_terms_<id>}, comma-separated, one set per language.
+     */
+    public static final String[] CONCEPT_IDS = {
+            "blur", "font", "size", "weight", "translation", "reading", "language", "ads", "cache",
+            "status_bar", "like", "double", "seek", "tap", "long_press", "gesture", "color",
+            "background", "dark", "animation", "glow", "bounce", "artwork", "sync", "source",
+            "lyrics", "karaoke", "home", "share", "ai", "hide", "button", "spacing", "position",
+            "focus", "connect", "music", "mute", "quality", "debug", "reset", "layout", "title",
+            "icon", "screen", "auto", "notification",
+    };
 
     /** One searchable thing: a setting, a section, or an editor-only setting. */
     public static final class Entry {
@@ -35,16 +62,14 @@ public final class SettingsSearch {
         public final String place;
         /** Its section's id; related results share it. */
         public final String group;
-        final String foldedTitle;
-        final String foldedAll;
-        final String[] titleWords;
-        final String[] allWords;
-        final Set<Integer> concepts;
+        final Doc titleDoc;
+        final Doc allDoc;
+        final String initials;
+        Set<Integer> concepts = Collections.emptySet();
 
         /**
          * @param titles the name in every language available (the first is the one shown)
-         * @param extra  section names, option labels, the preference key, anything else that
-         *               describes it
+         * @param extra  descriptions, section names, option labels, the preference key
          */
         public Entry(Object target, List<String> titles, String place, String group, List<String> extra) {
             this.target = target;
@@ -56,11 +81,9 @@ public final class SettingsSearch {
             StringBuilder a = new StringBuilder(t);
             if (extra != null) for (String s : extra) a.append(' ').append(s);
             a.append(' ').append(this.place);
-            foldedTitle = fold(t.toString());
-            foldedAll = fold(a.toString());
-            titleWords = words(foldedTitle);
-            allWords = words(foldedAll);
-            concepts = conceptsIn(foldedAll, allWords);
+            titleDoc = new Doc(t.toString());
+            allDoc = new Doc(a.toString());
+            initials = initialsOf(t.toString());
         }
     }
 
@@ -77,114 +100,96 @@ public final class SettingsSearch {
         }
     }
 
-    /**
-     * Words that mean the same thing here, across the panel's languages. A typed word naming any
-     * member finds entries that mention any other member. Kept to the ideas this app's settings
-     * actually use.
-     */
-    static final String[][] CONCEPTS = {
-            {"blur", "블러", "흐림", "흐리게", "뿌옇게", "ぼかし", "ブラー", "размытие", "模糊"},
-            {"font", "typeface", "글꼴", "폰트", "서체", "フォント", "書体", "шрифт", "字体"},
-            {"size", "scale", "big", "small", "large", "크기", "사이즈", "크게", "작게", "サイズ", "大きさ", "размер", "大小"},
-            {"weight", "bold", "thick", "굵기", "두께", "볼드", "太さ", "жирность", "粗细"},
-            {"translation", "translate", "번역", "翻訳", "перевод", "翻译"},
-            {"transliteration", "romanization", "romaji", "reading", "pronunciation", "furigana", "pinyin",
-                    "발음", "로마자", "읽기", "후리가나", "병음", "읽는법", "読み", "ローマ字", "ふりがな",
-                    "транслитерация", "拼音", "注音"},
-            {"language", "locale", "언어", "言語", "язык", "语言"},
-            {"ad", "ads", "advert", "advertisement", "commercial", "광고", "広告", "реклама", "广告"},
-            {"cache", "storage", "stored", "memory", "캐시", "저장", "용량", "저장공간", "キャッシュ", "容量", "кэш", "缓存"},
-            {"status bar", "statusbar", "notification bar", "system bar", "상단바", "상태바", "알림바", "시스템바",
-                    "ステータスバー", "строка состояния", "状态栏"},
-            {"like", "liked", "heart", "favorite", "favourite", "star", "좋아요", "하트", "별", "즐겨찾기",
-                    "いいね", "ハート", "お気に入り", "избранное", "喜欢", "收藏"},
-            {"seek", "jump", "skip to", "이동", "탐색", "건너뛰기", "シーク", "移動", "перемотка", "跳转"},
-            {"tap", "touch", "click", "press", "double tap", "탭", "터치", "클릭", "누르기", "두번", "더블탭",
-                    "タップ", "ダブルタップ", "касание", "点击", "双击"},
-            {"long press", "hold", "길게", "꾹", "長押し", "удержание", "长按"},
-            {"gesture", "swipe", "제스처", "스와이프", "ジェスチャー", "жест", "手势"},
-            {"color", "colour", "theme", "tint", "색", "색상", "컬러", "테마", "色", "カラー", "цвет", "颜色"},
-            {"background", "backdrop", "wallpaper", "배경", "배경화면", "背景", "фон"},
-            {"dark", "black", "night", "어둡게", "다크", "검정", "어두운", "ダーク", "暗い", "тёмный", "深色"},
-            {"animation", "motion", "effect", "transition", "애니메이션", "움직임", "효과", "전환",
-                    "アニメーション", "エフェクト", "анимация", "动画", "效果"},
-            {"glow", "shine", "빛", "광채", "글로우", "발광", "グロー", "свечение", "发光"},
-            {"bounce", "spring", "튕김", "바운스", "스프링", "バウンス", "отскок", "弹跳"},
-            {"artwork", "album art", "cover", "art", "아트워크", "앨범아트", "앨범", "표지", "커버",
-                    "アートワーク", "ジャケット", "обложка", "封面"},
-            {"sync", "offset", "timing", "delay", "latency", "싱크", "타이밍", "지연", "딜레이", "오프셋",
-                    "同期", "タイミング", "синхронизация", "同步", "延迟"},
-            {"source", "provider", "lyrics source", "제공자", "제공처", "출처", "소스", "ソース", "提供元",
-                    "источник", "来源"},
-            {"lyrics", "lyric", "가사", "歌詞", "текст", "歌词"},
-            {"karaoke", "instrumental", "노래방", "반주", "카라오케", "カラオケ", "караоке", "卡拉ok"},
-            {"now playing", "card", "mini player", "widget", "재생중", "카드", "미니플레이어", "위젯",
-                    "再生中", "カード", "карточка", "卡片"},
-            {"share", "공유", "共有", "поделиться", "分享"},
-            {"ai", "gemini", "openai", "gpt", "deepseek", "openrouter", "llm", "인공지능", "에이아이", "ии", "人工智能"},
-            {"hide", "hidden", "show", "visible", "숨기기", "숨김", "감추기", "표시", "보이기", "非表示", "表示",
-                    "скрыть", "隐藏", "显示"},
-            {"button", "control", "controls", "icon", "버튼", "컨트롤", "아이콘", "ボタン", "кнопка", "按钮"},
-            {"spacing", "gap", "line height", "간격", "줄간격", "여백", "間隔", "интервал", "间距"},
-            {"position", "place", "align", "alignment", "위치", "정렬", "배치", "位置", "配置", "позиция", "位置"},
-            {"focus", "center", "centre", "포커스", "중앙", "가운데", "フォーカス", "中央", "фокус", "焦点"},
-            {"connect", "remote", "device", "cast", "연결", "기기", "원격", "接続", "подключение", "连接"},
-            {"music", "song", "track", "음악", "노래", "곡", "曲", "音楽", "музыка", "音乐"},
-            {"mute", "silence", "volume", "sound", "음소거", "소리", "볼륨", "ミュート", "音量", "звук", "静音"},
-            {"quality", "performance", "battery", "smooth", "품질", "성능", "배터리", "부드럽게", "画質", "品質",
-                    "качество", "性能"},
-            {"debug", "diagnostic", "log", "version", "디버그", "진단", "로그", "버전", "デバッグ", "отладка", "调试"},
-            {"reset", "default", "restore", "초기화", "기본값", "リセット", "сброс", "重置"},
-            {"layout", "editor", "arrange", "레이아웃", "편집", "편집기", "에디터", "レイアウト", "編集", "макет", "布局"},
-    };
+    /** A text, folded and tokenised once. */
+    static final class Doc {
+        final String compact;
+        final String[] words;
+        final Set<String> bigrams = new HashSet<>();
+        final Set<Character> cjkChars = new HashSet<>();
 
-    private static final String[][] FOLDED_CONCEPTS = new String[CONCEPTS.length][];
-
-    static {
-        for (int i = 0; i < CONCEPTS.length; i++) {
-            FOLDED_CONCEPTS[i] = new String[CONCEPTS[i].length];
-            for (int j = 0; j < CONCEPTS[i].length; j++) FOLDED_CONCEPTS[i][j] = fold(CONCEPTS[i][j]);
+        Doc(String raw) {
+            String folded = fold(raw);
+            compact = folded.replace(" ", "");
+            words = tokens(folded);
+            for (String w : words) {
+                if (!isCjk(w.charAt(0))) continue;
+                for (int i = 0; i < w.length(); i++) {
+                    cjkChars.add(w.charAt(i));
+                    if (i + 1 < w.length()) bigrams.add(w.substring(i, i + 2));
+                }
+            }
         }
     }
 
     private final List<Entry> entries;
+    /** Folded members of each concept, by index into {@link #CONCEPT_IDS} order given. */
+    private final List<String[]> concepts = new ArrayList<>();
+    /** Known non-CJK words, for splitting a run typed without spaces. */
+    private final Set<String> vocabulary = new HashSet<>();
+    private int longestWord;
 
-    public SettingsSearch(List<Entry> entries) {
+    /**
+     * @param conceptTerms each concept's words in every language, in any form (they are
+     *                     folded here); order is the concept's identity
+     */
+    public SettingsSearch(List<Entry> entries, List<List<String>> conceptTerms) {
         this.entries = entries == null ? new ArrayList<>() : entries;
+        if (conceptTerms != null) {
+            for (List<String> terms : conceptTerms) {
+                List<String> folded = new ArrayList<>();
+                for (String term : terms) {
+                    String f = fold(term).replace(" ", "");
+                    if (!f.isEmpty()) folded.add(f);
+                }
+                concepts.add(folded.toArray(new String[0]));
+            }
+        }
+        for (Entry entry : this.entries) {
+            entry.concepts = conceptsIn(entry.allDoc);
+            for (String w : entry.allDoc.words) addWord(w);
+        }
+        for (String[] members : concepts) for (String m : members) addWord(m);
     }
+
+    private void addWord(String w) {
+        if (w.length() < 2 || isCjk(w.charAt(0))) return;
+        vocabulary.add(w);
+        longestWord = Math.max(longestWord, w.length());
+    }
+
+    // --- Searching ---
 
     /** Matches, best first, then up to {@code maxRelated} related entries marked as such. */
     public List<Result> search(String query, int maxResults, int maxRelated) {
         List<Result> out = new ArrayList<>();
-        String folded = fold(query).trim();
-        if (folded.isEmpty()) return out;
-        String[] typed = words(folded);
-        if (typed.length == 0) return out;
+        List<String[]> readings = readings(query);
+        if (readings.isEmpty()) return out;
         Set<Integer> queryConcepts = new HashSet<>();
-        for (String word : typed) queryConcepts.addAll(conceptsNamedBy(word));
-        // The whole query as one phrase too ("status bar", "상단 바").
-        queryConcepts.addAll(conceptsNamedBy(folded));
+        for (String[] reading : readings) for (String token : reading) queryConcepts.addAll(conceptsNamedBy(token));
 
         List<Result> matches = new ArrayList<>();
         for (Entry entry : entries) {
-            float score = score(entry, folded, typed);
-            if (score > 0f) matches.add(new Result(entry, score, false));
+            float best = 0f;
+            for (String[] reading : readings) best = Math.max(best, score(entry, reading));
+            if (best > 0f) matches.add(new Result(entry, best, false));
         }
         Collections.sort(matches, (a, b) -> Float.compare(b.score, a.score));
-        for (int i = 0; i < matches.size() && out.size() < maxResults; i++) out.add(matches.get(i));
+        // Keep what is close to the best; a long tail of weak hits reads as noise.
+        float cut = matches.isEmpty() ? 0f : matches.get(0).score * 0.45f;
+        for (int i = 0; i < matches.size() && out.size() < maxResults; i++) {
+            if (matches.get(i).score >= cut) out.add(matches.get(i));
+        }
 
         if (maxRelated > 0 && !out.isEmpty()) {
             Set<Entry> shown = new HashSet<>();
             for (Result r : out) shown.add(r.entry);
-            Set<String> groups = new LinkedHashSet<>();
-            groups.add(out.get(0).entry.group);
+            String group = out.get(0).entry.group;
             Set<Integer> shared = new HashSet<>(queryConcepts);
             shared.addAll(out.get(0).entry.concepts);
             List<Result> related = new ArrayList<>();
             for (Entry entry : entries) {
                 if (shown.contains(entry)) continue;
-                float closeness = 0f;
-                if (groups.contains(entry.group)) closeness += 0.3f;
+                float closeness = group.equals(entry.group) ? 0.3f : 0f;
                 for (int c : entry.concepts) if (shared.contains(c)) closeness += 0.25f;
                 if (closeness >= 0.5f) related.add(new Result(entry, closeness, true));
             }
@@ -194,57 +199,123 @@ public final class SettingsSearch {
         return out;
     }
 
-    static float score(Entry entry, String phrase, String[] typed) {
-        float total = 0f;
-        int missing = 0;
-        for (String word : typed) {
-            float best = Math.max(wordScore(word, entry.foldedTitle, entry.titleWords) * 1.25f,
-                    wordScore(word, entry.foldedAll, entry.allWords));
-            for (int c : conceptsNamedBy(word)) {
-                if (entry.concepts.contains(c)) best = Math.max(best, 0.62f);
+    /**
+     * The ways to read what was typed: its words as typed; runs typed without spaces split into
+     * known words; and, for Latin letters only, the same keys read on a Korean keyboard.
+     */
+    List<String[]> readings(String query) {
+        List<String[]> out = new ArrayList<>();
+        String folded = fold(query);
+        String[] typed = tokens(folded);
+        if (typed.length == 0) return out;
+        out.add(typed);
+        String[] split = splitCompounds(typed);
+        if (split != null) out.add(split);
+        String raw = query == null ? "" : query.trim();
+        if (!raw.isEmpty() && raw.matches("[A-Za-z ]+")) {
+            String hangul = fromKoreanKeyboard(raw);
+            String[] keyed = tokens(fold(hangul));
+            if (keyed.length > 0) {
+                out.add(keyed);
+                String[] keyedSplit = splitCompounds(keyed);
+                if (keyedSplit != null) out.add(keyedSplit);
             }
-            if (best <= 0f) missing++;
-            total += best;
         }
-        if (missing > (typed.length >= 3 ? 1 : 0)) return 0f;
-        float score = total / typed.length;
-        // The typed phrase whole, in the title, is the strongest signal of all.
-        if (typed.length > 1 && compact(entry.foldedTitle).contains(compact(phrase))) score += 0.5f;
-        for (int c : conceptsNamedBy(phrase)) if (entry.concepts.contains(c)) score = Math.max(score, 0.62f);
+        return out;
+    }
+
+    float score(Entry entry, String[] tokens) {
+        float total = 0f;
+        int matched = 0;
+        Set<Integer> named = new HashSet<>();
+        for (String token : tokens) {
+            float s = Math.max(tokenScore(token, entry.titleDoc, entry) * 1.2f,
+                    tokenScore(token, entry.allDoc, null));
+            Set<Integer> c = conceptsNamedBy(token);
+            named.addAll(c);
+            for (int id : c) if (entry.concepts.contains(id)) s = Math.max(s, 0.66f);
+            if (s > 0f) matched++;
+            total += s;
+        }
+        int n = tokens.length;
+        // Most of what was typed must be found: all of one or two words, half of more.
+        int needed = n <= 2 ? n : (n + 1) / 2;
+        if (matched < needed) return 0f;
+        float score = total / n;
+        if (matched == n) score += 0.1f;
+        if (named.size() >= 2 && entry.concepts.containsAll(named)) score += 0.2f;
+        if (n > 1) {
+            StringBuilder phrase = new StringBuilder();
+            for (String t : tokens) phrase.append(t);
+            if (entry.titleDoc.compact.contains(phrase)) score += 0.4f;
+        }
         return score;
     }
 
-    /** How well one typed word matches a text: 1 at a word start, less inside, less for typos. */
-    static float wordScore(String word, String text, String[] textWords) {
-        if (word.isEmpty()) return 0f;
-        for (String w : textWords) {
-            if (w.startsWith(word)) return 1f;
+    /** How well one token matches a text; 0 when it does not. */
+    static float tokenScore(String token, Doc doc, Entry initialsOf) {
+        if (token.isEmpty()) return 0f;
+        if (isCjk(token.charAt(0))) return cjkScore(token, doc);
+        if (initialsOf != null && token.length() >= 2 && allInitials(token)) {
+            return initialsOf.initials.contains(token) ? 0.9f : 0f;
         }
-        if (compact(text).contains(word)) return word.length() >= 2 ? 0.8f : 0f;
-        // One-letter words match only as a word start above.
-        if (word.length() < 3) return 0f;
-        int allowed = word.length() >= 9 ? 2 : 1;
         float best = 0f;
-        for (String w : textWords) {
-            if (w.length() < 2) continue;
-            int d = distance(word, w);
-            // A word still being typed: compare with the start of a longer word.
-            if (w.length() > word.length()) d = Math.min(d, distance(word, w.substring(0, word.length())));
-            if (d <= allowed) best = Math.max(best, 0.72f - 0.12f * d);
+        for (String w : doc.words) {
+            if (isCjk(w.charAt(0))) continue;
+            if (w.startsWith(token)) return 1f;
+            // The typed word carries an ending the known one lacks: a particle, plural, case.
+            if (w.length() >= 4 && token.startsWith(w) && token.length() - w.length() <= 5) {
+                best = Math.max(best, 0.88f);
+            }
+            // Same stem, different ending: a long shared start.
+            int common = commonPrefix(w, token);
+            if (common >= 5 && common >= 0.7f * Math.min(w.length(), token.length())) {
+                best = Math.max(best, 0.8f);
+            }
+        }
+        if (best < 0.78f && token.length() >= 3 && doc.compact.contains(token)) best = 0.78f;
+        if (best > 0f || token.length() < 4) return best;
+        int allowed = token.length() >= 9 ? 2 : 1;
+        for (String w : doc.words) {
+            if (w.length() < 3 || isCjk(w.charAt(0))) continue;
+            int d = distance(token, w);
+            // A word still being typed: compare with the start of a longer one.
+            if (w.length() > token.length()) d = Math.min(d, distance(token, w.substring(0, token.length())));
+            if (d <= allowed) best = Math.max(best, 0.7f - 0.12f * d);
         }
         return best;
     }
 
-    /** The concepts a typed word (or phrase) names: equal to, or the start of, a member. */
-    static Set<Integer> conceptsNamedBy(String word) {
+    /** Overlapping character pairs found, as a share; single characters by presence. */
+    private static float cjkScore(String token, Doc doc) {
+        if (token.length() == 1) return doc.cjkChars.contains(token.charAt(0)) ? 0.6f : 0f;
+        int found = 0;
+        int total = token.length() - 1;
+        for (int i = 0; i < total; i++) if (doc.bigrams.contains(token.substring(i, i + 2))) found++;
+        float share = found / (float) total;
+        if (share >= 0.999f && doc.compact.contains(token)) return 1f;
+        return share >= 0.5f ? 0.5f + 0.4f * share : 0f;
+    }
+
+    /** The concepts a token names: equal to, the start of, extending, or one typo off a member. */
+    Set<Integer> conceptsNamedBy(String token) {
         Set<Integer> out = new HashSet<>();
-        if (word.length() < 2) return out;
-        String w = compact(word);
-        for (int i = 0; i < FOLDED_CONCEPTS.length; i++) {
-            for (String member : FOLDED_CONCEPTS[i]) {
-                String m = compact(member);
-                if (m.equals(w) || (w.length() >= 3 && m.startsWith(w))
-                        || (w.length() >= 5 && distance(w, m) <= 1)) {
+        if (token.length() < 2) return out;
+        boolean cjk = isCjk(token.charAt(0));
+        for (int i = 0; i < concepts.size(); i++) {
+            for (String m : concepts.get(i)) {
+                boolean hit;
+                if (cjk) {
+                    hit = isCjk(m.charAt(0)) && m.length() >= 2
+                            && (token.contains(m) || m.startsWith(token));
+                } else {
+                    hit = m.equals(token)
+                            || (token.length() >= 3 && m.startsWith(token))
+                            || (m.length() >= 4 && token.startsWith(m) && token.length() - m.length() <= 5)
+                            || (token.length() >= 5 && Math.abs(m.length() - token.length()) <= 1
+                                && distance(token, m) <= 1);
+                }
+                if (hit) {
                     out.add(i);
                     break;
                 }
@@ -253,22 +324,16 @@ public final class SettingsSearch {
         return out;
     }
 
-    static Set<Integer> conceptsIn(String folded, String[] words) {
+    private Set<Integer> conceptsIn(Doc doc) {
         Set<Integer> out = new HashSet<>();
-        String flat = compact(folded);
-        for (int i = 0; i < FOLDED_CONCEPTS.length; i++) {
-            for (String member : FOLDED_CONCEPTS[i]) {
-                String m = compact(member);
-                if (m.isEmpty()) continue;
-                // Short Latin members must be whole words ("ad" is not in "shadow"); anything
-                // else, and all Hangul/CJK, may sit inside a longer run.
-                boolean latinShort = m.length() <= 3 && m.chars().allMatch(ch -> ch < 0x80);
-                boolean found = false;
-                if (latinShort) {
-                    for (String w : words) if (w.equals(m)) { found = true; break; }
-                } else {
-                    found = flat.contains(m);
-                }
+        Set<String> words = new HashSet<>();
+        Collections.addAll(words, doc.words);
+        for (int i = 0; i < concepts.size(); i++) {
+            for (String m : concepts.get(i)) {
+                // A short Latin member must be a whole word ("ad" is not in "shadow"); longer
+                // ones, and every Hangul/CJK one, may sit inside a longer run.
+                boolean shortLatin = m.length() <= 3 && m.chars().allMatch(ch -> ch < 0x80);
+                boolean found = shortLatin ? words.contains(m) : doc.compact.contains(m);
                 if (found) {
                     out.add(i);
                     break;
@@ -278,39 +343,176 @@ public final class SettingsSearch {
         return out;
     }
 
-    /** Lower case, accents stripped, Hangul in jamo, punctuation to spaces. */
+    /**
+     * Splits runs typed without spaces into known words when that explains most of the run
+     * ("이중탭하트" -> 이중탭, 하트). Null when nothing splits.
+     */
+    String[] splitCompounds(String[] tokens) {
+        List<String> out = new ArrayList<>();
+        boolean changed = false;
+        for (String token : tokens) {
+            List<String> pieces = token.length() >= 4 && !isCjk(token.charAt(0)) ? segment(token) : null;
+            if (pieces != null && pieces.size() >= 2) {
+                out.addAll(pieces);
+                changed = true;
+            } else {
+                out.add(token);
+            }
+        }
+        return changed ? out.toArray(new String[0]) : null;
+    }
+
+    /** Fewest unknown letters, then fewest pieces; null unless 70% is known words. */
+    private List<String> segment(String s) {
+        int n = s.length();
+        int[] unknown = new int[n + 1];
+        int[] pieces = new int[n + 1];
+        int[] from = new int[n + 1];
+        boolean[] known = new boolean[n + 1];
+        java.util.Arrays.fill(unknown, Integer.MAX_VALUE / 2);
+        unknown[0] = 0;
+        for (int i = 1; i <= n; i++) {
+            // One unknown letter.
+            if (unknown[i - 1] + 1 < unknown[i]
+                    || (unknown[i - 1] + 1 == unknown[i] && pieces[i - 1] + 1 < pieces[i])) {
+                unknown[i] = unknown[i - 1] + 1;
+                pieces[i] = pieces[i - 1] + 1;
+                from[i] = i - 1;
+                known[i] = false;
+            }
+            for (int j = Math.max(0, i - longestWord); j <= i - 2; j++) {
+                if (!vocabulary.contains(s.substring(j, i))) continue;
+                if (unknown[j] < unknown[i] || (unknown[j] == unknown[i] && pieces[j] + 1 < pieces[i])) {
+                    unknown[i] = unknown[j];
+                    pieces[i] = pieces[j] + 1;
+                    from[i] = j;
+                    known[i] = true;
+                }
+            }
+        }
+        if (unknown[n] > n * 0.3f) return null;
+        List<String> out = new ArrayList<>();
+        StringBuilder stray = new StringBuilder();
+        for (int i = n; i > 0; i = from[i]) {
+            if (known[i]) {
+                if (stray.length() >= 2) out.add(stray.reverse().toString());
+                stray.setLength(0);
+                out.add(s.substring(from[i], i));
+            } else {
+                stray.append(s.charAt(i - 1));
+            }
+        }
+        if (stray.length() >= 2) out.add(stray.reverse().toString());
+        Collections.reverse(out);
+        return out;
+    }
+
+    // --- Text ---
+
+    private static final String LEAD = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
+    private static final String[] VOWEL = {"ㅏ", "ㅐ", "ㅑ", "ㅒ", "ㅓ", "ㅔ", "ㅕ", "ㅖ", "ㅗ", "ㅗㅏ", "ㅗㅐ",
+            "ㅗㅣ", "ㅛ", "ㅜ", "ㅜㅓ", "ㅜㅔ", "ㅜㅣ", "ㅠ", "ㅡ", "ㅡㅣ", "ㅣ"};
+    private static final String[] TAIL = {"", "ㄱ", "ㄲ", "ㄱㅅ", "ㄴ", "ㄴㅈ", "ㄴㅎ", "ㄷ", "ㄹ", "ㄹㄱ", "ㄹㅁ",
+            "ㄹㅂ", "ㄹㅅ", "ㄹㅌ", "ㄹㅍ", "ㄹㅎ", "ㅁ", "ㅂ", "ㅂㅅ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"};
+    /** Compound letters typed on their own, taken apart the same way. */
+    private static final Map<Character, String> COMPOUND = new HashMap<>();
+
+    static {
+        String[][] pairs = {{"ㅘ", "ㅗㅏ"}, {"ㅙ", "ㅗㅐ"}, {"ㅚ", "ㅗㅣ"}, {"ㅝ", "ㅜㅓ"}, {"ㅞ", "ㅜㅔ"}, {"ㅟ", "ㅜㅣ"},
+                {"ㅢ", "ㅡㅣ"}, {"ㄳ", "ㄱㅅ"}, {"ㄵ", "ㄴㅈ"}, {"ㄶ", "ㄴㅎ"}, {"ㄺ", "ㄹㄱ"}, {"ㄻ", "ㄹㅁ"}, {"ㄼ", "ㄹㅂ"},
+                {"ㄽ", "ㄹㅅ"}, {"ㄾ", "ㄹㅌ"}, {"ㄿ", "ㄹㅍ"}, {"ㅀ", "ㄹㅎ"}, {"ㅄ", "ㅂㅅ"}};
+        for (String[] p : pairs) COMPOUND.put(p[0].charAt(0), p[1]);
+    }
+
+    /** Lower case, accents stripped, Hangul as its letters, punctuation to spaces. */
     public static String fold(String value) {
         if (value == null) return "";
-        String lower = value.toLowerCase(Locale.ROOT);
+        String lower = Normalizer.normalize(value.toLowerCase(Locale.ROOT), Normalizer.Form.NFC);
         StringBuilder out = new StringBuilder(lower.length() * 2);
         for (int i = 0; i < lower.length(); i++) {
             char c = lower.charAt(i);
             if (c >= 0xAC00 && c <= 0xD7A3) {
-                // Hangul syllable -> leading consonant, vowel, optional trailing consonant.
                 int s = c - 0xAC00;
-                out.append((char) (0x1100 + s / 588));
-                out.append((char) (0x1161 + (s % 588) / 28));
-                int tail = s % 28;
-                if (tail != 0) out.append((char) (0x11A7 + tail));
+                out.append(LEAD.charAt(s / 588)).append(VOWEL[(s % 588) / 28]).append(TAIL[s % 28]);
+            } else if (COMPOUND.containsKey(c)) {
+                out.append(COMPOUND.get(c));
             } else {
                 out.append(c);
             }
         }
-        String decomposed = Normalizer.normalize(out, Normalizer.Form.NFD).replaceAll("\\p{M}+", "");
-        // Hangul jamo are letters, keep them; everything not a letter or digit becomes a space.
-        return decomposed.replaceAll("[^\\p{L}\\p{N}\\u1100-\\u11FF]+", " ");
+        // Accents off Latin/Cyrillic letters; Hangul is already letters, CJK has none.
+        String stripped = Normalizer.normalize(out, Normalizer.Form.NFD).replaceAll("\\p{M}+", "");
+        return stripped.replaceAll("[^\\p{L}\\p{N}]+", " ").trim();
     }
 
-    private static String[] words(String folded) {
-        String trimmed = folded.trim();
-        return trimmed.isEmpty() ? new String[0] : trimmed.split(" +");
+    /** Words, also split where the script changes ("lrclib가사" -> lrclib, 가사). */
+    static String[] tokens(String folded) {
+        List<String> out = new ArrayList<>();
+        for (String word : folded.split(" +")) {
+            if (word.isEmpty()) continue;
+            int start = 0;
+            for (int i = 1; i <= word.length(); i++) {
+                if (i == word.length() || script(word.charAt(i)) != script(word.charAt(i - 1))) {
+                    out.add(word.substring(start, i));
+                    start = i;
+                }
+            }
+        }
+        return out.toArray(new String[0]);
     }
 
-    private static String compact(String folded) {
-        return folded.replace(" ", "");
+    private static int script(char c) {
+        if (c >= 0x3131 && c <= 0x318E) return 1; // Hangul letters
+        if (isCjk(c)) return 2;
+        return 0;
     }
 
-    /** Damerau-Levenshtein (optimal string alignment) distance. */
+    static boolean isCjk(char c) {
+        return (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF)
+                || (c >= 0x3040 && c <= 0x30FF) || (c >= 0x31F0 && c <= 0x31FF) || (c >= 0xF900 && c <= 0xFAFF);
+    }
+
+    private static boolean allInitials(String token) {
+        for (int i = 0; i < token.length(); i++) {
+            char c = token.charAt(i);
+            if (c < 0x3131 || c > 0x314E) return false;
+        }
+        return true;
+    }
+
+    /** The leading consonant of each Hangul syllable ("가사 흐림" -> ㄱㅅㅎㄹ). */
+    static String initialsOf(String raw) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c >= 0xAC00 && c <= 0xD7A3) out.append(LEAD.charAt((c - 0xAC00) / 588));
+        }
+        return out.toString();
+    }
+
+    private static final String KEYS = "qwertyuiopasdfghjklzxcvbnmQWERTOP";
+    private static final String JAMO = "ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔㅁㄴㅇㄹㅎㅗㅓㅏㅣㅋㅌㅊㅍㅠㅜㅡㅃㅉㄸㄲㅆㅒㅖ";
+
+    /** The letters those keys type on a standard (2-set) Korean keyboard. */
+    static String fromKoreanKeyboard(String keys) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < keys.length(); i++) {
+            char c = keys.charAt(i);
+            int at = KEYS.indexOf(c);
+            if (at < 0) at = KEYS.indexOf(Character.toLowerCase(c));
+            out.append(at >= 0 ? JAMO.charAt(at) : c);
+        }
+        return out.toString();
+    }
+
+    private static int commonPrefix(String a, String b) {
+        int n = Math.min(a.length(), b.length());
+        int i = 0;
+        while (i < n && a.charAt(i) == b.charAt(i)) i++;
+        return i;
+    }
+
+    /** Damerau-Levenshtein (optimal string alignment) distance; 3 means "far". */
     static int distance(String a, String b) {
         int n = a.length();
         int m = b.length();
@@ -329,5 +531,23 @@ public final class SettingsSearch {
             }
         }
         return d[n][m];
+    }
+
+    /** Splits a comma-separated {@code search_terms_*} string. */
+    public static List<String> splitTerms(String value) {
+        List<String> out = new ArrayList<>();
+        if (value == null) return out;
+        for (String part : value.split("[,，、;]")) {
+            String t = part.trim();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out;
+    }
+
+    /** Merges several comma-separated term strings (one per language) into one list. */
+    public static List<String> mergeTerms(List<String> perLanguage) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String value : perLanguage) out.addAll(splitTerms(value));
+        return new ArrayList<>(out);
     }
 }
