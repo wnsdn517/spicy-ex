@@ -215,6 +215,60 @@ public final class SourceOrderEditor {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
     }
 
+    /**
+     * The Lyrics sources tile's second line: how the source is picked as a small pill, then the
+     * providers that are on, in their order - "[Smart]  Apple Music › Musixmatch › LRCLIB +2".
+     */
+    public View tileLine() {
+        final PanelStyle style = host.style();
+        final SettingsUiStrings strings = host.strings();
+        final android.content.Context context = style.context();
+        boolean byOrder = MODE_USER_ORDER.equals(rankingValue());
+
+        LinearLayout line = new LinearLayout(context);
+        line.setOrientation(LinearLayout.HORIZONTAL);
+        line.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+        TextView pill = style.text(byOrder
+                        ? strings.get("settings_source_rank_order", "My order")
+                        : strings.get("settings_source_rank_smart", "Smart"),
+                11, PanelStyle.COL_ACCENT, true);
+        pill.setSingleLine(true);
+        pill.setPadding(style.dp(7), style.dp(1), style.dp(7), style.dp(2));
+        android.graphics.drawable.GradientDrawable pillBg = new android.graphics.drawable.GradientDrawable();
+        pillBg.setCornerRadius(style.dp(8));
+        pillBg.setColor(0x261ED760);
+        pill.setBackground(pillBg);
+        LinearLayout.LayoutParams pillLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pillLp.rightMargin = style.dp(8);
+        line.addView(pill, pillLp);
+
+        ArrayList<String> names = new ArrayList<>();
+        for (Source source : LyricsSourcePreferences.sourceOrder(context)) {
+            if (source == Source.SPICY) continue;
+            if (LyricsSourcePreferences.sourceEnabled(context, source)) names.add(sourceLabel(source));
+        }
+        StringBuilder text = new StringBuilder();
+        if (names.isEmpty()) {
+            text.append(strings.get("settings_source_none_on", "No sources on"));
+        } else {
+            // Smart has no fixed order, so its providers read as a set rather than a chain.
+            String join = byOrder ? "  \u203a  " : ", ";
+            int shown = Math.min(3, names.size());
+            for (int i = 0; i < shown; i++) {
+                if (i > 0) text.append(join);
+                text.append(names.get(i));
+            }
+            if (names.size() > shown) text.append("  +").append(names.size() - shown);
+        }
+        TextView list = style.text(text.toString(), 13, PanelStyle.COL_SUMMARY, false);
+        list.setSingleLine(true);
+        list.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        line.addView(list, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return line;
+    }
+
     private TextView caption(String label) {
         PanelStyle style = host.style();
         TextView view = style.text(label, 13, PanelStyle.COL_SECTION, true);

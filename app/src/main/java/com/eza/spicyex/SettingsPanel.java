@@ -740,7 +740,12 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         texts.setOrientation(LinearLayout.VERTICAL);
         texts.addView(style.text(uiStrings.section(section), 16, PanelStyle.COL_TITLE, true));
         String summary = tileSummary(section);
-        if (!summary.isEmpty()) {
+        if (section == Settings.LYRICS_SOURCES) {
+            LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            subLp.topMargin = style.dp(4);
+            texts.addView(sources.tileLine(), subLp);
+        } else if (!summary.isEmpty()) {
             TextView sub = style.text(summary, 13, PanelStyle.COL_SUMMARY, false);
             sub.setSingleLine(true);
             sub.setEllipsize(android.text.TextUtils.TruncateAt.END);

@@ -63,6 +63,7 @@
     <string name="settings_source_order_hint"></string>
     <string name="settings_source_drag">ドラッグして並び替え</string>
     <string name="settings_source_rank_smart">自動</string>
+    <string name="settings_source_none_on">有効なソースなし</string>
     <string name="settings_source_rank_order">自分の順番</string>
     <string name="settings_source_list_title">ソース</string>
     <string name="settings_source_count" formatted="false">%2$d 件中 %1$d 件オン</string>

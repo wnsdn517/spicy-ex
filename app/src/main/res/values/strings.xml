@@ -80,6 +80,7 @@
     <string name="settings_source_order_hint"></string>
     <string name="settings_source_drag">Drag to reorder</string>
     <string name="settings_source_rank_smart">Smart</string>
+    <string name="settings_source_none_on">No sources on</string>
     <string name="settings_source_rank_order">My order</string>
     <string name="settings_source_list_title">Sources</string>
     <string name="settings_source_count" formatted="false">%1$d of %2$d on</string>
