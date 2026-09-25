@@ -259,6 +259,7 @@ final class LyricsShareCardController {
         artistImage = cachedArtist(track);
         lyricsBackground = null;
         fitCache.clear();
+        codePlayed = false;
         overlay = buildPreview();
         // Above the lyric screen's own chrome, which is raised with elevation and otherwise draws
         // through the sheet regardless of child order.
@@ -290,20 +291,16 @@ final class LyricsShareCardController {
                 if (overlay == teaseHost) teaseNextLine();
             }, row0Delay());
         }
-        View row = sourceRow;
+        // The pressed line flies in once the first card is on screen (see swapCard): leaving
+        // straight away, its words used to land in an empty frame while the card still rendered.
+        pendingFlyRow = sourceRow;
         sourceRow = null;
-        if (row != null && document != null && row.isAttachedToWindow()) {
-            View host = overlay;
-            host.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
-                @Override
-                public boolean onPreDraw() {
-                    host.getViewTreeObserver().removeOnPreDrawListener(this);
-                    if (overlay == host) flyQuoteIn(row);
-                    return true;
-                }
-            });
-        }
     }
+
+    /** The pressed lyric row, waiting for the first card to fly its words onto. */
+    private View pendingFlyRow;
+    /** The Spotify Code builds itself once per opening; later cards show it whole. */
+    private boolean codePlayed;
 
     /**
      * The pressed lyric lifts out of the list and glides into the card: a snapshot of the row
@@ -413,7 +410,7 @@ final class LyricsShareCardController {
         quoteFlying = true;
         if (currentTextLayer != null) currentTextLayer.setAlpha(0f);
         cardHost.setAlpha(0f);
-        cardHost.animate().alpha(1f).setStartDelay(160).setDuration(380)
+        cardHost.animate().alpha(1f).setStartDelay(60).setDuration(320)
                 .setInterpolator(new PathInterpolator(0.3f, 0f, 0.2f, 1f)).start();
 
         int n = order;
@@ -644,7 +641,7 @@ final class LyricsShareCardController {
             ghost.setElevation(dp(2));
 
             cardHost.setAlpha(0f);
-            cardHost.animate().alpha(1f).setStartDelay(320).setDuration(360)
+            cardHost.animate().alpha(1f).setStartDelay(120).setDuration(320)
                     .setInterpolator(new PathInterpolator(0.3f, 0f, 0.2f, 1f)).start();
             ghost.animate().x(targetX).y(targetY).scaleX(ghostScale).scaleY(ghostScale)
                     .setDuration(560).setInterpolator(new PathInterpolator(0.3f, 0f, 0.1f, 1f))
@@ -763,6 +760,7 @@ final class LyricsShareCardController {
         peekNext = null;
         currentTextLayer = null;
         currentCodeArt = null;
+        pendingFlyRow = null;
         picker = null;
         pickRows.clear();
         pieceViews = new java.util.HashMap<>();
@@ -855,6 +853,8 @@ final class LyricsShareCardController {
         carousel.addView(peekPrev, new FrameLayout.LayoutParams(cardWidthPx, cardHeightPx, Gravity.CENTER));
         carousel.addView(peekNext, new FrameLayout.LayoutParams(cardWidthPx, cardHeightPx, Gravity.CENTER));
         cardHost = new FrameLayout(activity);
+        // Hidden until the first card is in it: an empty host still casts its shadow frame.
+        cardHost.setAlpha(0f);
         cardHost.setClipChildren(true);
         cardHost.setElevation(dp(18));
         cardHost.setOutlineProvider(new android.view.ViewOutlineProvider() {
@@ -2460,18 +2460,18 @@ final class LyricsShareCardController {
         incoming.addView(baseView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         FrameLayout outgoing = currentCard;
+        CodeView codeView = null;
         if (codeArt != null) {
             // The code builds itself on the card: the logo pops in, then the bars rise and
             // bounce like a playing waveform before settling into the scannable code.
             float scale = cardHost.getWidth() / (float) W;
             RectF frame = slot.frame(codeArt.ink);
-            CodeView codeView = new CodeView(activity, codeArt);
+            codeView = new CodeView(activity, codeArt);
             FrameLayout.LayoutParams codeLp = new FrameLayout.LayoutParams(
                     Math.max(1, Math.round(frame.width() * scale)), Math.max(1, Math.round(frame.height() * scale)));
             codeLp.leftMargin = Math.round(frame.left * scale);
             codeLp.topMargin = Math.round(frame.top * scale);
             incoming.addView(codeView, codeLp);
-            codeView.play(outgoing == null ? (quoteFlying ? 900L : 480L) : 240L);
         }
         currentCodeArt = codeArt;
         incoming.addView(textLayer, new FrameLayout.LayoutParams(
@@ -2513,6 +2513,18 @@ final class LyricsShareCardController {
                     .withEndAction(() -> {
                         if (cardHost != null) cardHost.removeView(outgoing);
                     }).start();
+        } else {
+            // The first card: the host shows now that it has something in it, and the pressed
+            // line's words leave the list to land on it.
+            cardHost.animate().alpha(1f).setDuration(260).start();
+            View row = pendingFlyRow;
+            pendingFlyRow = null;
+            if (row != null && document != null && row.isAttachedToWindow()) flyQuoteIn(row);
+        }
+        if (codeView != null && !codePlayed) {
+            // Once, on the first card that has the code, after the words have landed.
+            codePlayed = true;
+            codeView.play(outgoing == null ? (quoteFlying ? 1150L : 650L) : 320L);
         }
     }
 
@@ -3623,16 +3635,17 @@ final class LyricsShareCardController {
      * before easing into its own height - and the scannable code is left exactly as shared.
      */
     static final class CodeView extends View {
-        private static final long LOGO_MS = 460L;
-        private static final long BARS_FROM = 240L;
-        private static final long BAR_STAGGER = 24L;
-        private static final long BAR_MS = 900L;
+        // Unhurried: the logo takes its time, the bars follow one by one and sway for a while.
+        private static final long LOGO_MS = 820L;
+        private static final long BARS_FROM = 560L;
+        private static final long BAR_STAGGER = 48L;
+        private static final long BAR_MS = 1600L;
         private final CodeArt art;
         private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
         private final Paint barPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
         private final android.view.animation.OvershootInterpolator pop =
-                new android.view.animation.OvershootInterpolator(2.4f);
+                new android.view.animation.OvershootInterpolator(1.3f);
         private android.animation.ValueAnimator animator;
         /** Time into the animation; past the end (the resting state) until played. */
         private float elapsed = Float.MAX_VALUE;
@@ -3722,17 +3735,17 @@ final class LyricsShareCardController {
                 float left = art.barLeft[i] * sx;
                 float right = art.barRight[i] * sx;
                 float width = right - left;
-                float grow = smooth(0f, 150f, u);
-                float settle = smooth(BAR_MS * 0.42f, BAR_MS, u);
-                float wave = Math.abs((float) Math.sin(u * 0.0105f + i * 0.9f)
-                        * (float) Math.cos(u * 0.0047f - i * 0.37f));
+                float grow = smooth(0f, 360f, u);
+                float settle = smooth(BAR_MS * 0.5f, BAR_MS, u);
+                float wave = Math.abs((float) Math.sin(u * 0.0058f + i * 0.9f)
+                        * (float) Math.cos(u * 0.0026f - i * 0.37f));
                 float level = loud * (0.22f + 0.78f * wave);
                 float top = art.barTop[i] * sy;
                 float bottom = art.barBottom[i] * sy;
                 float height = Math.max(width, (level + (bottom - top - level) * settle) * grow);
                 float centre = mid + ((top + bottom) / 2f - mid) * settle;
                 rect.set(left, centre - height / 2f, right, centre + height / 2f);
-                barPaint.setAlpha(Math.round(baseAlpha * Math.min(1f, u / 90f)));
+                barPaint.setAlpha(Math.round(baseAlpha * Math.min(1f, u / 220f)));
                 canvas.drawRoundRect(rect, width / 2f, width / 2f, barPaint);
             }
         }
