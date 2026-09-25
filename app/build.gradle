@@ -198,6 +198,10 @@ dependencies {
 tasks.register("packageLanguageModelPack", Zip) {
     archiveFileName = "spicyex-language-models-v1.zip"
     destinationDirectory = layout.buildDirectory.dir("language-models")
+    // Byte-identical for the same models, so build-install.sh can tell an unchanged pack by its
+    // hash (and skip copying it to the device again) even after a clean build.
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
     from("language-models")
     from(configurations.debugRuntimeClasspath.collect { zipTree(it) }) {
         include "com/atilika/kuromoji/unidic/*.bin"
