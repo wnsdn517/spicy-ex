@@ -74,44 +74,31 @@ final class NativeLyricsUtils {
 
     /**
      * Top clearance for the lyrics screen's chrome, in the content area's own coordinates: the
-     * status bar's height plus the chrome gap, plus {@link #hiddenBarShift}.
+     * chrome gap below where the status bar is, pinned to the same place on screen whether or not
+     * the bar is showing.
      *
-     * <p>It no longer drops the bar's height while the bar is hidden: that, together with hiding
-     * letting the window's content start higher up the screen, made the buttons, artwork and
-     * lyrics jump up whenever "hide status bar" was on.
+     * <p>Hiding the bar used to drop its height here, and hiding also lets the window's content
+     * start at the very top of the screen, so buttons, artwork and lyrics jumped up. Measuring
+     * where the content area actually starts ({@link #contentScreenTop}) and clearing the bar from
+     * there puts everything at the same screen position in both states, never below it.
      */
     static int topSystemPadding(Context context) {
+        return statusBarClearance(context) + dp(28);
+    }
+
+    /** How much of the status bar's height overlaps the content area: none when it starts below. */
+    static int statusBarClearance(Context context) {
         int status = 0;
         try {
             int resId = context.getResources().getIdentifier("status_bar_height", "dimen", "android");
             if (resId > 0) status = context.getResources().getDimensionPixelSize(resId);
         } catch (Throwable ignored) {
         }
-        return status + dp(28) + hiddenBarShift();
+        return Math.max(0, status - contentScreenTop);
     }
 
-    /** Where the activity's content area starts on screen now, kept by the lyrics shell. */
+    /** Where the activity's content area starts on screen, kept by the lyrics shell. */
     static volatile int contentScreenTop;
-    /** Where it started the last time the status bar was showing; -1 until seen. */
-    static volatile int shownContentScreenTop = -1;
-
-    /**
-     * How far the content area has moved up compared with the status bar showing - what has to
-     * be added back so everything stays where it was. Zero while the bar shows. Before the bar
-     * has ever been seen showing, assume the content started right below it (Android 11+ lays
-     * a window that fits system windows out under the bar).
-     */
-    static int hiddenBarShift() {
-        int shown = shownContentScreenTop;
-        if (shown < 0) {
-            if (android.os.Build.VERSION.SDK_INT < 30) return 0;
-            Activity activity = References.currentActivity();
-            if (activity == null) return 0;
-            int resId = activity.getResources().getIdentifier("status_bar_height", "dimen", "android");
-            shown = resId > 0 ? activity.getResources().getDimensionPixelSize(resId) : 0;
-        }
-        return Math.max(0, shown - contentScreenTop);
-    }
 
     static int dp(int value) {
         Activity activity = References.currentActivity();

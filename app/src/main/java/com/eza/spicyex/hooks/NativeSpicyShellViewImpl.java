@@ -672,7 +672,6 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         if (content == null || !content.isAttachedToWindow()) return;
         content.getLocationOnScreen(contentLocation);
         int top = Math.max(0, contentLocation[1]);
-        if (!statusBarHidden) NativeLyricsUtils.shownContentScreenTop = top;
         if (top == NativeLyricsUtils.contentScreenTop) return;
         NativeLyricsUtils.contentScreenTop = top;
         // Posted: this runs inside a layout pass.
@@ -685,13 +684,13 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             chromeHeader.setPadding(chromeHeader.getPaddingLeft(), topSystemPadding(activity),
                     chromeHeader.getPaddingRight(), chromeHeader.getPaddingBottom());
         }
-        lyricsTopInsetPx = lyricsBaseTopInsetPx + NativeLyricsUtils.hiddenBarShift();
+        lyricsTopInsetPx = Math.max(NativeLyricsUtils.statusBarClearance(activity), cutoutTopPx);
         applyLyricsScrollPadding();
         if (trackInfoController != null) trackInfoController.onPreferenceChanged();
     }
 
-    /** The lyrics' top inset as the bar-showing layout has it; hiddenBarShift is added on top. */
-    private int lyricsBaseTopInsetPx;
+    /** A display cutout reaching lower than the status bar, when there is one. */
+    private int cutoutTopPx;
 
     private void hideStatusBar() {
         android.view.Window window = activity == null ? null : activity.getWindow();
@@ -930,8 +929,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         showTranslation = config.get(Settings.NATIVE_SPICY_TRANSLATION);
         // Seed with a status-bar-height estimate; the WindowInsets listener refines it with the
         // real safe-area top (status bar + display cutout) once insets dispatch on attach.
-        lyricsTopInsetPx = topSystemPadding(activity);
-        lyricsBaseTopInsetPx = lyricsTopInsetPx - NativeLyricsUtils.hiddenBarShift();
+        lyricsTopInsetPx = NativeLyricsUtils.statusBarClearance(activity);
         lyricsSideInsetPx = sideSystemPadding(activity);
 
         setBackground(ambientController.pageBackground());
@@ -1425,13 +1423,14 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // Refine the lyric top/side insets from real window insets (status bar + cutout) once
         // they dispatch on attach. Returned unconsumed so nothing else is starved of insets.
         setOnApplyWindowInsetsListener((v, insets) -> {
-            // Learned only while the bar shows: hidden, the insets lose the bar (and the lyrics
-            // followed them up). The hidden layout is the shown one plus hiddenBarShift.
-            int top = computeSafeTopInset(insets);
-            if (top > 0 && !statusBarHidden && top != lyricsBaseTopInsetPx) {
-                lyricsBaseTopInsetPx = top;
+            // The bar's place, not the visible insets: those lose the bar while it is hidden, and
+            // the lyrics used to follow them up. Only a cutout deeper than the bar adds to it.
+            int cutout = 0;
+            if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null) {
+                cutout = insets.getDisplayCutout().getSafeInsetTop();
             }
-            int wanted = lyricsBaseTopInsetPx + NativeLyricsUtils.hiddenBarShift();
+            cutoutTopPx = cutout;
+            int wanted = Math.max(NativeLyricsUtils.statusBarClearance(activity), cutout);
             if (wanted != lyricsTopInsetPx) {
                 lyricsTopInsetPx = wanted;
                 applyLyricsScrollPadding();
