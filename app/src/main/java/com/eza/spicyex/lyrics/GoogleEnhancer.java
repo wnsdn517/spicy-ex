@@ -39,6 +39,8 @@ public final class GoogleEnhancer {
      * two run genuinely in parallel.
      */
     private static final Map<String, long[]> LANE_THROTTLES = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Shared by every lane: the endpoint's rate limit is per network address, not per lane. */
+    private static final GoogleCooldown COOLDOWN = new GoogleCooldown();
     private static final Pattern BATCH_MARKER_PATTERN = Pattern.compile("\\[\\[SPX_(\\d{3})\\]\\]");
 
     private GoogleEnhancer() {
@@ -204,23 +206,41 @@ public final class GoogleEnhancer {
         }
         String lane = laneOf(request);
         for (int attempt = 0; attempt <= GOOGLE_REQUEST_RETRIES; attempt++) {
+            if (COOLDOWN.remainingMs(SystemClock.elapsedRealtime()) > 0L) {
+                // Still rate-limited: answer as the server would, without asking it.
+                result.status = 429;
+                result.failureReason = "cooldown";
+                return result;
+            }
             result.attempts++;
             throttleGoogleRequest(lane);
             try (Response response = http.newCall(request).execute()) {
                 result.status = response.code();
                 if (response.isSuccessful() && response.body() != null) {
+                    COOLDOWN.onSuccess();
                     result.body = response.body().string();
                     if (isBlank(result.body)) result.failureReason = "empty_body";
                     return result;
                 }
                 result.failureReason = "http_" + response.code();
-                if (response.code() != 429 && response.code() < 500) return result;
+                if (response.code() == 429) {
+                    // Retrying a second later only extends the limit; back off instead.
+                    COOLDOWN.onRateLimited(SystemClock.elapsedRealtime(),
+                            GoogleCooldown.parseRetryAfterMs(response.header("Retry-After")));
+                    return result;
+                }
+                if (response.code() < 500) return result;
             } catch (IOException failure) {
                 result.failureReason = failure.getClass().getSimpleName();
             }
             if (attempt < GOOGLE_REQUEST_RETRIES) quietSleep(GOOGLE_REQUEST_RETRY_DELAY_MS);
         }
         return result;
+    }
+
+    /** Milliseconds until Google may be asked again after a 429; 0 when it may be now. */
+    public static long cooldownRemainingMs() {
+        return COOLDOWN.remainingMs(SystemClock.elapsedRealtime());
     }
 
     /** Lane identity from the call tag: "SOUND#12" and "MEANING#13" throttle independently. */
