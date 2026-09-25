@@ -238,3 +238,6 @@ node_modules/
 /.artifacts/
 /dev/
 *.har
+
+# scripts/build-install.sh: what was last installed on each device
+.build-install/

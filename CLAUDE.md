@@ -14,6 +14,10 @@ Use `scripts/build-install.sh [--no-install]` instead of typing out the gradlew/
 sequence by hand - it builds, installs to the connected device, force-stops Spotify so the module
 reloads, and prints a clean success/failure summary (full gradle/adb output only on failure).
 
+- Useful flags: `--no-models` (skip pushing the language model pack on rooted installs),
+  `--pull` (fast-forward from upstream first; every run already reports new upstream commits),
+  `--offline`, `--force` (reinstall even when the APK/models are unchanged - the script skips
+  both, and the Spotify restart, when nothing changed), `--clean`.
 - Requires `JAVA_HOME` pointed at a JDK 17 install (AGP 8.8.2 / Gradle 8.14.2 target); the script
   falls back to the common Windows Temurin 17 path if unset.
 - The project produces one APK with all language and translation features enabled.
