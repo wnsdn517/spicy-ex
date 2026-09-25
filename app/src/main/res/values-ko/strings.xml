@@ -62,6 +62,16 @@
     <string name="settings_source_order_title">우선순위</string>
     <string name="settings_source_order_hint"></string>
     <string name="settings_source_drag">끌어서 순서 변경</string>
+    <string name="settings_source_rank_smart">자동</string>
+    <string name="settings_source_rank_order">내 순서</string>
+    <string name="settings_source_list_title">제공처</string>
+    <string name="settings_source_count" formatted="false">%2$d개 중 %1$d개 켜짐</string>
+    <string name="settings_source_desc_apple">Apple Music 가사 · 단어 단위 싱크가 많음</string>
+    <string name="settings_source_desc_spotify">스포티파이 자체 가사</string>
+    <string name="settings_source_desc_musixmatch">Musixmatch의 방대한 가사</string>
+    <string name="settings_source_desc_netease">넷이즈 클라우드 뮤직 · 중국 노래에 강함</string>
+    <string name="settings_source_desc_qq">QQ 뮤직 · 중국 노래에 강함</string>
+    <string name="settings_source_desc_lrclib">커뮤니티가 만든 싱크 가사</string>
     <string name="settings_option_lyrics_source_order_spicy_spotify_lrclib">Spicy, Spotify, LRCLIB</string>
     <string name="settings_option_lyrics_source_order_spotify_spicy_lrclib">Spotify, Spicy, LRCLIB</string>
     <string name="settings_option_lyrics_source_order_lrclib_spicy_spotify">LRCLIB, Spicy, Spotify</string>

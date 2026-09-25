@@ -441,7 +441,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
 
     private void renderSetting(LinearLayout content, Settings.Setting<?> setting) {
         if (setting == Settings.LYRICS_SOURCE_MODE) {
-            sources.mergedRow(content);
+            sources.inlineBlock(content);
             return;
         }
         if (setting == Settings.LYRICS_SOURCE_OVERRIDE

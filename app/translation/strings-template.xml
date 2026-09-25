@@ -88,6 +88,16 @@
     <string name="settings_source_order_title">Order</string>
     <string name="settings_source_order_hint"></string>
     <string name="settings_source_drag">Drag to reorder</string>
+    <string name="settings_source_rank_smart">Smart</string>
+    <string name="settings_source_rank_order">My order</string>
+    <string name="settings_source_list_title">Sources</string>
+    <string name="settings_source_count" formatted="false">%1$d of %2$d on</string>
+    <string name="settings_source_desc_apple">Apple Music\'s lyrics, often word by word</string>
+    <string name="settings_source_desc_spotify">Spotify\'s own lyrics</string>
+    <string name="settings_source_desc_musixmatch">Musixmatch\'s large catalog</string>
+    <string name="settings_source_desc_netease">NetEase Cloud Music - strong for Chinese songs</string>
+    <string name="settings_source_desc_qq">QQ Music - strong for Chinese songs</string>
+    <string name="settings_source_desc_lrclib">Community-made synced lyrics</string>
     <string name="settings_option_lyrics_source_order_spicy_spotify_lrclib">Spicy, Spotify, LRCLIB</string>
     <string name="settings_option_lyrics_source_order_spotify_spicy_lrclib">Spotify, Spicy, LRCLIB</string>
     <string name="settings_option_lyrics_source_order_lrclib_spicy_spotify">LRCLIB, Spicy, Spotify</string>

@@ -62,6 +62,16 @@
     <string name="settings_source_order_title">順序</string>
     <string name="settings_source_order_hint"></string>
     <string name="settings_source_drag">ドラッグして並び替え</string>
+    <string name="settings_source_rank_smart">自動</string>
+    <string name="settings_source_rank_order">自分の順番</string>
+    <string name="settings_source_list_title">ソース</string>
+    <string name="settings_source_count" formatted="false">%2$d 件中 %1$d 件オン</string>
+    <string name="settings_source_desc_apple">Apple Music の歌詞・単語単位の同期が多い</string>
+    <string name="settings_source_desc_spotify">Spotify 自身の歌詞</string>
+    <string name="settings_source_desc_musixmatch">Musixmatch の豊富な歌詞</string>
+    <string name="settings_source_desc_netease">NetEase Cloud Music・中国語の曲に強い</string>
+    <string name="settings_source_desc_qq">QQ Music・中国語の曲に強い</string>
+    <string name="settings_source_desc_lrclib">コミュニティ製の同期歌詞</string>
     <string name="settings_option_lyrics_source_order_spicy_spotify_lrclib">Spicy、Spotify、LRCLIB</string>
     <string name="settings_option_lyrics_source_order_spotify_spicy_lrclib">Spotify、Spicy、LRCLIB</string>
     <string name="settings_option_lyrics_source_order_lrclib_spicy_spotify">LRCLIB、Spicy、Spotify</string>
