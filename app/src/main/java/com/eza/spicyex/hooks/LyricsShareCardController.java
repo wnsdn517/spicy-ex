@@ -893,6 +893,10 @@ final class LyricsShareCardController {
         currentCode = null;
         currentCodeView = null;
         lineSlides.clear();
+        // Full-size bitmaps kept only for the open sheet: the frozen lyrics background and the
+        // shareable card (drawn at most twice, 5-6 MB each) go with it.
+        lyricsBackground = null;
+        currentRecipe = null;
         pendingHandOff = null;
         currentFlight = null;
         stageView = null;
