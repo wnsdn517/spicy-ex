@@ -845,9 +845,18 @@ final class LyricsShareCardController {
         // Landscape puts the controls in a side panel so the card keeps the screen's height.
         boolean landscape = screenW > screenH;
 
-        LinearLayout page = new LinearLayout(activity);
+        // Pulled down anywhere but on the card (whose vertical drags pick lines), the whole sheet
+        // follows the finger and a flick or a long enough pull closes it - as the Layout
+        // Editor's sheet does.
+        PullSheet page = new PullSheet(activity);
         page.setOrientation(landscape ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         page.setPadding(insetLeft, insetTop, insetRight, insetBottom);
+        page.onProgress = progress -> ground.setAlpha(1f - 0.7f * progress);
+        page.onEmptyTap = this::dismiss;
+        page.onDismiss = velocity -> {
+            ground.animate().alpha(0f).setDuration(220).start();
+            page.slideAway(velocity, this::dismiss);
+        };
 
         int panelW = landscape ? Math.min(dp(400), Math.round(screenW * 0.46f)) : screenW - insetLeft - insetRight;
         View panel = buildPanel(landscape);
@@ -901,6 +910,7 @@ final class LyricsShareCardController {
         stageColumn.addView(stage, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         installPreviewGestures(cardHost);
+        page.excluded = cardHost;
 
         hint = new TextView(activity);
         hint.setTextColor(Color.argb(130, 255, 255, 255));
@@ -1254,9 +1264,11 @@ final class LyricsShareCardController {
         layer.addView(dim, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        LinearLayout sheet = new LinearLayout(activity);
+        PullSheet sheet = new PullSheet(activity);
         sheet.setOrientation(LinearLayout.VERTICAL);
         sheet.setClickable(true);
+        sheet.onProgress = progress -> dim.setAlpha(1f - progress);
+        sheet.onDismiss = velocity -> closePicker(velocity);
         android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
         float r = dp(28);
         bg.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
@@ -1316,6 +1328,8 @@ final class LyricsShareCardController {
         }
         scroll.addView(list);
         sheet.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        // The list hands a downward pull over to the sheet once it is scrolled to its top.
+        sheet.scroller = scroll;
 
         int height = Math.round((host.getHeight() > 0 ? host.getHeight()
                 : activity.getResources().getDisplayMetrics().heightPixels) * 0.6f);
@@ -1339,6 +1353,10 @@ final class LyricsShareCardController {
     }
 
     private void closePicker() {
+        closePicker(0f);
+    }
+
+    private void closePicker(float velocity) {
         View layer = picker;
         picker = null;
         pickRows.clear();
@@ -1348,11 +1366,173 @@ final class LyricsShareCardController {
         View dim = group.getChildAt(0);
         View sheet = group.getChildAt(1);
         dim.animate().alpha(0f).setDuration(200).start();
-        sheet.animate().translationY(sheet.getHeight()).setDuration(260)
-                .setInterpolator(new PathInterpolator(0.4f, 0f, 1f, 1f))
-                .withEndAction(() -> {
-                    if (layer.getParent() instanceof ViewGroup) ((ViewGroup) layer.getParent()).removeView(layer);
-                }).start();
+        Runnable remove = () -> {
+            if (layer.getParent() instanceof ViewGroup) ((ViewGroup) layer.getParent()).removeView(layer);
+        };
+        if (sheet instanceof PullSheet) {
+            ((PullSheet) sheet).slideAway(velocity, remove);
+        } else {
+            sheet.animate().translationY(sheet.getHeight()).setDuration(260).withEndAction(remove).start();
+        }
+    }
+
+    private interface FloatListener {
+        void on(float value);
+    }
+
+    /** iOS sheet curve, as the Layout Editor's sheet: quick departure, long soft landing. */
+    private static final android.animation.TimeInterpolator SHEET_EASE = new PathInterpolator(0.32f, 0.72f, 0f, 1f);
+
+    /**
+     * A sheet that a downward drag moves with the finger - anywhere on it, and from a scrolling
+     * list once the list has nothing left above (the same gesture carries on into the sheet) -
+     * and that a flick or a long enough pull closes, otherwise springing back. The Layout
+     * Editor's sheet behaviour, handled in dispatchTouchEvent so a list that has started
+     * scrolling can still hand the gesture over.
+     */
+    private final class PullSheet extends LinearLayout {
+        private static final int DISMISS_VELOCITY_DP = 900;
+        private static final float DISMISS_FRACTION = 0.25f;
+        private final int touchSlop;
+        /** A list inside the sheet, or null. */
+        View scroller;
+        /** A child with its own vertical gestures (the card), never pulled from. */
+        View excluded;
+        FloatListener onProgress;
+        FloatListener onDismiss;
+        /** A tap nothing inside took (the empty backdrop): the sheet takes every touch to be
+         *  able to follow a pull, so the tap that closed it from outside is handled here. */
+        Runnable onEmptyTap;
+        private boolean childTook;
+        private android.view.VelocityTracker velocity;
+        private float downRawX, downRawY, lastRawY, pull;
+        private boolean dragging, fromOutsideList, blocked, childLocked, disallowRequested;
+
+        PullSheet(Context context) {
+            super(context);
+            touchSlop = android.view.ViewConfiguration.get(context).getScaledTouchSlop();
+        }
+
+        @Override
+        public void requestDisallowInterceptTouchEvent(boolean disallow) {
+            if (disallow) disallowRequested = true;
+            super.requestDisallowInterceptTouchEvent(disallow);
+        }
+
+        private boolean inside(View view, float rawX, float rawY) {
+            if (view == null || !view.isShown()) return false;
+            int[] at = new int[2];
+            view.getLocationOnScreen(at);
+            return rawX >= at[0] && rawX < at[0] + view.getWidth() * view.getScaleX()
+                    && rawY >= at[1] && rawY < at[1] + view.getHeight() * view.getScaleY();
+        }
+
+        @Override
+        public boolean dispatchTouchEvent(android.view.MotionEvent event) {
+            int action = event.getActionMasked();
+            float rawY = event.getRawY();
+            trackVelocity(event, action == android.view.MotionEvent.ACTION_DOWN);
+            if (action == android.view.MotionEvent.ACTION_DOWN) {
+                dragging = false;
+                pull = 0f;
+                downRawX = event.getRawX();
+                downRawY = lastRawY = rawY;
+                blocked = inside(excluded, event.getRawX(), rawY);
+                fromOutsideList = !inside(scroller, event.getRawX(), rawY);
+                disallowRequested = false;
+                childTook = super.dispatchTouchEvent(event);
+                childLocked = disallowRequested;
+                return true;
+            }
+            if (action == android.view.MotionEvent.ACTION_UP && !dragging && !childTook && onEmptyTap != null
+                    && Math.hypot(event.getRawX() - downRawX, rawY - downRawY) < touchSlop) {
+                onEmptyTap.run();
+                return true;
+            }
+            float dy = rawY - lastRawY;
+            lastRawY = rawY;
+            if (dragging) {
+                if (action == android.view.MotionEvent.ACTION_MOVE) {
+                    setTranslationY(Math.max(0f, getTranslationY() + dy));
+                    progress();
+                } else if (action == android.view.MotionEvent.ACTION_UP
+                        || action == android.view.MotionEvent.ACTION_CANCEL) {
+                    dragging = false;
+                    settle(action == android.view.MotionEvent.ACTION_UP ? releaseVelocity() : 0f);
+                }
+                return true;
+            }
+            if (action == android.view.MotionEvent.ACTION_MOVE && !blocked && !childLocked) {
+                boolean listAtTop = scroller == null || !scroller.canScrollVertically(-1);
+                if ((fromOutsideList || listAtTop) && dy > 0f) {
+                    pull += dy;
+                } else if (dy < 0f || !listAtTop) {
+                    pull = 0f;
+                }
+                float sideways = Math.abs(event.getRawX() - downRawX);
+                if (pull > touchSlop && sideways < Math.abs(rawY - downRawY)) {
+                    dragging = true;
+                    animate().cancel();
+                    android.view.MotionEvent cancel = android.view.MotionEvent.obtain(event);
+                    cancel.setAction(android.view.MotionEvent.ACTION_CANCEL);
+                    super.dispatchTouchEvent(cancel);
+                    cancel.recycle();
+                    return true;
+                }
+            }
+            return super.dispatchTouchEvent(event);
+        }
+
+        private float travel() {
+            return Math.max(dp(120), getHeight());
+        }
+
+        private void progress() {
+            if (onProgress != null) onProgress.on(Math.min(1f, getTranslationY() / travel()));
+        }
+
+        private void settle(float velocityPxPerSec) {
+            boolean dismiss = velocityPxPerSec > dp(DISMISS_VELOCITY_DP)
+                    || (velocityPxPerSec > -dp(DISMISS_VELOCITY_DP) / 3f
+                        && getTranslationY() > travel() * DISMISS_FRACTION);
+            if (dismiss && onDismiss != null) {
+                onDismiss.on(velocityPxPerSec);
+            } else {
+                moveTo(0f, velocityPxPerSec, null);
+            }
+        }
+
+        /** Off the bottom edge, carrying on at the finger's speed, then {@code end}. */
+        void slideAway(float velocityPxPerSec, Runnable end) {
+            moveTo(travel(), velocityPxPerSec, end);
+        }
+
+        /** Duration from the remaining distance and the release speed, so a flick carries on. */
+        private void moveTo(float target, float velocityPxPerSec, Runnable end) {
+            animate().cancel();
+            float distance = Math.abs(target - getTranslationY());
+            long duration = 340L;
+            float speed = Math.abs(velocityPxPerSec);
+            if (speed > 1f) duration = Math.round(1000f * 2.3f * distance / speed);
+            duration = Math.max(160L, Math.min(360L, duration));
+            animate().translationY(target).setDuration(duration).setInterpolator(SHEET_EASE)
+                    .setUpdateListener(a -> progress())
+                    .withEndAction(end).start();
+        }
+
+        private void trackVelocity(android.view.MotionEvent event, boolean reset) {
+            if (velocity == null) velocity = android.view.VelocityTracker.obtain();
+            if (reset) velocity.clear();
+            android.view.MotionEvent screen = android.view.MotionEvent.obtain(event);
+            screen.setLocation(event.getRawX(), event.getRawY());
+            velocity.addMovement(screen);
+            screen.recycle();
+        }
+
+        private float releaseVelocity() {
+            velocity.computeCurrentVelocity(1000);
+            return velocity.getYVelocity();
+        }
     }
 
     /** One lyric line in the picker: a tick circle, the line, and its translation under it. */
@@ -3788,23 +3968,26 @@ final class LyricsShareCardController {
     }
 
     /**
-     * The code building itself on the preview card: the Spotify logo pops in with a turn, then
-     * the bars rise from dots, left to right, and sway like a slow level meter on a playing song.
-     * Once the real code is known they ease into its own bars - at once when it is already
-     * loaded, or whenever it arrives (the bars keep swaying until then) - and the scannable code
-     * is left exactly as shared.
+     * The code building itself on the preview card, like a track starting to play: the Spotify
+     * logo fades up, then a play-head sweeps left to right and every bar it passes kicks up like
+     * a level meter and springs back down. While the code is still downloading the sweep keeps
+     * going round over low resting bars; the first sweep after it arrives lands each bar on its
+     * real height, and the scannable code is left exactly as shared.
      */
     static final class CodeView extends View {
-        private static final long LOGO_MS = 460L;
-        private static final long BARS_FROM = 240L;
-        private static final long BAR_STAGGER = 24L;
-        private static final long GROW_MS = 200L;
-        /** A bar's settling starts this long after it rose, or when the code arrives if later. */
-        private static final long SETTLE_FROM = 380L;
-        private static final long SETTLE_MS = 520L;
+        private static final long LOGO_MS = 420L;
+        /** The first sweep starts as the logo settles; later ones follow at this period. */
+        private static final long FIRST_SWEEP = 300L;
+        private static final long SWEEP_PERIOD = 1350L;
+        /** Time for the play-head to cross from the first bar to the last. */
+        private static final long SWEEP_SPAN = 640L;
+        /** A bar's kick up to its peak, then a damped spring down to where it rests. */
+        private static final long RISE_MS = 110L;
+        private static final float SPRING_DECAY_MS = 140f;
+        private static final float SPRING_PERIOD_MS = 75f;
+        private static final long RING_OUT_MS = 900L;
         // The stand-in's geometry, in the code's own 400x100 units: the logo, then 23 bars.
         private static final int STAND_IN_BARS = 23;
-        private final boolean paper;
         private final int color;
         private CodeArt art;
         private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
@@ -3812,19 +3995,18 @@ final class LyricsShareCardController {
         private final Paint clear = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
         private final Path arc = new Path();
-        private final android.view.animation.OvershootInterpolator pop =
-                new android.view.animation.OvershootInterpolator(1.8f);
+        private final android.view.animation.DecelerateInterpolator soft =
+                new android.view.animation.DecelerateInterpolator(1.8f);
         private android.animation.TimeAnimator animator;
         private boolean playing;
         /** Time into the animation. */
         private float elapsed;
-        /** When the real code was there: 0 when it was from the start, -1 while still coming. */
+        /** When the real code was there: 0 from the start, -1 while it is still coming. */
         private float artAt = -1f;
 
         CodeView(Context context, CodeArt art, boolean paper) {
             super(context);
             this.art = art;
-            this.paper = paper;
             this.color = paper ? Color.BLACK : Color.argb(230, 255, 255, 255);
             barPaint.setColor(color);
             clear.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR));
@@ -3832,7 +4014,7 @@ final class LyricsShareCardController {
             clear.setStrokeCap(Paint.Cap.ROUND);
         }
 
-        /** The real code has arrived: the swaying bars ease into it from where they are. */
+        /** The real code has arrived: the next sweep lands on it. */
         void setArt(CodeArt art) {
             if (art == null) return;
             this.art = art;
@@ -3852,7 +4034,8 @@ final class LyricsShareCardController {
             animator = new android.animation.TimeAnimator();
             animator.setTimeListener((animation, totalTime, deltaTime) -> {
                 elapsed = Math.max(0f, totalTime - delay);
-                if (art != null && elapsed >= settleEnd(barCount() - 1)) {
+                int last = finalSweep();
+                if (last >= 0 && elapsed >= hit(last, STAND_IN_BARS - 1) + RISE_MS + RING_OUT_MS) {
                     playing = false;
                     animation.cancel();
                 }
@@ -3867,26 +4050,39 @@ final class LyricsShareCardController {
             if (animator != null) animator.cancel();
         }
 
-        private int barCount() {
-            return art == null || art.logo == null ? STAND_IN_BARS : Math.max(STAND_IN_BARS, art.barTop.length);
+        /** The sweep that lands on the real code: the first to start once it is here; -1 before. */
+        private int finalSweep() {
+            if (artAt < 0f) return -1;
+            if (artAt <= FIRST_SWEEP) return 0;
+            return (int) Math.ceil((artAt - FIRST_SWEEP) / SWEEP_PERIOD);
         }
 
-        private static float barStart(int i) {
-            return BARS_FROM + BAR_STAGGER * i;
-        }
-
-        private float settleBegin(int i) {
-            if (artAt < 0f) return Float.MAX_VALUE;
-            return Math.max(barStart(i) + SETTLE_FROM, artAt + BAR_STAGGER * i);
-        }
-
-        private float settleEnd(int i) {
-            return settleBegin(i) + SETTLE_MS;
+        /** When sweep {@code k} reaches bar {@code i}. */
+        private static float hit(int k, int i) {
+            float along = Math.min(1f, i / (float) (STAND_IN_BARS - 1));
+            return FIRST_SWEEP + k * SWEEP_PERIOD + along * SWEEP_SPAN;
         }
 
         private static float smooth(float edge0, float edge1, float x) {
             float t = Math.max(0f, Math.min(1f, (x - edge0) / (edge1 - edge0)));
             return t * t * (3f - 2f * t);
+        }
+
+        /** A fixed, varied peak per bar: a waveform's shape, not a random flicker. */
+        private static float peakShare(int i) {
+            double n = Math.sin(i * 12.9898 + 4.1) * 43758.5453;
+            float r = (float) (n - Math.floor(n));
+            return 0.55f + 0.45f * r;
+        }
+
+        /** Kick from {@code from} to {@code peak}, then a damped spring settling on {@code rest}. */
+        private static float kick(float tau, float from, float peak, float rest) {
+            if (tau < RISE_MS) {
+                float t = tau / RISE_MS;
+                return from + (peak - from) * (1f - (1f - t) * (1f - t));
+            }
+            float u = tau - RISE_MS;
+            return rest + (peak - rest) * (float) (Math.exp(-u / SPRING_DECAY_MS) * Math.cos(u / SPRING_PERIOD_MS));
         }
 
         @Override
@@ -3910,18 +4106,17 @@ final class LyricsShareCardController {
             float unit = getWidth() / 400f;
             float sx = real ? getWidth() / (float) art.ink.getWidth() : 0f;
             float sy = real ? getHeight() / (float) art.ink.getHeight() : 0f;
-            float mid = real ? art.midY * sy : 50f * unit;
+            float standInMid = 50f * unit;
 
-            // The logo: grows a little past its size and settles, turning a quarter as it comes.
+            // The logo fades up from a little smaller; the stand-in gives way to the real mark.
             float lt = Math.min(1f, elapsed / LOGO_MS);
             if (lt > 0f) {
-                float scale = pop.getInterpolation(lt);
+                float scale = 0.72f + 0.28f * soft.getInterpolation(lt);
+                int alpha = Math.round(255 * smooth(0f, 0.6f, lt));
                 float cx = real ? art.logo.exactCenterX() * sx : 50f * unit;
-                float cy = real ? art.logo.exactCenterY() * sy : mid;
+                float cy = real ? art.logo.exactCenterY() * sy : standInMid;
                 canvas.save();
-                canvas.rotate(-90f * (1f - smooth(0f, 1f, lt)), cx, cy);
                 canvas.scale(scale, scale, cx, cy);
-                int alpha = Math.round(255 * smooth(0f, 0.4f, lt));
                 if (real) {
                     bitmapPaint.setAlpha(alpha);
                     rect.set(art.logo.left * sx, art.logo.top * sy, art.logo.right * sx, art.logo.bottom * sy);
@@ -3932,51 +4127,51 @@ final class LyricsShareCardController {
                 canvas.restore();
             }
 
-            // The bars: a slow travelling wave of levels that calms into the code's own heights.
+            // The bars, each driven by the latest sweep to have reached it.
+            int last = finalSweep();
             float loud = real ? art.tallest * sy : 60f * unit;
-            int bars = barCount();
+            float resting = loud * 0.2f;
+            int realBars = real ? art.barTop.length : 0;
+            int bars = Math.max(STAND_IN_BARS, realBars);
             int baseAlpha = Color.alpha(color);
             for (int i = 0; i < bars; i++) {
-                float u = elapsed - barStart(i);
-                if (u <= 0f) continue;
-                float grow = smooth(0f, GROW_MS, u);
-                float settle = smooth(settleBegin(i), settleEnd(i), elapsed);
-                // Unhurried: long, overlapping swells rather than a jitter.
-                float wave = 0.5f + 0.5f * (float) Math.sin(elapsed * 0.0042f - i * 0.42f)
-                        * (float) Math.cos(elapsed * 0.0017f + i * 0.21f);
-                float level = loud * (0.3f + 0.6f * wave);
-                boolean standIn = i < STAND_IN_BARS;
-                float standInLeft = (100f + i * 12.83f) * unit;
+                int k = (int) Math.floor((elapsed - hit(0, i)) / SWEEP_PERIOD);
+                if (elapsed < hit(0, i)) continue;
+                if (last >= 0) k = Math.min(k, last);
+                float tau = elapsed - hit(k, i);
+                boolean landing = k == last;
+                float standInLeft = (100f + Math.min(i, STAND_IN_BARS - 1) * 12.83f) * unit;
                 float standInWidth = 6f * unit;
-                boolean hasReal = real && i < art.barTop.length;
+                float peak = Math.min(getHeight(), loud * peakShare(i) * 1.1f);
+                float from = k == 0 ? 0f : resting;
                 float left, right, height, centre;
-                if (hasReal) {
-                    float realLeft = art.barLeft[i] * sx;
-                    float realRight = art.barRight[i] * sx;
+                if (landing && i < realBars) {
                     float top = art.barTop[i] * sy;
                     float bottom = art.barBottom[i] * sy;
-                    // Bars that danced as the stand-in (the code came late) slide to their place.
-                    boolean wasStandIn = standIn && artAt > 0f;
-                    float fromLeft = wasStandIn ? standInLeft : realLeft;
-                    float fromRight = wasStandIn ? standInLeft + standInWidth : realRight;
-                    left = fromLeft + (realLeft - fromLeft) * settle;
-                    right = fromRight + (realRight - fromRight) * settle;
-                    height = level + (bottom - top - level) * settle;
-                    centre = mid + ((top + bottom) / 2f - mid) * settle;
-                } else if (standIn) {
-                    // A stand-in bar the real code does not have fades away as it settles.
+                    float realLeft = art.barLeft[i] * sx;
+                    float realRight = art.barRight[i] * sx;
+                    // Bars that rested as the stand-in (the code came late) glide to their place.
+                    float glide = k == 0 ? 1f : smooth(0f, RISE_MS + 260f, tau);
+                    left = standInLeft + (realLeft - standInLeft) * glide;
+                    right = left + (standInWidth + (realRight - realLeft - standInWidth) * glide);
+                    float target = bottom - top;
+                    height = kick(tau, from, Math.max(peak, target * 1.15f), target);
+                    centre = standInMid + ((top + bottom) / 2f - standInMid) * glide;
+                } else if (i < STAND_IN_BARS) {
+                    // The stand-in, resting low between sweeps; one the real code lacks bows out.
                     left = standInLeft;
                     right = left + standInWidth;
-                    height = level * (1f - settle);
-                    centre = mid;
-                    if (height < 0.5f) continue;
+                    height = kick(tau, from, peak, landing ? 0f : resting);
+                    centre = standInMid;
+                    if (landing && tau > RISE_MS + 300f) continue;
                 } else {
                     continue;
                 }
                 float width = right - left;
-                height = Math.max(width, height * grow);
+                height = Math.max(width, height);
                 rect.set(left, centre - height / 2f, right, centre + height / 2f);
-                barPaint.setAlpha(Math.round(baseAlpha * Math.min(1f, u / 140f)));
+                float appear = k == 0 ? Math.min(1f, tau / 90f) : 1f;
+                barPaint.setAlpha(Math.round(baseAlpha * appear));
                 canvas.drawRoundRect(rect, width / 2f, width / 2f, barPaint);
             }
         }
