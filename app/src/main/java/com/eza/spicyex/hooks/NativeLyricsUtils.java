@@ -72,17 +72,45 @@ final class NativeLyricsUtils {
         }
     }
 
+    /**
+     * Top clearance for the lyrics screen's chrome, in the content area's own coordinates: the
+     * status bar's height plus the chrome gap, plus {@link #hiddenBarShift}.
+     *
+     * <p>It no longer drops the bar's height while the bar is hidden: that, together with hiding
+     * letting the window's content start higher up the screen, made the buttons, artwork and
+     * lyrics jump up whenever "hide status bar" was on.
+     */
     static int topSystemPadding(Context context) {
-        // A hidden status bar (NativeSpicyShellViewImpl#applyStatusBarPreference) leaves no bar
-        // height to reserve - just the fixed chrome clearance.
-        if (statusBarHidden(context)) return dp(28);
         int status = 0;
         try {
             int resId = context.getResources().getIdentifier("status_bar_height", "dimen", "android");
             if (resId > 0) status = context.getResources().getDimensionPixelSize(resId);
         } catch (Throwable ignored) {
         }
-        return status + dp(28);
+        return status + dp(28) + hiddenBarShift();
+    }
+
+    /** Where the activity's content area starts on screen now, kept by the lyrics shell. */
+    static volatile int contentScreenTop;
+    /** Where it started the last time the status bar was showing; -1 until seen. */
+    static volatile int shownContentScreenTop = -1;
+
+    /**
+     * How far the content area has moved up compared with the status bar showing - what has to
+     * be added back so everything stays where it was. Zero while the bar shows. Before the bar
+     * has ever been seen showing, assume the content started right below it (Android 11+ lays
+     * a window that fits system windows out under the bar).
+     */
+    static int hiddenBarShift() {
+        int shown = shownContentScreenTop;
+        if (shown < 0) {
+            if (android.os.Build.VERSION.SDK_INT < 30) return 0;
+            Activity activity = References.currentActivity();
+            if (activity == null) return 0;
+            int resId = activity.getResources().getIdentifier("status_bar_height", "dimen", "android");
+            shown = resId > 0 ? activity.getResources().getDimensionPixelSize(resId) : 0;
+        }
+        return Math.max(0, shown - contentScreenTop);
     }
 
     static int dp(int value) {

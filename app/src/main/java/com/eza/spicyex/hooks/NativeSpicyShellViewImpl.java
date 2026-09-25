@@ -646,15 +646,52 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         if (hide) hideStatusBar(); else showStatusBar();
         if (hide != statusBarHidden) {
             statusBarHidden = hide;
-            // The chrome header and the lyrics' top clearance were sized for the old state.
-            if (chromeHeader != null) {
-                chromeHeader.setPadding(chromeHeader.getPaddingLeft(), topSystemPadding(activity),
-                        chromeHeader.getPaddingRight(), chromeHeader.getPaddingBottom());
-            }
-            lyricsTopInsetPx = topSystemPadding(activity);
-            applyLyricsScrollPadding();
+            // Showing or hiding moves where the window's content starts; the layout listener
+            // re-pins everything once that relayout lands (see trackContentScreenTop).
+            reapplyTopClearance();
         }
     }
+
+    private final int[] contentLocation = new int[2];
+    private final View.OnLayoutChangeListener contentTopListener =
+            (v, l, t, r, b, ol, ot, or, ob) -> trackContentScreenTop();
+
+    /** Watches where the activity's content area sits on screen, which the status bar moves. */
+    private void watchContentScreenTop(boolean watch) {
+        View content = activity == null ? null : activity.findViewById(android.R.id.content);
+        if (content == null) return;
+        content.removeOnLayoutChangeListener(contentTopListener);
+        if (watch) {
+            content.addOnLayoutChangeListener(contentTopListener);
+            trackContentScreenTop();
+        }
+    }
+
+    private void trackContentScreenTop() {
+        View content = activity == null ? null : activity.findViewById(android.R.id.content);
+        if (content == null || !content.isAttachedToWindow()) return;
+        content.getLocationOnScreen(contentLocation);
+        int top = Math.max(0, contentLocation[1]);
+        if (!statusBarHidden) NativeLyricsUtils.shownContentScreenTop = top;
+        if (top == NativeLyricsUtils.contentScreenTop) return;
+        NativeLyricsUtils.contentScreenTop = top;
+        // Posted: this runs inside a layout pass.
+        post(this::reapplyTopClearance);
+    }
+
+    /** Re-pins the header, the lyrics and the track readout below the status bar's place. */
+    private void reapplyTopClearance() {
+        if (chromeHeader != null) {
+            chromeHeader.setPadding(chromeHeader.getPaddingLeft(), topSystemPadding(activity),
+                    chromeHeader.getPaddingRight(), chromeHeader.getPaddingBottom());
+        }
+        lyricsTopInsetPx = lyricsBaseTopInsetPx + NativeLyricsUtils.hiddenBarShift();
+        applyLyricsScrollPadding();
+        if (trackInfoController != null) trackInfoController.onPreferenceChanged();
+    }
+
+    /** The lyrics' top inset as the bar-showing layout has it; hiddenBarShift is added on top. */
+    private int lyricsBaseTopInsetPx;
 
     private void hideStatusBar() {
         android.view.Window window = activity == null ? null : activity.getWindow();
@@ -894,6 +931,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // Seed with a status-bar-height estimate; the WindowInsets listener refines it with the
         // real safe-area top (status bar + display cutout) once insets dispatch on attach.
         lyricsTopInsetPx = topSystemPadding(activity);
+        lyricsBaseTopInsetPx = lyricsTopInsetPx - NativeLyricsUtils.hiddenBarShift();
         lyricsSideInsetPx = sideSystemPadding(activity);
 
         setBackground(ambientController.pageBackground());
@@ -1387,9 +1425,15 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         // Refine the lyric top/side insets from real window insets (status bar + cutout) once
         // they dispatch on attach. Returned unconsumed so nothing else is starved of insets.
         setOnApplyWindowInsetsListener((v, insets) -> {
+            // Learned only while the bar shows: hidden, the insets lose the bar (and the lyrics
+            // followed them up). The hidden layout is the shown one plus hiddenBarShift.
             int top = computeSafeTopInset(insets);
-            if (top > 0 && top != lyricsTopInsetPx) {
-                lyricsTopInsetPx = top;
+            if (top > 0 && !statusBarHidden && top != lyricsBaseTopInsetPx) {
+                lyricsBaseTopInsetPx = top;
+            }
+            int wanted = lyricsBaseTopInsetPx + NativeLyricsUtils.hiddenBarShift();
+            if (wanted != lyricsTopInsetPx) {
+                lyricsTopInsetPx = wanted;
                 applyLyricsScrollPadding();
             }
             int side = computeSafeSideInset(insets);
@@ -1501,6 +1545,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         }
         statusBarHidden = NativeLyricsUtils.statusBarHidden(activity);
         applyStatusBarPreference();
+        watchContentScreenTop(true);
         refreshAudioListening();
         ambientController.start();
         revealChrome();
@@ -1516,6 +1561,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     void stop() {
         dbgEnter("NativeSpicyShellView.stop");
         running = false;
+        watchContentScreenTop(false);
         // The layout editor is an in-shell full-screen touch layer. It normally removes itself
         // through Save/Cancel, but a lyrics screen teardown can bypass that path. Remove any
         // stale instance before this shell is reused so it can never intercept the next screen's
@@ -1910,6 +1956,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 rowMountController.reset();
                 followState.resetActive();
                 emptyStateController.showAdState(lyricsScroll, lyricsColumn);
+                // The track just changed; don't let the 250ms throttle hand back the song.
+                throttledTrack = track;
+                throttledTrackAtMs = SystemClock.elapsedRealtime();
+                updateToggleVisuals();
             } else {
                 showLoading("Loading lyrics…");
                 loadLyrics(track, id);
@@ -5308,6 +5358,16 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     }
 
     private void updateToggleVisuals() {
+        // An ad has nothing to read or translate. The toggles used to keep the previous song's
+        // state into the ad, and the reading toggle showed with no document at all whenever an
+        // AI reading lane was configured. (Not while an ordinary song loads: hiding them then
+        // would shift the other buttons on every track change.)
+        if (isAdTrack(currentTrackThrottled())) {
+            romanToggle.setVisibility(View.GONE);
+            translationToggle.setVisibility(View.GONE);
+            updateToggleSpinners();
+            return;
+        }
         boolean jp = documentHasJapanese();
         boolean cn = documentHasChinese();
         boolean romanizable = documentHasRomanizableScript();
