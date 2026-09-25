@@ -64,6 +64,10 @@
     <string name="settings_source_drag">끌어서 순서 변경</string>
     <string name="settings_source_rank_smart">자동</string>
     <string name="settings_source_none_on">켜진 제공자 없음</string>
+    <string name="settings_language_search">언어 검색</string>
+    <string name="settings_language_suggested">추천</string>
+    <string name="settings_language_all">모든 언어</string>
+    <string name="settings_language_no_match">일치하는 언어가 없어요</string>
     <string name="settings_source_rank_order">내 순서</string>
     <string name="settings_source_list_title">제공처</string>
     <string name="settings_source_count" formatted="false">%2$d개 중 %1$d개 켜짐</string>
