@@ -63,7 +63,7 @@ import java.util.Set;
  * layout stays visually stable unless device screenshots verify a change.
  */
 public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs.Host,
-        SourceOrderEditor.Host {
+        SourceOrderEditor.Host, com.eza.spicyex.settings.CacheManager.Host {
     /**
      * Two levels, as a phone's own settings: the section list, and one section's page. Null is
      * the list. (It used to be one long page of all-caps accordions, every open section's rows
@@ -78,6 +78,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     private final SettingRowFactory rows;
     private final PanelDialogs dialogs;
     private final SourceOrderEditor sources;
+    private final com.eza.spicyex.settings.CacheManager cache;
     private final java.util.function.BooleanSupplier isHalfSize;
     private final Runnable onToggleSize;
     private final Runnable onClose;
@@ -130,6 +131,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         this.rows = new SettingRowFactory(this);
         this.dialogs = new PanelDialogs(this);
         this.sources = new SourceOrderEditor(this);
+        this.cache = new com.eza.spicyex.settings.CacheManager(this);
         this.isHalfSize = isHalfSize;
         this.onToggleSize = onToggleSize;
         this.onClose = onClose;
@@ -450,6 +452,19 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         }
         if (setting == Settings.SPICY_MANUAL_TOKEN) {
             spicyTokenRow(content);
+            return;
+        }
+        if (setting == Settings.CACHE_SIZE) {
+            // The limit row with the stored-lyrics block under it, one keyed unit: patchRow
+            // still finds the limit's summary inside, and the block refreshes itself.
+            LinearLayout unit = new LinearLayout(context);
+            unit.setOrientation(LinearLayout.VERTICAL);
+            rows.selectorRow(unit, Settings.CACHE_SIZE);
+            if (unit.getChildCount() > 0) unit.getChildAt(0).setTag(null);
+            cache.block(unit);
+            unit.setTag(PanelTags.row(Settings.CACHE_SIZE));
+            content.addView(unit, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             return;
         }
         if (setting == Settings.LYRICS_FONT_CUSTOM_PATH) {
@@ -1027,14 +1042,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
                             playing ? "Playing a new piece" : "Stopped"),
                             android.widget.Toast.LENGTH_SHORT).show();
                 });
-        clearAction(content, "settings_action_clear_translation_cache",
-                "Clear translation cache", CacheClearKind.TRANSLATION);
-        clearAction(content, "settings_action_clear_reading_cache",
-                "Clear transliteration cache", CacheClearKind.TRANSLITERATION);
-        clearAction(content, "settings_action_clear_ai_cache",
-                "Clear AI results", CacheClearKind.AI);
-        clearAction(content, "settings_action_clear_lyrics_cache",
-                "Clear lyrics response cache", CacheClearKind.LYRICS_RESPONSE);
+        // Cache clears live with the cache itself, on the Lyrics sources page (CacheManager).
         rows.actionRow(content, Kind.EXTERNAL_LINK,
                 uiStrings.get("settings_action_open_github", "Open GitHub"), v -> openGithub());
         rows.actionRow(content, null,
@@ -1101,11 +1109,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         handler.postDelayed(tick, 500L);
     }
 
-    private void clearAction(LinearLayout content, String key, String fallback, CacheClearKind kind) {
-        rows.actionRow(content, null, uiStrings.get(key, fallback), v -> clearCache(kind));
-    }
-
-    private void clearCache(CacheClearKind kind) {
+    @Override public void clearCache(CacheClearKind kind) {
         if (onClearCache == null) return;
         onClearCache.accept(kind);
         // Cache clears update preference memory (and the AI database) before returning. Rebuild
@@ -1230,6 +1234,10 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
 
     @Override public boolean unavailable(Settings.Setting<?> setting) {
         return PanelPolicy.unavailable(setting, captureSnapshot());
+    }
+
+    @Override public String cacheLimitLabel() {
+        return uiStrings.option(Settings.CACHE_SIZE, store.get(Settings.CACHE_SIZE));
     }
 
     @Override public String cacheSizeSummary() {
