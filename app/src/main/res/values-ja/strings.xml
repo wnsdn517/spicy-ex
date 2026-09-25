@@ -9,7 +9,10 @@
     <string name="settings_locale_name">日本語</string>
 
     <!-- Settings sections -->
-    <string name="settings_section_lyrics">動作</string>
+    <string name="settings_section_general">一般</string>
+    <string name="settings_section_lyrics">歌詞の再生</string>
+    <string name="settings_section_gestures">ジェスチャー</string>
+    <string name="settings_section_ads">広告</string>
     <string name="settings_section_lyrics_sources">リリックスソース</string>
     <string name="settings_section_now_playing">Now Playing カード</string>
     <string name="settings_section_lyrics_screen">リリックス画面</string>

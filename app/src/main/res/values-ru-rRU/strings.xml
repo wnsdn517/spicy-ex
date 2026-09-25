@@ -9,7 +9,10 @@
     <string name="settings_locale_code">ru</string>
     <string name="settings_locale_name">Русский</string>
     
-    <string name="settings_section_lyrics">Поведение</string>
+    <string name="settings_section_general">Общие</string>
+    <string name="settings_section_lyrics">Воспроизведение текста</string>
+    <string name="settings_section_gestures">Жесты</string>
+    <string name="settings_section_ads">Реклама</string>
     <string name="settings_section_lyrics_sources">Источники текстов</string>
     <string name="settings_section_now_playing">Карточка Now Playing</string>
     <string name="settings_section_lyrics_screen">Экран Текста</string>

@@ -25,7 +25,9 @@ public final class SettingsUiSchema {
     /** Panel section order, first to last. DEBUG is rendered separately; INTERNAL never renders. */
     public static List<Settings.Section> orderedSections() {
         return Collections.unmodifiableList(Arrays.asList(
+                Settings.GENERAL,
                 Settings.LYRICS,
+                Settings.GESTURES,
                 Settings.LYRICS_SOURCES,
                 Settings.NOW_PLAYING,
                 Settings.LYRICS_SCREEN,
@@ -33,6 +35,7 @@ public final class SettingsUiSchema {
                 Settings.TRANSLITERATION,
                 Settings.TRANSLATION,
                 Settings.AI,
+                Settings.ADS,
                 Settings.CONNECT));
     }
 

@@ -8,7 +8,10 @@
     <string name="settings_locale_name">English</string>
 
     <!-- Settings sections. Add the same names in values-<locale>/strings.xml to translate the panel. -->
-    <string name="settings_section_lyrics">Behavior</string>
+    <string name="settings_section_general">General</string>
+    <string name="settings_section_lyrics">Lyrics playback</string>
+    <string name="settings_section_gestures">Gestures</string>
+    <string name="settings_section_ads">Ads</string>
     <string name="settings_section_lyrics_sources">Lyrics Sources</string>
     <string name="settings_section_now_playing">Now Playing Card</string>
     <string name="settings_section_lyrics_screen">Lyrics Screen</string>
