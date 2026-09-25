@@ -1244,6 +1244,15 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 revealChrome();
             }
             trackPressedLyric(event);
+            int action = event.getActionMasked();
+            if (action != android.view.MotionEvent.ACTION_DOWN && tapSeekHandler.longPressFired()
+                    && shareCardController != null && shareCardController.isShowing()) {
+                // The finger that opened the share sheet is still down: its moves pull the card a
+                // little (the sheet's rubber band) instead of scrolling the lyrics underneath.
+                shareCardController.heldDrag(event);
+                tapSeekHandler.onTouch(view, event);
+                return true;
+            }
             return tapSeekHandler.onTouch(view, event);
         });
         lyricsFrame = new FrameLayout(activity);
