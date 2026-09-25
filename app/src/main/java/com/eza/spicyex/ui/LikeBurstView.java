@@ -87,26 +87,28 @@ public final class LikeBurstView extends View {
         this.sway = (random.nextBoolean() ? 1f : -1f) * (0.6f + 0.4f * random.nextFloat());
         this.icon = ActionIconDrawable.pathOf(star ? ActionIconDrawable.Kind.STAR
                 : ActionIconDrawable.Kind.HEART);
-        int top = star ? Color.rgb(255, 214, 10) : Color.rgb(255, 55, 95);
-        int bottom = star ? Color.rgb(255, 170, 0) : Color.rgb(228, 28, 72);
-        this.accent = star ? Color.rgb(255, 196, 0) : Color.rgb(255, 45, 85);
+        // Soft, light tints: a pastel pink (or butter gold) rather than the saturated system
+        // colour, so the burst reads as light rather than paint.
+        int top = star ? Color.rgb(255, 232, 150) : Color.rgb(255, 150, 175);
+        int bottom = star ? Color.rgb(255, 204, 92) : Color.rgb(255, 104, 138);
+        this.accent = star ? Color.rgb(255, 222, 120) : Color.rgb(255, 138, 165);
         // Warm, related colours - a firework in the icon's own family, never a rainbow.
         int[] palette = star
-                ? new int[]{Color.rgb(255, 236, 140), Color.rgb(255, 204, 0), Color.rgb(255, 159, 10),
+                ? new int[]{Color.rgb(255, 244, 196), Color.rgb(255, 226, 130), Color.rgb(255, 206, 150),
                         Color.WHITE}
-                : new int[]{Color.rgb(255, 55, 95), Color.rgb(255, 120, 150), Color.rgb(255, 159, 10),
-                        Color.rgb(255, 214, 10), Color.WHITE};
+                : new int[]{Color.rgb(255, 170, 190), Color.rgb(255, 196, 212), Color.rgb(255, 205, 170),
+                        Color.rgb(255, 234, 170), Color.WHITE};
 
         iconPaint.setStyle(Paint.Style.FILL);
         iconPaint.setShader(new LinearGradient(0f, 3f, 0f, 21f, top, bottom, Shader.TileMode.CLAMP));
         sheenPaint.setStyle(Paint.Style.FILL);
-        sheenPaint.setShader(new LinearGradient(0f, 3f, 0f, 13f, 0x40FFFFFF, 0x00FFFFFF,
+        sheenPaint.setShader(new LinearGradient(0f, 3f, 0f, 13f, 0x50FFFFFF, 0x00FFFFFF,
                 Shader.TileMode.CLAMP));
         shadowPaint.setStyle(Paint.Style.FILL);
         shadowPaint.setColor(Color.BLACK);
         bubblePaint.setColor(accent);
         glowPaint.setShader(new RadialGradient(0f, 0f, 1f,
-                new int[]{withAlpha(accent, 0x55), withAlpha(accent, 0x18), withAlpha(accent, 0)},
+                new int[]{withAlpha(accent, 0x44), withAlpha(accent, 0x14), withAlpha(accent, 0)},
                 new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
         sparkPaint.setStrokeCap(Paint.Cap.ROUND);
 
@@ -203,7 +205,7 @@ public final class LikeBurstView extends View {
         if (thickness <= 0.5f) return;
         bubblePaint.setStyle(Paint.Style.STROKE);
         bubblePaint.setStrokeWidth(thickness);
-        bubblePaint.setAlpha(Math.round(255 * (0.45f + 0.4f * (1f - hollow))));
+        bubblePaint.setAlpha(Math.round(255 * (0.5f + 0.35f * (1f - hollow))));
         canvas.drawCircle(cx, cy, inner + thickness / 2f, bubblePaint);
     }
 
