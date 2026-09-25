@@ -155,11 +155,11 @@ public final class Settings {
     );
 
     // Double-tapping the lyrics adds the song to Liked Songs with a heart (or star) burst where
-    // the finger was, as on Instagram Reels. It never removes a like. Off by default because it
-    // takes the double tap over from "Tap lyric to seek" (whose default is double tap): turning
-    // it on silently would make an existing seek gesture start writing to the library.
+    // the finger was, as on Instagram Reels. It never removes a like. While on it owns the
+    // double tap outright: "Tap lyric to seek" on double tap does nothing, and on single tap
+    // the seek waits out the double-tap window so a double tap never also seeks.
     public static final Setting<Boolean> DOUBLE_TAP_LIKE = boolSetting(
-            "lyrics_double_tap_like", GESTURES, "Double-tap to like", false
+            "lyrics_double_tap_like", GESTURES, "Double-tap to like", true
     );
 
     // Whether the lyrics screen keeps the status bar hidden, per orientation. A swipe from the

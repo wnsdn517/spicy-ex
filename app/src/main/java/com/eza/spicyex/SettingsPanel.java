@@ -1289,7 +1289,16 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     }
 
     @Override public String rowSummaryFor(Settings.StringSetting setting, String value) {
-        return setting == Settings.CACHE_SIZE ? cacheSizeSummary() : labelFor(setting, value);
+        return setting == Settings.CACHE_SIZE ? cacheSizeSummary() : selectorSummary(setting, value);
+    }
+
+    /** Tap-to-seek on double tap does nothing while double tap likes; the row says so. */
+    @Override public String selectorSummary(Settings.StringSetting setting, String value) {
+        if (setting == Settings.TAP_SEEK_MODE && "Double tap".equals(value)
+                && Boolean.TRUE.equals(store.get(Settings.DOUBLE_TAP_LIKE))) {
+            return uiStrings.get("settings_tap_seek_taken_by_like", "Off \u00b7 double tap likes");
+        }
+        return labelFor(setting, value);
     }
 
     @Override public PanelStrings panelStrings() {
