@@ -5,6 +5,8 @@
     <string name="settings_section_lyrics">歌词播放</string>
     <string name="settings_section_gestures">手势</string>
     <string name="settings_section_ads">广告</string>
+    <string name="settings_tile_debug">版本、缓存和诊断</string>
+    <string name="settings_back">返回</string>
     <string name="settings_section_now_playing">正在播放卡片</string>
     <string name="settings_section_lyrics_screen">歌词界面</string>
     <string name="settings_section_transliteration">读音与转写</string>

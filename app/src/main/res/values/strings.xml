@@ -12,6 +12,8 @@
     <string name="settings_section_lyrics">Lyrics playback</string>
     <string name="settings_section_gestures">Gestures</string>
     <string name="settings_section_ads">Ads</string>
+    <string name="settings_tile_debug">Version, cache and diagnostics</string>
+    <string name="settings_back">Back</string>
     <string name="settings_section_lyrics_sources">Lyrics Sources</string>
     <string name="settings_section_now_playing">Now Playing Card</string>
     <string name="settings_section_lyrics_screen">Lyrics Screen</string>

@@ -74,7 +74,10 @@ final class LyricsSettingsDialogController {
             dialog.setOnKeyListener((d, keyCode, event) -> {
                 if (keyCode == android.view.KeyEvent.KEYCODE_BACK
                         && event.getAction() == android.view.KeyEvent.ACTION_UP) {
-                    Motion.exitCardThen(panelView, dialog::isShowing, dialog::dismiss);
+                    // From a section's page, back goes to the section list first.
+                    if (!panel.handleBack()) {
+                        Motion.exitCardThen(panelView, dialog::isShowing, dialog::dismiss);
+                    }
                     return true;
                 }
                 return false;

@@ -64,8 +64,12 @@ import java.util.Set;
  */
 public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs.Host,
         SourceOrderEditor.Host {
-    // Static: survives panel re-opens within the process, so the panel never re-opens fully collapsed.
-    private static final Set<String> expandedSections = new java.util.HashSet<>();
+    /**
+     * Two levels, as a phone's own settings: the section list, and one section's page. Null is
+     * the list. (It used to be one long page of all-caps accordions, every open section's rows
+     * stacked into the same scroll - hard to find anything in.)
+     */
+    private String openSection;
 
     private final Context context;
     private final PanelStyle style;
@@ -212,12 +216,61 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
 
     private void renderSections(LinearLayout content) {
         if (aiAvailable()) aiRows().ensureInitialModelCheck();
-        for (Map.Entry<Settings.Section, List<Settings.Setting<?>>> entry
-                : groupVisibleSettings().entrySet()) {
-            renderSectionGroup(content, entry.getKey(), entry.getValue());
+        LinkedHashMap<Settings.Section, List<Settings.Setting<?>>> grouped = groupVisibleSettings();
+        Settings.Section open = openSectionOf(grouped);
+        if (open == null) {
+            // The list: one tile per section, what is inside it written underneath.
+            openSection = null;
+            for (Settings.Section section : grouped.keySet()) {
+                appendSectionHeader(content, section, false, -1);
+            }
+            appendSectionHeader(content, Settings.DEBUG, false, -1);
+            return;
         }
-        appendSectionHeader(content, Settings.DEBUG, expandedSections.contains(Settings.DEBUG.id), -1);
-        if (expandedSections.contains(Settings.DEBUG.id)) appendDebugCard(content, -1);
+        // One section's page: a back bar with its name, then its rows.
+        appendSectionHeader(content, open, true, -1);
+        if (open == Settings.DEBUG) {
+            appendDebugCard(content, -1);
+        } else {
+            List<Settings.Setting<?>> items = grouped.get(open);
+            appendSectionCard(content, open, items == null ? new ArrayList<>() : items, -1);
+        }
+    }
+
+    private Settings.Section openSectionOf(Map<Settings.Section, List<Settings.Setting<?>>> grouped) {
+        if (openSection == null) return null;
+        if (Settings.DEBUG.id.equals(openSection)) return Settings.DEBUG;
+        for (Settings.Section section : grouped.keySet()) {
+            if (section.id.equals(openSection) && !isEditorSection(section)) return section;
+        }
+        return null;
+    }
+
+    private boolean isOpen(Settings.Section section) {
+        return openSection != null && openSection.equals(section.id);
+    }
+
+    /** Into a section's page (or back to the list with null), sliding the way it goes. */
+    private void navigate(Settings.Section section) {
+        if (sectionsContainer == null) return;
+        boolean forward = section != null;
+        openSection = section == null ? null : section.id;
+        aiBadgeView = null;
+        sectionsContainer.animate().cancel();
+        sectionsContainer.removeAllViews();
+        renderSections(sectionsContainer);
+        if (scrollRoot != null) scrollRoot.scrollTo(0, 0);
+        sectionsContainer.setTranslationX(style.dp(forward ? 32 : -32));
+        sectionsContainer.setAlpha(0f);
+        sectionsContainer.animate().translationX(0f).alpha(1f).setDuration(220)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+    }
+
+    /** Back from a section's page returns to the list; on the list the host closes the panel. */
+    public boolean handleBack() {
+        if (openSection == null) return false;
+        navigate(null);
+        return true;
     }
 
     /** Closes this dialog (its usual animated exit), then hands off to the shell: the layout
@@ -275,16 +328,6 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         snapshot.put(Settings.LIVE_CARD_TEXT_SIZE, store.get(Settings.LIVE_CARD_TEXT_SIZE));
         snapshot.put(Settings.TRACK_INFO_TEXT_SIZE, store.get(Settings.TRACK_INFO_TEXT_SIZE));
         return snapshot.build();
-    }
-
-    private void renderSectionGroup(LinearLayout content, Settings.Section section,
-                                    List<Settings.Setting<?>> items) {
-        boolean expanded = expandedSections.contains(section.id) && !isEditorSection(section);
-        appendSectionHeader(content, section, expanded, -1);
-        if (!expanded) return;
-        // The AI section's remaining rows are not settings: a key that must not persist as it
-        // is typed, and a model list that has to be fetched before it can be offered.
-        appendSectionCard(content, section, items, -1);
     }
 
     /** Card for a settings section; AI gets its non-setting rows appended after the settings. */
@@ -468,8 +511,11 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
             rebuildSections();
             return;
         }
+        // On a section's page only that section is on screen; a change elsewhere shows when its
+        // page is opened.
+        if (openSection != null && !isOpen(target)) return;
         captureAnchor();
-        boolean expanded = expandedSections.contains(target.id) && !isEditorSection(target);
+        boolean expanded = isOpen(target);
         if (!expanded && PanelTags.card(target).equals(anchorTag)) {
             retargetAnchorToHeader(target);
         }
@@ -634,9 +680,6 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         } else if (setting == Settings.ANIMATION_STYLE) {
             // The Apple Music card appears/disappears with this pick (a cross-section change),
             // so the whole panel rebuilds anchor-preserved instead of one section in place.
-            if ("Apple Music".equals(String.valueOf(store.get(setting)))) {
-                expandedSections.add(Settings.APPLE.id);
-            }
             rebuildSections();
         } else if (PanelPolicy.shouldRebuildSectionAfterChange(setting)) {
             rebuildSection(setting.section);
@@ -655,44 +698,127 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     /** Section headers --- */
 
     private LinearLayout buildSectionHeader(Settings.Section section, boolean expanded) {
+        return expanded ? buildPageBar(section) : buildSectionTile(section);
+    }
+
+    /**
+     * A section in the list: its icon on a tinted square, its name in plain case, and a line
+     * saying what is inside - the first few of its settings, or where the button goes.
+     */
+    private LinearLayout buildSectionTile(Settings.Section section) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(style.dp(44));
-        row.setPadding(style.dp(4), style.dp(8), style.dp(4), style.dp(8));
+        row.setMinimumHeight(style.dp(64));
+        row.setPadding(style.dp(12), style.dp(10), style.dp(10), style.dp(10));
+        android.graphics.drawable.GradientDrawable tile = new android.graphics.drawable.GradientDrawable();
+        tile.setCornerRadius(style.dp(16));
+        tile.setColor(0x10FFFFFF);
         row.setBackground(new android.graphics.drawable.RippleDrawable(
-                android.content.res.ColorStateList.valueOf(0x22FFFFFF), null,
-                new android.graphics.drawable.ColorDrawable(0xFFFFFFFF)));
+                android.content.res.ColorStateList.valueOf(0x22FFFFFF), tile, null));
         row.setTag(PanelTags.header(section));
 
+        boolean aiLit = section == Settings.AI && aiReady();
         Kind sectionIcon = PanelStyle.sectionIcon(section);
+        android.widget.FrameLayout badge = new android.widget.FrameLayout(context);
+        android.graphics.drawable.GradientDrawable badgeBg = new android.graphics.drawable.GradientDrawable();
+        badgeBg.setCornerRadius(style.dp(11));
+        badgeBg.setColor(isEditorSection(section) || aiLit ? 0x331ED760 : 0x1AFFFFFF);
+        badge.setBackground(badgeBg);
         if (sectionIcon != null) {
-            ImageView sectionIconView = style.kindView(sectionIcon,
-                    section == Settings.AI && aiReady() ? PanelStyle.COL_ACCENT : PanelStyle.COL_SECTION, 18);
-            if (section == Settings.AI) aiBadgeView = sectionIconView;
-            row.addView(sectionIconView, style.leadParams());
+            ImageView icon = style.kindView(sectionIcon,
+                    isEditorSection(section) || aiLit ? PanelStyle.COL_ACCENT : PanelStyle.COL_TITLE, 20);
+            if (section == Settings.AI) aiBadgeView = icon;
+            badge.addView(icon, new android.widget.FrameLayout.LayoutParams(
+                    style.dp(24), style.dp(24), Gravity.CENTER));
         }
+        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(style.dp(40), style.dp(40));
+        badgeLp.rightMargin = style.dp(14);
+        row.addView(badge, badgeLp);
 
-        TextView title = style.text(uiStrings.section(section), 14, PanelStyle.COL_TITLE, true);
-        title.setAllCaps(true);
-        title.setLetterSpacing(0.05f);
-        row.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout texts = new LinearLayout(context);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.addView(style.text(uiStrings.section(section), 16, PanelStyle.COL_TITLE, true));
+        String summary = tileSummary(section);
+        if (!summary.isEmpty()) {
+            TextView sub = style.text(summary, 13, PanelStyle.COL_SUMMARY, false);
+            sub.setSingleLine(true);
+            sub.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            subLp.topMargin = style.dp(2);
+            texts.addView(sub, subLp);
+        }
+        row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
         if (isEditorSection(section)) {
-            // A button into the editor: one tap opens it, there is nothing to expand.
+            // A button into the editor: one tap opens it, there is no page.
             row.addView(style.kindView(Kind.CHEVRONS_RIGHT, PanelStyle.COL_ACCENT, 16),
                     new LinearLayout.LayoutParams(style.dp(28), style.dp(28)));
             row.setOnClickListener(v -> openEditorFor(section));
-            return row;
+        } else {
+            row.addView(style.kindView(Kind.CHEVRON_RIGHT, PanelStyle.COL_SECTION, 16),
+                    new LinearLayout.LayoutParams(style.dp(28), style.dp(28)));
+            row.setOnClickListener(v -> navigate(section));
         }
-        row.addView(style.kindView(expanded ? Kind.CHEVRON_DOWN : Kind.CHEVRON_RIGHT,
-                        PanelStyle.COL_SECTION, 16),
-                new LinearLayout.LayoutParams(style.dp(28), style.dp(28)));
-        row.setOnClickListener(v -> {
-            boolean nowExpanded = !expandedSections.contains(section.id);
-            if (nowExpanded) expandedSections.add(section.id);
-            else expandedSections.remove(section.id);
-            rebuildSection(section);
-        });
+        return row;
+    }
+
+    /** What a tile says is inside: where an editor button goes, else its first few settings. */
+    private String tileSummary(Settings.Section section) {
+        if (section == Settings.LYRICS_SCREEN) return uiStrings.get("settings_layout_editor", "Layout editor…");
+        if (section == Settings.NOW_PLAYING) return uiStrings.get("settings_card_editor", "Now playing card editor…");
+        if (section == Settings.DEBUG) {
+            return uiStrings.get("settings_tile_debug", "Version, cache and diagnostics");
+        }
+        List<Settings.Setting<?>> items = groupVisibleSettings().get(section);
+        if (items == null || items.isEmpty()) return "";
+        StringBuilder out = new StringBuilder();
+        int shown = 0;
+        for (Settings.Setting<?> setting : items) {
+            if (setting == Settings.LYRICS_SOURCE_OVERRIDE || setting == Settings.LYRICS_SOURCE_ORDER) continue;
+            if (shown == 3) {
+                out.append(" \u00b7 \u2026");
+                break;
+            }
+            if (shown > 0) out.append(" \u00b7 ");
+            out.append(uiStrings.setting(setting));
+            shown++;
+        }
+        return out.toString();
+    }
+
+    /** A section's page: back to the list, and its name large. */
+    private LinearLayout buildPageBar(Settings.Section section) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(style.dp(48));
+        row.setPadding(0, style.dp(2), style.dp(4), style.dp(8));
+        row.setTag(PanelTags.header(section));
+        ImageView back = style.kindView(Kind.CHEVRON_RIGHT, PanelStyle.COL_TITLE, 20);
+        back.setRotation(180f);
+        back.setContentDescription(uiStrings.get("settings_back", "Back"));
+        back.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        android.graphics.drawable.GradientDrawable backBg = new android.graphics.drawable.GradientDrawable();
+        backBg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        backBg.setColor(0x1AFFFFFF);
+        back.setBackground(backBg);
+        back.setOnClickListener(v -> navigate(null));
+        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(style.dp(36), style.dp(36));
+        backLp.rightMargin = style.dp(12);
+        row.addView(back, backLp);
+        Kind sectionIcon = PanelStyle.sectionIcon(section);
+        if (sectionIcon != null) {
+            ImageView icon = style.kindView(sectionIcon,
+                    section == Settings.AI && aiReady() ? PanelStyle.COL_ACCENT : PanelStyle.COL_SECTION, 18);
+            if (section == Settings.AI) aiBadgeView = icon;
+            LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(style.dp(22), style.dp(22));
+            iconLp.rightMargin = style.dp(8);
+            row.addView(icon, iconLp);
+        }
+        row.addView(style.text(uiStrings.section(section), 20, PanelStyle.COL_TITLE, true),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         return row;
     }
 
@@ -701,7 +827,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         View row = buildSectionHeader(section, expanded);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = style.dp(4);
+        lp.topMargin = style.dp(expanded ? 0 : 8);
         if (at < 0 || at >= parent.getChildCount()) parent.addView(row, lp);
         else parent.addView(row, at, lp);
     }

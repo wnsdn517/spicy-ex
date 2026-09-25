@@ -13,6 +13,8 @@
     <string name="settings_section_lyrics">가사 재생</string>
     <string name="settings_section_gestures">제스처</string>
     <string name="settings_section_ads">광고</string>
+    <string name="settings_tile_debug">버전, 캐시, 진단</string>
+    <string name="settings_back">뒤로</string>
     <string name="settings_section_lyrics_sources">가사 제공처</string>
     <string name="settings_section_now_playing">재생 화면 가사 카드</string>
     <string name="settings_section_lyrics_screen">가사 화면</string>

@@ -13,6 +13,8 @@
     <string name="settings_section_lyrics">Воспроизведение текста</string>
     <string name="settings_section_gestures">Жесты</string>
     <string name="settings_section_ads">Реклама</string>
+    <string name="settings_tile_debug">Версия, кэш и диагностика</string>
+    <string name="settings_back">Назад</string>
     <string name="settings_section_lyrics_sources">Источники текстов</string>
     <string name="settings_section_now_playing">Карточка Now Playing</string>
     <string name="settings_section_lyrics_screen">Экран Текста</string>
