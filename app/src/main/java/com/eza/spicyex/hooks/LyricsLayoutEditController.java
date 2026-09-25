@@ -1139,6 +1139,8 @@ final class LyricsLayoutEditController {
                 @Override
                 public void onScaleEnd(android.view.ScaleGestureDetector detector) {
                     hideValueBubble();
+                    // The size just pinched lives on the Style tab: show it there.
+                    textTab = TAB_STYLE;
                     if (selected == Element.TEXT) selectElement(Element.TEXT, false);
                 }
             });
@@ -2079,12 +2081,67 @@ final class LyricsLayoutEditController {
 
         private static final int FILE_PICKER_REQUEST_CODE = 10234;
 
-        private void buildTextOptions() {
-            // Animation style first: it decides which of the groups below exist, so changing it
-            // must only ever change what is under the finger, never what is above it.
-            buildAnimationOptions();
+        /**
+         * The lyrics sheet is split into tabs - Style, Animation, Effects - instead of one scroll
+         * of ten option cards, which was hard to read and to find anything in. The tab survives
+         * the in-place rebuilds option changes trigger.
+         */
+        private int textTab;
+        private static final int TAB_STYLE = 0;
+        private static final int TAB_ANIMATION = 1;
+        private static final int TAB_EFFECTS = 2;
 
-            addDivider();
+        private void buildTextOptions() {
+            addOption(textTabs(), matchWrap(12));
+            switch (textTab) {
+                case TAB_ANIMATION:
+                    buildAnimationOptions();
+                    break;
+                case TAB_EFFECTS:
+                    buildTextEffectOptions();
+                    break;
+                default:
+                    buildTextStyleOptions();
+                    break;
+            }
+            endGroup();
+        }
+
+        /** One pill holding the three tabs; the current one is a white segment. */
+        private View textTabs() {
+            String[] labels = {s("tab_style", "Style"), s("tab_animation", "Animation"),
+                    s("tab_effects", "Effects")};
+            LinearLayout bar = new LinearLayout(activity);
+            bar.setPadding(dp(3), dp(3), dp(3), dp(3));
+            GradientDrawable barBg = new GradientDrawable();
+            barBg.setCornerRadius(dp(20));
+            barBg.setColor(0x1AFFFFFF);
+            bar.setBackground(barBg);
+            for (int i = 0; i < labels.length; i++) {
+                TextView tab = text(labels[i], 14, i == textTab ? Color.BLACK : 0xCCFFFFFF, i == textTab);
+                tab.setGravity(Gravity.CENTER);
+                tab.setSingleLine(true);
+                tab.setPadding(dp(8), dp(8), dp(8), dp(8));
+                if (i == textTab) {
+                    GradientDrawable on = new GradientDrawable();
+                    on.setCornerRadius(dp(17));
+                    on.setColor(Color.WHITE);
+                    tab.setBackground(on);
+                }
+                final int index = i;
+                tab.setOnClickListener(v -> {
+                    if (textTab == index) return;
+                    textTab = index;
+                    selectElement(Element.TEXT);
+                    optionsScroll.scrollTo(0, 0);
+                });
+                bar.addView(tab, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            }
+            return bar;
+        }
+
+        /** Style: size, font, weight, line spacing. */
+        private void buildTextStyleOptions() {
             addSectionLabel(Settings.LYRICS_TEXT_SIZE, 10);
             addOption(presetSliderRow(Settings.LYRICS_TEXT_SIZE, Settings.LYRICS_TEXT_SIZE_CUSTOM,
                     "custom", new String[]{"small", "normal", "large", "xlarge"},
@@ -2120,7 +2177,11 @@ final class LyricsLayoutEditController {
                     "custom", new String[]{"compact", "default", "spacious", "more", "max"},
                     new int[]{80, 110, 150, 200, 250}, null), matchWrap(14));
 
-            addDivider();
+            endGroup();
+        }
+
+        /** Effects: interlude icon, glow, line blur. */
+        private void buildTextEffectOptions() {
             addSectionLabel(Settings.INTERLUDE_ICON, 10);
             addOption(chipRow(Settings.INTERLUDE_ICON,
                     new String[]{"dots", "note"}, null), matchWrap(14));
