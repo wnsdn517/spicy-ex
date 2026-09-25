@@ -461,12 +461,30 @@ final class LyricsShareCardController {
                 int pieceStart = Math.max(start, run.quoteStart);
                 int pieceEnd = Math.min(end, run.quoteStart + run.length);
                 if (pieceEnd <= pieceStart) continue;
-                FlyingWord w = flyingPiece(run, quote, pieceStart, pieceEnd, drawn, overlayLoc,
-                        target, cardPaint, cardMetrics, targetSize, box, quoteTop, cardScale, cardLoc, settle);
-                if (w == null) continue;
-                w.order = order;
-                flying.add(w);
-                any = true;
+                // A word can wrap mid-way - on the card or in the lyric row (CJK breaks between
+                // any two characters): each side-of-a-break part flies on its own, from its own
+                // line to its own line, still together with the rest of its word. Flown whole, it
+                // landed on one line and then jumped to two when the card's text took over.
+                android.text.Layout from = run.view.getLayout();
+                int partStart = pieceStart;
+                for (int k = pieceStart + 1; k <= pieceEnd; k++) {
+                    boolean split = k == pieceEnd
+                            || target.getLineForOffset(k) != target.getLineForOffset(k - 1)
+                            || from.getLineForOffset(run.viewStart + (k - run.quoteStart))
+                                != from.getLineForOffset(run.viewStart + (k - 1 - run.quoteStart));
+                    if (!split) continue;
+                    String part = quote.substring(partStart, k);
+                    if (!part.trim().isEmpty()) {
+                        FlyingWord w = flyingPiece(run, quote, partStart, k, drawn, overlayLoc,
+                                target, cardPaint, cardMetrics, targetSize, box, quoteTop, cardScale, cardLoc, settle);
+                        if (w != null) {
+                            w.order = order;
+                            flying.add(w);
+                            any = true;
+                        }
+                    }
+                    partStart = k;
+                }
             }
             if (any) order++;
         }
@@ -525,7 +543,11 @@ final class LyricsShareCardController {
         int s1 = run.viewStart + (pieceEnd - run.quoteStart);
         int line = from.getLineForOffset(s0);
         float left = from.getPrimaryHorizontal(s0);
-        float right = from.getLineForOffset(Math.max(s0, s1 - 1)) == line && s1 < view.getText().length()
+        // The part's right edge: where its end is, when that is still on its line; at a line
+        // break the end offset belongs to the next line (x back at its start), so the line's own
+        // right edge. The old check looked at the last character instead, and a part ending at a
+        // break came out zero-wide and was dropped.
+        float right = s1 < view.getText().length() && from.getLineForOffset(s1) == line
                 ? from.getPrimaryHorizontal(s1) : from.getLineRight(line);
         if (right <= left) return null;
         Bitmap whole = drawn.get(view);
@@ -3522,11 +3544,18 @@ final class LyricsShareCardController {
     }
 
     private static StaticLayout layout(String text, TextPaint paint, int width, Layout.Alignment align) {
-        return StaticLayout.Builder.obtain(text, 0, text.length(), paint, width)
+        StaticLayout.Builder builder = StaticLayout.Builder.obtain(text, 0, text.length(), paint, width)
                 .setAlignment(align)
                 .setLineSpacing(0f, 1.08f)
-                .setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED)
-                .build();
+                .setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED);
+        if (Build.VERSION.SDK_INT >= 33) {
+            // Korean wraps between words and Japanese between phrases, as they are read, rather
+            // than between any two characters - a word split across the card's lines reads badly.
+            builder.setLineBreakConfig(new android.graphics.text.LineBreakConfig.Builder()
+                    .setLineBreakWordStyle(android.graphics.text.LineBreakConfig.LINE_BREAK_WORD_STYLE_PHRASE)
+                    .build());
+        }
+        return builder.build();
     }
 
     private static Bitmap renderCard(Design design, TextStyle style, Backdrop backdrop, Bitmap code,
