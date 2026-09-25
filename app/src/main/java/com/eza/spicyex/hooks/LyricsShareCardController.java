@@ -490,6 +490,7 @@ final class LyricsShareCardController {
         }
         for (Bitmap whole : drawn.values()) whole.recycle();
         if (flying.isEmpty()) return false;
+        orderAlongTravel(flying);
 
         FlightView flight = new FlightView(activity, flying, dp(14));
         flight.setElevation(dp(70));
@@ -530,6 +531,38 @@ final class LyricsShareCardController {
         });
         animator.start();
         return true;
+    }
+
+    /**
+     * The words leave in reading order when they travel down to the card. Travelling up (the
+     * card above the pressed line), the line nearest the card goes first: the bottom line of a
+     * wrapped lyric leads, then the one above it - each still left to right - so the words that
+     * have furthest to go do not cut across those still waiting.
+     */
+    private static void orderAlongTravel(List<FlyingWord> flying) {
+        float travel = 0f;
+        for (FlyingWord w : flying) travel += w.toBaseline - w.fromBaseline;
+        if (travel >= 0f) return;
+        // Each word by where it starts: its first part's line and x.
+        Map<Integer, float[]> starts = new java.util.HashMap<>();
+        for (FlyingWord w : flying) {
+            float[] at = starts.get(w.order);
+            if (at == null || w.fromBaseline < at[0] - 1f
+                    || (Math.abs(w.fromBaseline - at[0]) <= 1f && w.fromX < at[1])) {
+                starts.put(w.order, new float[]{w.fromBaseline, w.fromX});
+            }
+        }
+        List<Integer> words = new ArrayList<>(starts.keySet());
+        java.util.Collections.sort(words, (a, b) -> {
+            float[] pa = starts.get(a);
+            float[] pb = starts.get(b);
+            // Same line when the baselines are within a few pixels.
+            if (Math.abs(pa[0] - pb[0]) > 4f) return Float.compare(pb[0], pa[0]);
+            return Float.compare(pa[1], pb[1]);
+        });
+        Map<Integer, Integer> rank = new java.util.HashMap<>();
+        for (int i = 0; i < words.size(); i++) rank.put(words.get(i), i);
+        for (FlyingWord w : flying) w.order = rank.get(w.order);
     }
 
     /** One run's share of a word: cut from the row as seen, and set as the card sets it. */
