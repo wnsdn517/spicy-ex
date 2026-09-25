@@ -20,9 +20,6 @@ public final class PanelTags {
     public static final String AI_DYNAMIC = "card:ai:dynamic";
     /** Connect login/test-track action rows, shown only while CONNECT_ENABLED is on. */
     public static final String CONNECT_DYNAMIC = "card:connect:dynamic";
-    /** A card's editor entry ("Layout editor…", "Now playing card editor…"): not a setting row,
-     *  but kept by the keyed rebuild all the same, always last in its card. */
-    public static final String EDITOR_ENTRY = "card:editor";
 
     private PanelTags() {
     }

@@ -242,8 +242,8 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
                 }
                 items.add(setting);
             }
-            // The lyrics screen section has no rows of its own any more, only the editor entry.
-            if (section == Settings.LYRICS_SCREEN && !grouped.containsKey(section)) {
+            // The editor sections have no rows of their own: they are buttons into the editors.
+            if (isEditorSection(section) && !grouped.containsKey(section)) {
                 grouped.put(section, new ArrayList<>());
             }
         }
@@ -279,7 +279,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
 
     private void renderSectionGroup(LinearLayout content, Settings.Section section,
                                     List<Settings.Setting<?>> items) {
-        boolean expanded = expandedSections.contains(section.id);
+        boolean expanded = expandedSections.contains(section.id) && !isEditorSection(section);
         appendSectionHeader(content, section, expanded, -1);
         if (!expanded) return;
         // The AI section's remaining rows are not settings: a key that must not persist as it
@@ -293,7 +293,6 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         LinearLayout card = style.newCard();
         card.setTag(PanelTags.card(section));
         for (Settings.Setting<?> setting : items) renderSetting(card, setting);
-        appendEditorEntry(card, section);
         if (section == Settings.AI && aiAvailable()) {
             // Dynamic AI rows churn with setup state; they live in their own tagged block so
             // keyed rebinding refreshes them as a unit without touching ordinary rows.
@@ -317,40 +316,16 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         style.attachCard(parent, card, at);
     }
 
-    /** The sections whose look is edited on the screen itself carry an entry to that editor. */
-    private static boolean hasEditorEntry(Settings.Section section) {
+    /**
+     * The sections whose look is edited on the screen itself: in the panel they are single
+     * buttons that open their editor straight away, not sections to expand.
+     */
+    private static boolean isEditorSection(Settings.Section section) {
         return section == Settings.LYRICS_SCREEN || section == Settings.NOW_PLAYING;
     }
 
-    private void appendEditorEntry(LinearLayout card, Settings.Section section) {
-        if (section == Settings.LYRICS_SCREEN) {
-            // Everything about how the lyrics screen looks is edited on the screen itself.
-            rows.actionRow(card, Kind.ALIGN_VERTICAL_DISTRIBUTE_CENTER,
-                    uiStrings.get("settings_layout_editor", "Layout editor…"),
-                    v -> openEditor(EDITOR_LYRICS));
-        } else if (section == Settings.NOW_PLAYING) {
-            rows.actionRow(card, Kind.ALIGN_VERTICAL_DISTRIBUTE_CENTER,
-                    uiStrings.get("settings_card_editor", "Now playing card editor…"),
-                    v -> openEditor(EDITOR_CARD));
-        } else {
-            return;
-        }
-        card.getChildAt(card.getChildCount() - 1).setTag(PanelTags.EDITOR_ENTRY);
-    }
-
-    /** Keeps a card's editor entry present and last through a keyed rebind. */
-    private void syncEditorEntry(LinearLayout card, Settings.Section section) {
-        View entry = findChildByTag(card, PanelTags.EDITOR_ENTRY);
-        if (!hasEditorEntry(section)) {
-            if (entry != null) card.removeView(entry);
-            return;
-        }
-        if (entry == null) {
-            appendEditorEntry(card, section);
-        } else if (card.indexOfChild(entry) != card.getChildCount() - 1) {
-            card.removeView(entry);
-            card.addView(entry);
-        }
+    private void openEditorFor(Settings.Section section) {
+        openEditor(section == Settings.NOW_PLAYING ? EDITOR_CARD : EDITOR_LYRICS);
     }
 
     private void appendDebugCard(LinearLayout parent, int at) {
@@ -494,7 +469,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
             return;
         }
         captureAnchor();
-        boolean expanded = expandedSections.contains(target.id);
+        boolean expanded = expandedSections.contains(target.id) && !isEditorSection(target);
         if (!expanded && PanelTags.card(target).equals(anchorTag)) {
             retargetAnchorToHeader(target);
         }
@@ -519,16 +494,15 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     private void rebindCard(Settings.Section target, int headerIdx) {
         List<Settings.Setting<?>> items = groupVisibleSettings().get(target);
         if (items == null) items = new ArrayList<>();
-        if (items.isEmpty() && !hasEditorEntry(target)) {
+        if (items.isEmpty()) {
             rebuildSections(); // defensive: rendered section without visible settings
             return;
         }
         int cardIdx = indexOfChildByTag(PanelTags.card(target));
         if (cardIdx < 0 || !(sectionsContainer.getChildAt(cardIdx) instanceof LinearLayout)) {
             // A section just expanded: its card is built whole, by the same code as a full
-            // render. Built here row by row, it lacked everything that is not a setting row -
-            // the editor entry above all, which then only showed after reopening the panel with
-            // the section still expanded.
+            // render, rather than row by row here - which left out everything in a card that is
+            // not a setting row until the panel was reopened.
             appendSectionCard(sectionsContainer, target, items, headerIdx + 1);
             return;
         }
@@ -580,7 +554,6 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         }
         refreshAiDynamicBlock(card, target);
         refreshConnectDynamicBlock(card, target);
-        syncEditorEntry(card, target);
     }
 
     /** AI dynamic rows re-render as one tagged block; ordinary AI settings rows patch by key. */
@@ -704,6 +677,13 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         title.setAllCaps(true);
         title.setLetterSpacing(0.05f);
         row.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (isEditorSection(section)) {
+            // A button into the editor: one tap opens it, there is nothing to expand.
+            row.addView(style.kindView(Kind.CHEVRONS_RIGHT, PanelStyle.COL_ACCENT, 16),
+                    new LinearLayout.LayoutParams(style.dp(28), style.dp(28)));
+            row.setOnClickListener(v -> openEditorFor(section));
+            return row;
+        }
         row.addView(style.kindView(expanded ? Kind.CHEVRON_DOWN : Kind.CHEVRON_RIGHT,
                         PanelStyle.COL_SECTION, 16),
                 new LinearLayout.LayoutParams(style.dp(28), style.dp(28)));

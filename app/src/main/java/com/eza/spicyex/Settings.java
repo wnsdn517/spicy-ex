@@ -210,14 +210,16 @@ public final class Settings {
             );
 
     // --- Now Playing ---
+    // Behaviour, so listed under Behavior: the Now Playing section itself is only the entry to
+    // the card editor now. (Moving a setting between sections keeps its stored value.)
     public static final Setting<String> LIVE_CARD_TAP_MODE = enumSetting(
-            "lyrics_live_card_tap_mode", NOW_PLAYING, "Tap card to open lyrics",
+            "lyrics_live_card_tap_mode", LYRICS, "Tap card to open lyrics",
             "Double tap",
             "Off", "Single tap", "Double tap"
     );
 
     public static final Setting<String> LIVE_CARD_TAP_TARGET = enumSetting(
-            "lyrics_live_card_tap_target", NOW_PLAYING, "Card tap target",
+            "lyrics_live_card_tap_target", LYRICS, "Card tap target",
             "Fullscreen",
             "Fullscreen", "Artwork"
     );
