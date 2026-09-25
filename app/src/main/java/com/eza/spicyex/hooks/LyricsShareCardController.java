@@ -543,22 +543,39 @@ final class LyricsShareCardController {
         float travel = 0f;
         for (FlyingWord w : flying) travel += w.toBaseline - w.fromBaseline;
         if (travel <= 0f) return;
-        // Each word by where it starts: its first part's line and x.
+        // Each word by where it starts: its first part's line and x, plus its text height.
         Map<Integer, float[]> starts = new java.util.HashMap<>();
         for (FlyingWord w : flying) {
             float[] at = starts.get(w.order);
             if (at == null || w.fromBaseline < at[0] - 1f
                     || (Math.abs(w.fromBaseline - at[0]) <= 1f && w.fromX < at[1])) {
-                starts.put(w.order, new float[]{w.fromBaseline, w.fromX});
+                starts.put(w.order, new float[]{w.fromBaseline, w.fromX, w.fromScreenSize});
             }
+        }
+        // Words share a line when their baselines are within about half the text height. A
+        // karaoke row lifts the words already sung by a few pixels, and the old 4px test split
+        // a one-line lyric into "lines" - the unsung, lower words then led from the right.
+        List<Integer> byHeight = new ArrayList<>(starts.keySet());
+        java.util.Collections.sort(byHeight, (a, b) -> Float.compare(starts.get(a)[0], starts.get(b)[0]));
+        Map<Integer, Integer> lineOf = new java.util.HashMap<>();
+        int line = -1;
+        float lineBaseline = Float.NaN;
+        for (int word : byHeight) {
+            float[] at = starts.get(word);
+            float tolerance = Math.max(4f, at[2] * 0.5f);
+            if (line < 0 || at[0] - lineBaseline > tolerance) {
+                line++;
+                lineBaseline = at[0];
+            }
+            lineOf.put(word, line);
         }
         List<Integer> words = new ArrayList<>(starts.keySet());
         java.util.Collections.sort(words, (a, b) -> {
-            float[] pa = starts.get(a);
-            float[] pb = starts.get(b);
-            // Same line when the baselines are within a few pixels.
-            if (Math.abs(pa[0] - pb[0]) > 4f) return Float.compare(pb[0], pa[0]);
-            return Float.compare(pa[1], pb[1]);
+            int la = lineOf.get(a);
+            int lb = lineOf.get(b);
+            // Bottom line first; within a line, left to right.
+            if (la != lb) return Integer.compare(lb, la);
+            return Float.compare(starts.get(a)[1], starts.get(b)[1]);
         });
         Map<Integer, Integer> rank = new java.util.HashMap<>();
         for (int i = 0; i < words.size(); i++) rank.put(words.get(i), i);
@@ -1474,7 +1491,7 @@ final class LyricsShareCardController {
         codeChip.setOnClickListener(v -> {
             spotifyCode = !spotifyCode;
             prefs.edit().putBoolean(PREF_CODE, spotifyCode).apply();
-            styleToggle(codeChip, spotifyCode);
+            styleToggle(codeChip, spotifyCode, spotifyCode);
             if (spotifyCode) {
                 // Switched on: the code starts building at once, whether or not it has loaded.
                 codePlayed = false;
@@ -2172,7 +2189,7 @@ final class LyricsShareCardController {
     private void toggleTranslation() {
         if (document == null) return;
         showTranslation = !showTranslation;
-        if (translationChip != null) styleToggle(translationChip, showTranslation);
+        if (translationChip != null) styleToggle(translationChip, showTranslation, showTranslation);
         render(Transition.TEXT);
     }
 
@@ -2225,18 +2242,38 @@ final class LyricsShareCardController {
         return chip;
     }
 
-    /** On: Spotify green with a check; off: glass with the feature's own icon. */
     private void styleToggle(TextView chip, boolean on) {
+        styleToggle(chip, on, false);
+    }
+
+    /**
+     * On: Spotify green; off: glass. Either way the chip keeps the feature's own icon - no check
+     * mark - and switching it on plays that icon once: the code's bars pulse like a song
+     * playing, the globe turns.
+     */
+    private void styleToggle(TextView chip, boolean on, boolean play) {
         android.graphics.drawable.GradientDrawable bg = glass(dp(20), on ? 255 : 30, 0);
         if (on) bg.setColor(Color.rgb(30, 215, 96));
         chip.setBackground(bg);
         int color = on ? Color.BLACK : Color.argb(220, 255, 255, 255);
-        LineIcon icon = new LineIcon(on ? LineIcon.Kind.CHECK : (LineIcon.Kind) chip.getTag(), color);
+        final LineIcon icon = new LineIcon((LineIcon.Kind) chip.getTag(), color);
         icon.setBounds(0, 0, dp(16), dp(16));
         chip.setCompoundDrawablesRelative(icon, null, null, null);
         chip.setTextColor(color);
         chip.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        Object running = chip.getTag(R_ICON_ANIMATOR);
+        if (running instanceof android.animation.Animator) ((android.animation.Animator) running).cancel();
+        if (!play) return;
+        android.animation.ValueAnimator motion = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        motion.setDuration(icon.kind == LineIcon.Kind.GLOBE ? 1100 : 1300);
+        motion.setInterpolator(new android.view.animation.LinearInterpolator());
+        motion.addUpdateListener(a -> icon.setPhase((float) a.getAnimatedValue()));
+        chip.setTag(R_ICON_ANIMATOR, motion);
+        motion.start();
     }
+
+    /** View tag key for a chip's running icon animation (any id unique to this class works). */
+    private static final int R_ICON_ANIMATOR = 0x7F5EC0DE;
 
     private android.graphics.drawable.Drawable appIcon(String pkg) {
         try {
@@ -2301,8 +2338,15 @@ final class LyricsShareCardController {
         enum Kind { CLOSE, LINK, DOWNLOAD, MORE, CHECK, ALIGN_START, ALIGN_CENTER, ALIGN_END,
             POS_TOP, POS_MIDDLE, POS_BOTTOM, CODE, GLOBE, LYRICS, ARROW_UP }
 
-        private final Kind kind;
+        final Kind kind;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        /** 0..1 through a one-shot motion (CODE, GLOBE); 0 and 1 both draw the still icon. */
+        private float phase;
+
+        void setPhase(float value) {
+            phase = value;
+            invalidateSelf();
+        }
 
         LineIcon(Kind kind, int color) {
             this.kind = kind;
@@ -2395,9 +2439,20 @@ final class LyricsShareCardController {
                     c.drawCircle(5, 12, 2.6f, p);
                     p.setStyle(Paint.Style.STROKE);
                     float[] heights = {5, 10, 6, 12, 7, 4};
+                    // While playing, each bar bounces like a level meter, eased in and out of
+                    // the still shape so the motion starts and ends on the icon itself.
+                    float blend = phase <= 0f || phase >= 1f ? 0f
+                            : (float) Math.sin(Math.PI * phase);
                     for (int i = 0; i < heights.length; i++) {
                         float x = 10 + i * 2.2f;
-                        c.drawLine(x, 12 - heights[i] / 2f, x, 12 + heights[i] / 2f, p);
+                        float h = heights[i];
+                        if (blend > 0f) {
+                            double beat = phase * 5.5 + i * 0.37;
+                            float level = 3f + 10f * (float) Math.abs(Math.sin(Math.PI * beat)
+                                    * (0.65 + 0.35 * Math.sin(2.3 * Math.PI * beat + i)));
+                            h = h + (level - h) * blend;
+                        }
+                        c.drawLine(x, 12 - h / 2f, x, 12 + h / 2f, p);
                     }
                     break;
                 }
@@ -2422,8 +2477,31 @@ final class LyricsShareCardController {
                 case GLOBE:
                     p.setStrokeWidth(1.7f);
                     c.drawCircle(12, 12, 9, p);
-                    c.drawOval(new RectF(8, 3, 16, 21), p);
                     c.drawLine(3, 12, 21, 12, p);
+                    if (phase <= 0f || phase >= 1f) {
+                        c.drawOval(new RectF(8, 3, 16, 21), p);
+                    } else {
+                        // One eased turn: meridians sweep across, narrowing toward the rim, the
+                        // way a spinning globe's lines of longitude do.
+                        float e = phase < 0.5f ? 4f * phase * phase * phase
+                                : 1f - (float) Math.pow(-2f * phase + 2f, 3) / 2f;
+                        double base = Math.asin(4.0 / 9.0) + e * Math.PI;
+                        int alpha = p.getAlpha();
+                        float presence = (float) Math.sin(Math.PI * phase);
+                        for (int k = 0; k < 2; k++) {
+                            double a = base + k * Math.PI / 2;
+                            float half = 9f * (float) Math.abs(Math.sin(a));
+                            // The second meridian fades in and out with the turn, so the first
+                            // and last frames are the still icon.
+                            if (k == 1) p.setAlpha(Math.round(alpha * presence));
+                            if (half < 0.4f) {
+                                c.drawLine(12, 3, 12, 21, p);
+                            } else {
+                                c.drawOval(new RectF(12 - half, 3, 12 + half, 21), p);
+                            }
+                        }
+                        p.setAlpha(alpha);
+                    }
                     break;
                 default:
                     break;
