@@ -18,6 +18,11 @@ public final class LayoutEditorSettings {
         return Collections.unmodifiableList(Arrays.asList(LyricsLayoutEditController.coveredSettings()));
     }
 
+    /** The next editor opened goes straight to this setting's element, tab and sheet. */
+    public static void openOn(Settings.Setting<?> setting) {
+        LyricsLayoutEditController.requestFocus(setting);
+    }
+
     /** Whether a covered setting belongs to the Now Playing card editor (else the lyrics one). */
     public static boolean isCardSetting(Settings.Setting<?> setting) {
         return setting != null && setting.key != null && setting.key.startsWith("lyrics_live_card");

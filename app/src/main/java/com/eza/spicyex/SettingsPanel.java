@@ -457,6 +457,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         Object target = entry.target;
         searchField.setText("");
         if (target instanceof EditorTarget) {
+            com.eza.spicyex.hooks.LayoutEditorSettings.openOn(((EditorTarget) target).setting);
             openEditor(((EditorTarget) target).mode);
         } else if (target instanceof Settings.Section) {
             Settings.Section section = (Settings.Section) target;
