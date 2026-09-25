@@ -1351,6 +1351,7 @@ final class LyricsShareCardController {
         row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         row.setTag(new Object[]{tick, text});
         row.setOnClickListener(v -> togglePicked(index, row));
+        pressable(row);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.bottomMargin = dp(2);
@@ -1962,6 +1963,7 @@ final class LyricsShareCardController {
         view.setOnTouchListener((v, event) -> {
             detector.onTouchEvent(event);
             handleDrag(event, touchSlop);
+            pressCard(event);
             return true;
         });
     }
@@ -2024,6 +2026,50 @@ final class LyricsShareCardController {
             default:
                 break;
         }
+    }
+
+    /**
+     * The card gives under the finger, as in Apple Music: it sinks a little when pressed and
+     * springs back on release - or as soon as a drag or swipe takes over.
+     */
+    private void pressCard(android.view.MotionEvent event) {
+        View card = cardHost;
+        if (card == null) return;
+        int action = event.getActionMasked();
+        if (action == android.view.MotionEvent.ACTION_DOWN) {
+            cardPressed = true;
+            card.setPivotX(card.getWidth() / 2f);
+            card.setPivotY(card.getHeight() / 2f);
+            card.animate().scaleX(0.96f).scaleY(0.96f).setDuration(160)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+        } else if (cardPressed && (action == android.view.MotionEvent.ACTION_UP
+                || action == android.view.MotionEvent.ACTION_CANCEL
+                || (action == android.view.MotionEvent.ACTION_MOVE && dragging))) {
+            cardPressed = false;
+            springBack(card);
+        }
+    }
+
+    private boolean cardPressed;
+
+    private static void springBack(View view) {
+        view.animate().scaleX(1f).scaleY(1f).setDuration(460)
+                .setInterpolator(new android.view.animation.OvershootInterpolator(2.2f)).start();
+    }
+
+    /** List rows (the line picker): the same give on press. */
+    private static void pressable(View view) {
+        view.setOnTouchListener((v, event) -> {
+            int action = event.getActionMasked();
+            if (action == android.view.MotionEvent.ACTION_DOWN) {
+                v.animate().scaleX(0.96f).scaleY(0.96f).setDuration(140)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+            } else if (action == android.view.MotionEvent.ACTION_UP
+                    || action == android.view.MotionEvent.ACTION_CANCEL) {
+                springBack(v);
+            }
+            return false;
+        });
     }
 
     private static float rubber(float distance, float limit) {
