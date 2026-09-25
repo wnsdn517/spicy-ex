@@ -293,17 +293,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         LinearLayout card = style.newCard();
         card.setTag(PanelTags.card(section));
         for (Settings.Setting<?> setting : items) renderSetting(card, setting);
-        if (section == Settings.LYRICS_SCREEN) {
-            // Everything about how the lyrics screen looks is edited on the screen itself.
-            rows.actionRow(card, Kind.ALIGN_VERTICAL_DISTRIBUTE_CENTER,
-                    uiStrings.get("settings_layout_editor", "Layout editor…"),
-                    v -> openEditor(EDITOR_LYRICS));
-        }
-        if (section == Settings.NOW_PLAYING) {
-            rows.actionRow(card, Kind.ALIGN_VERTICAL_DISTRIBUTE_CENTER,
-                    uiStrings.get("settings_card_editor", "Now playing card editor…"),
-                    v -> openEditor(EDITOR_CARD));
-        }
+        appendEditorEntry(card, section);
         if (section == Settings.AI && aiAvailable()) {
             // Dynamic AI rows churn with setup state; they live in their own tagged block so
             // keyed rebinding refreshes them as a unit without touching ordinary rows.
@@ -325,6 +315,42 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
                     LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
         style.attachCard(parent, card, at);
+    }
+
+    /** The sections whose look is edited on the screen itself carry an entry to that editor. */
+    private static boolean hasEditorEntry(Settings.Section section) {
+        return section == Settings.LYRICS_SCREEN || section == Settings.NOW_PLAYING;
+    }
+
+    private void appendEditorEntry(LinearLayout card, Settings.Section section) {
+        if (section == Settings.LYRICS_SCREEN) {
+            // Everything about how the lyrics screen looks is edited on the screen itself.
+            rows.actionRow(card, Kind.ALIGN_VERTICAL_DISTRIBUTE_CENTER,
+                    uiStrings.get("settings_layout_editor", "Layout editor…"),
+                    v -> openEditor(EDITOR_LYRICS));
+        } else if (section == Settings.NOW_PLAYING) {
+            rows.actionRow(card, Kind.ALIGN_VERTICAL_DISTRIBUTE_CENTER,
+                    uiStrings.get("settings_card_editor", "Now playing card editor…"),
+                    v -> openEditor(EDITOR_CARD));
+        } else {
+            return;
+        }
+        card.getChildAt(card.getChildCount() - 1).setTag(PanelTags.EDITOR_ENTRY);
+    }
+
+    /** Keeps a card's editor entry present and last through a keyed rebind. */
+    private void syncEditorEntry(LinearLayout card, Settings.Section section) {
+        View entry = findChildByTag(card, PanelTags.EDITOR_ENTRY);
+        if (!hasEditorEntry(section)) {
+            if (entry != null) card.removeView(entry);
+            return;
+        }
+        if (entry == null) {
+            appendEditorEntry(card, section);
+        } else if (card.indexOfChild(entry) != card.getChildCount() - 1) {
+            card.removeView(entry);
+            card.addView(entry);
+        }
     }
 
     private void appendDebugCard(LinearLayout parent, int at) {
@@ -492,19 +518,21 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     /** Keyed card sync: stale rows out, the rest reused by ID and patched, missing rows built. */
     private void rebindCard(Settings.Section target, int headerIdx) {
         List<Settings.Setting<?>> items = groupVisibleSettings().get(target);
-        if (items == null || items.isEmpty()) {
+        if (items == null) items = new ArrayList<>();
+        if (items.isEmpty() && !hasEditorEntry(target)) {
             rebuildSections(); // defensive: rendered section without visible settings
             return;
         }
         int cardIdx = indexOfChildByTag(PanelTags.card(target));
-        LinearLayout card;
         if (cardIdx < 0 || !(sectionsContainer.getChildAt(cardIdx) instanceof LinearLayout)) {
-            card = style.newCard();
-            card.setTag(PanelTags.card(target));
-            style.attachCard(sectionsContainer, card, headerIdx + 1);
-        } else {
-            card = (LinearLayout) sectionsContainer.getChildAt(cardIdx);
+            // A section just expanded: its card is built whole, by the same code as a full
+            // render. Built here row by row, it lacked everything that is not a setting row -
+            // the editor entry above all, which then only showed after reopening the panel with
+            // the section still expanded.
+            appendSectionCard(sectionsContainer, target, items, headerIdx + 1);
+            return;
         }
+        LinearLayout card = (LinearLayout) sectionsContainer.getChildAt(cardIdx);
         PanelSnapshot snapshot = captureSnapshot();
         Map<String, Settings.Setting<?>> byKey = new java.util.HashMap<>();
         List<String> visibleKeys = new ArrayList<>();
@@ -552,6 +580,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         }
         refreshAiDynamicBlock(card, target);
         refreshConnectDynamicBlock(card, target);
+        syncEditorEntry(card, target);
     }
 
     /** AI dynamic rows re-render as one tagged block; ordinary AI settings rows patch by key. */
