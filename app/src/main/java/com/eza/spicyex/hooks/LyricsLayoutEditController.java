@@ -149,6 +149,11 @@ final class LyricsLayoutEditController {
 
     /** One editor invocation's mutable state - a plain instance instead of a pile of one-element
      *  arrays now that there's real state (selected element, snapshot, current drag) to carry. */
+    /** The settings the editor covers, for the settings search (see LayoutEditorSettings). */
+    static Settings.Setting<?>[] coveredSettings() {
+        return Session.TOUCHED_SETTINGS.clone();
+    }
+
     private static final class Session implements EditorHandle {
         private static final Settings.Setting<?>[] TOUCHED_SETTINGS = {
                 Settings.TRACK_INFO_POSITION, Settings.TRACK_INFO_ART_RADIUS,

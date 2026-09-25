@@ -64,6 +64,11 @@
     <string name="settings_source_drag">끌어서 순서 변경</string>
     <string name="settings_source_rank_smart">자동</string>
     <string name="settings_source_none_on">켜진 제공자 없음</string>
+    <string name="settings_search_hint">설정 검색</string>
+    <string name="settings_search_empty">일치하는 설정이 없어요</string>
+    <string name="settings_search_related">관련 설정</string>
+    <string name="settings_search_editor_lyrics">레이아웃 에디터 · 가사 화면</string>
+    <string name="settings_search_editor_card">레이아웃 에디터 · 재생 중 카드</string>
     <string name="settings_language_search">언어 검색</string>
     <string name="settings_language_suggested">추천</string>
     <string name="settings_language_all">모든 언어</string>

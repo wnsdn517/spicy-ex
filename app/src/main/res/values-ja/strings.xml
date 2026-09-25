@@ -64,6 +64,11 @@
     <string name="settings_source_drag">ドラッグして並び替え</string>
     <string name="settings_source_rank_smart">自動</string>
     <string name="settings_source_none_on">有効なソースなし</string>
+    <string name="settings_search_hint">設定を検索</string>
+    <string name="settings_search_empty">一致する設定はありません</string>
+    <string name="settings_search_related">関連する設定</string>
+    <string name="settings_search_editor_lyrics">レイアウトエディター · 歌詞画面</string>
+    <string name="settings_search_editor_card">レイアウトエディター · 再生中カード</string>
     <string name="settings_tap_seek_taken_by_like">オフ · ダブルタップはいいね</string>
     <string name="settings_tap_seek_double_tap_turns_off_like">選ぶとダブルタップでいいねはオフになります</string>
     <string name="settings_double_tap_like_note">ダブルタップは歌詞の移動に使われています。オンにするとそちらはオフになります。</string>

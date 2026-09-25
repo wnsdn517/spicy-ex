@@ -90,6 +90,11 @@
     <string name="settings_source_drag">Drag to reorder</string>
     <string name="settings_source_rank_smart">Smart</string>
     <string name="settings_source_none_on">No sources on</string>
+    <string name="settings_search_hint">Search settings</string>
+    <string name="settings_search_empty">No matching settings</string>
+    <string name="settings_search_related">Related</string>
+    <string name="settings_search_editor_lyrics">Layout editor · Lyrics screen</string>
+    <string name="settings_search_editor_card">Layout editor · Now playing</string>
     <string name="settings_language_search">Search languages</string>
     <string name="settings_language_suggested">Suggested</string>
     <string name="settings_language_all">All languages</string>
