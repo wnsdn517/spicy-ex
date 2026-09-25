@@ -187,7 +187,8 @@ public class BlurredRowLayout extends LinearLayout {
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        if (content != null) {
+        // The nodes exist only on 31+ (see above); the check also tells lint so.
+        if (content != null && Build.VERSION.SDK_INT >= 31) {
             content.discardDisplayList();
             effect.discardDisplayList();
             cache.discardDisplayList();

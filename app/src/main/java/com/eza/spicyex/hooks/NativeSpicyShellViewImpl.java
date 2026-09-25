@@ -1243,6 +1243,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 programmaticScrollUntilMs = 0;
                 revealChrome();
             }
+            trackPressedLyric(event);
             return tapSeekHandler.onTouch(view, event);
         });
         lyricsFrame = new FrameLayout(activity);
@@ -3335,7 +3336,67 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         return -1;
     }
 
+    /** The lyric row under a finger that may be about to long-press it (share), and where. */
+    private View pressedLyricRow;
+    private float pressedLyricDownY;
+    private final Runnable shrinkPressedLyric = () -> {
+        View row = pressedLyricRow;
+        if (row == null || !row.isAttachedToWindow()) return;
+        // Held down, the line sinks a little, as in Apple Music, until the sheet opens. (No
+        // cancel(): a new scale animation replaces only the scale, not the row's other motion.)
+        row.animate().scaleX(0.94f).scaleY(0.94f)
+                .setDuration(Math.max(160, android.view.ViewConfiguration.getLongPressTimeout() - 60))
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+    };
+
+    /**
+     * Apple-Music-style press feedback for long-press-to-share: a line held (not scrolled) shrinks
+     * slightly, and springs back when released, scrolled, or when the share sheet opens.
+     */
+    private void trackPressedLyric(android.view.MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case android.view.MotionEvent.ACTION_DOWN: {
+                releasePressedLyric();
+                if (config == null || !Boolean.TRUE.equals(config.get(Settings.LONG_PRESS_SHARE))) return;
+                int index = appliedLineIndexUnder(event.getY());
+                if (index < 0 || document == null) return;
+                AppliedLine line = document.appliedLines.get(index);
+                if (line == null || line.dotLine || line.text == null || line.text.trim().isEmpty()) return;
+                View row = rowMountController.attachedRowView(line);
+                if (row == null || row.getWidth() <= 0) return;
+                row.setPivotX(row.getWidth() / 2f);
+                row.setPivotY(row.getHeight() / 2f);
+                pressedLyricRow = row;
+                pressedLyricDownY = event.getY();
+                // A beat later, so a flick that starts on a line does not pulse it.
+                row.postDelayed(shrinkPressedLyric, 90);
+                break;
+            }
+            case android.view.MotionEvent.ACTION_MOVE:
+                if (pressedLyricRow != null && Math.abs(event.getY() - pressedLyricDownY) >= dp(10)) {
+                    releasePressedLyric();
+                }
+                break;
+            case android.view.MotionEvent.ACTION_UP:
+            case android.view.MotionEvent.ACTION_CANCEL:
+                releasePressedLyric();
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void releasePressedLyric() {
+        View row = pressedLyricRow;
+        pressedLyricRow = null;
+        if (row == null) return;
+        row.removeCallbacks(shrinkPressedLyric);
+        row.animate().scaleX(1f).scaleY(1f).setDuration(460)
+                .setInterpolator(new android.view.animation.OvershootInterpolator(2.2f)).start();
+    }
+
     private void shareLyricLineAt(float yInScroll) {
+        releasePressedLyric();
         if (config == null || !Boolean.TRUE.equals(config.get(Settings.LONG_PRESS_SHARE))) return;
         SpotifyTrack track = currentTrackThrottled();
         if (track == null) return;
