@@ -65,8 +65,6 @@
     <string name="settings_source_rank_smart">自動</string>
     <string name="settings_source_none_on">有効なソースなし</string>
     <string name="lyrics_translation_retrying">翻訳を再試行しています…</string>
-    <string name="settings_source_refusing">HTTP %1$d が続いています。待っても回復しないため、オフにすることをおすすめします。</string>
-    <string name="settings_source_busy">混雑中です (HTTP %1$d)。しばらくすると回復します。</string>
     <string name="settings_search_hint">設定を検索</string>
     <string name="settings_search_empty">一致する設定はありません</string>
     <string name="settings_search_related">関連する設定</string>

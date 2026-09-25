@@ -185,23 +185,6 @@ public final class SourceOrderEditor {
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             aboutLp.topMargin = style.dp(1);
             texts.addView(about, aboutLp);
-            // How its server has been answering: refusing for good (suggest turning it off), or
-            // busy for now (it will come back by itself).
-            com.eza.spicyex.lyrics.ProviderHealth.Advice advice = enabled
-                    ? com.eza.spicyex.lyrics.ProviderHealth.advice(source, System.currentTimeMillis()) : null;
-            if (advice != null) {
-                String note = advice.suggestOff
-                        ? String.format(java.util.Locale.ROOT, strings.get("settings_source_refusing",
-                                "Keeps answering HTTP %1$d - this won't recover by waiting. Consider turning it off."),
-                                advice.status)
-                        : String.format(java.util.Locale.ROOT, strings.get("settings_source_busy",
-                                "Busy right now (HTTP %1$d) - it recovers by itself."), advice.status);
-                TextView warn = style.text(note, 12, advice.suggestOff ? 0xFFFFB74D : PanelStyle.COL_SUMMARY, false);
-                LinearLayout.LayoutParams warnLp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                warnLp.topMargin = style.dp(3);
-                texts.addView(warn, warnLp);
-            }
             row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
             GlossyToggle toggle = new GlossyToggle(context);
@@ -210,8 +193,6 @@ public final class SourceOrderEditor {
             toggle.setOnChangeListener(() -> {
                 EnumMap<Source, Boolean> next = currentEnabled();
                 next.put(source, toggle.isChecked());
-                // Off or back on, its failure record starts over.
-                com.eza.spicyex.lyrics.ProviderHealth.forget(source);
                 // After the switch's own slide: the block re-renders on commit.
                 toggle.postDelayed(() -> commit(rankingValue(), order, next), 180);
             });

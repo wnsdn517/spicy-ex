@@ -82,8 +82,6 @@
     <string name="settings_source_rank_smart">Smart</string>
     <string name="settings_source_none_on">No sources on</string>
     <string name="lyrics_translation_retrying">Retrying translation…</string>
-    <string name="settings_source_refusing">Keeps answering HTTP %1$d - this won\'t recover by waiting. Consider turning it off.</string>
-    <string name="settings_source_busy">Busy right now (HTTP %1$d) - it recovers by itself.</string>
     <string name="settings_search_hint">Search settings</string>
     <string name="settings_search_empty">No matching settings</string>
     <string name="settings_search_related">Related</string>
