@@ -790,6 +790,7 @@ final class LyricsShareCardController {
         currentTextLayer = null;
         currentCode = null;
         currentCodeView = null;
+        lineSlides.clear();
         pendingFlyRow = null;
         picker = null;
         pickRows.clear();
@@ -2571,6 +2572,7 @@ final class LyricsShareCardController {
      * a line pushed off the card slides out the other way.
      */
     private void swapText(Bitmap base, List<Piece> pieces, Transition transition) {
+        if (transition != Transition.ALIGN) settleLineSlides();
         currentBase.setImageBitmap(base);
         FrameLayout old = currentTextLayer;
         Map<Integer, ImageView> oldViews = pieceViews;
@@ -2601,9 +2603,10 @@ final class LyricsShareCardController {
             Piece before = oldData.get(piece.id);
             ImageView beforeView = oldViews.get(piece.id);
             if (view == null) continue;
-            if (transition == Transition.ALIGN && before != null && beforeView != null
-                    && slideLines(layer, piece, view, before, beforeView, cardScale, ease)) {
-                continue;
+            if (transition == Transition.ALIGN && before != null && beforeView != null) {
+                if (slideLines(layer, piece, view, before, beforeView, cardScale, ease)) continue;
+                // Cannot slide (the text re-fitted): a slide still running lands first.
+                settleLineSlide(piece.id);
             }
             if (before != null && beforeView != null && piece.id >= 0) {
                 float fromY = Math.round(before.y * cardScale) + beforeView.getTranslationY();
@@ -2661,6 +2664,12 @@ final class LyricsShareCardController {
             return false;
         }
         Bitmap image = piece.bitmap;
+        // Re-aligned again mid-slide: the lines still travelling start from where they are now,
+        // not from where the last slide was taking them, and that slide's hand-over is
+        // cancelled - left running, it revealed the old text under the new strips (the text
+        // split in two).
+        LineSlide previous = lineSlides.remove(piece.id);
+        if (previous != null) previous.host.removeCallbacks(previous.reveal);
         List<View> strips = new ArrayList<>();
         for (int k = 0; k < n; k++) {
             int left = Math.max(0, (int) Math.floor(piece.lineLeft[k]) - 6);
@@ -2677,26 +2686,78 @@ final class LyricsShareCardController {
             lp.leftMargin = Math.round((piece.x + left) * cardScale);
             lp.topMargin = Math.round((piece.y + top) * cardScale);
             layer.addView(strip, lp);
-            strip.setTranslationX((before.x + before.lineLeft[k] - piece.x - piece.lineLeft[k]) * cardScale
-                    + beforeView.getTranslationX());
-            strip.setTranslationY((before.y + before.lineTop[k] - piece.y - piece.lineTop[k]) * cardScale
-                    + beforeView.getTranslationY());
+            View flying = previous != null && k < previous.strips.size() ? previous.strips.get(k) : null;
+            if (flying != null && flying.getParent() instanceof View) {
+                // Where that line is on the card this frame, in the new layer's terms.
+                // (From its margins: a strip added this same frame has not been laid out yet.)
+                View oldLayer = (View) flying.getParent();
+                FrameLayout.LayoutParams at = (FrameLayout.LayoutParams) flying.getLayoutParams();
+                strip.setTranslationX(oldLayer.getX() + at.leftMargin + flying.getTranslationX()
+                        - layer.getX() - lp.leftMargin);
+                strip.setTranslationY(oldLayer.getY() + at.topMargin + flying.getTranslationY()
+                        - layer.getY() - lp.topMargin);
+            } else {
+                strip.setTranslationX((before.x + before.lineLeft[k] - piece.x - piece.lineLeft[k]) * cardScale
+                        + beforeView.getTranslationX());
+                strip.setTranslationY((before.y + before.lineTop[k] - piece.y - piece.lineTop[k]) * cardScale
+                        + beforeView.getTranslationY());
+            }
             // Line after line, a beat apart: the block ripples into its new shape.
             strip.animate().translationX(0f).translationY(0f).setStartDelay(28L * k).setDuration(440)
                     .setInterpolator(ease).start();
             strips.add(strip);
         }
+        if (previous != null) removeStrips(previous.strips);
         if (strips.isEmpty()) return false;
         beforeView.setVisibility(View.INVISIBLE);
         view.setAlpha(0f);
         // The whole piece takes over once every line has arrived.
-        view.postDelayed(() -> {
+        LineSlide slide = new LineSlide(view, strips);
+        slide.reveal = () -> {
+            if (lineSlides.get(piece.id) == slide) lineSlides.remove(piece.id);
             view.setAlpha(1f);
-            for (View strip : strips) {
-                if (strip.getParent() instanceof ViewGroup) ((ViewGroup) strip.getParent()).removeView(strip);
-            }
-        }, 440L + 28L * (n - 1) + 20L);
+            removeStrips(strips);
+        };
+        lineSlides.put(piece.id, slide);
+        view.postDelayed(slide.reveal, 440L + 28L * (n - 1) + 20L);
         return true;
+    }
+
+    /** A lyric line's wrapped lines sliding to a new alignment, and the hand-over after. */
+    private static final class LineSlide {
+        final View host;
+        final List<View> strips;
+        Runnable reveal;
+
+        LineSlide(View host, List<View> strips) {
+            this.host = host;
+            this.strips = strips;
+        }
+    }
+
+    /** Slides in flight, by lyric line. */
+    private final Map<Integer, LineSlide> lineSlides = new java.util.HashMap<>();
+
+    private static void removeStrips(List<View> strips) {
+        for (View strip : strips) {
+            strip.animate().cancel();
+            if (strip.getParent() instanceof ViewGroup) ((ViewGroup) strip.getParent()).removeView(strip);
+        }
+    }
+
+    /**
+     * Any other text change while lines are still sliding: they finish at once where they are
+     * headed (the whole piece shown, the strips gone), so the next move starts from one copy.
+     */
+    private void settleLineSlides() {
+        for (Integer id : new ArrayList<>(lineSlides.keySet())) settleLineSlide(id);
+    }
+
+    private void settleLineSlide(int id) {
+        LineSlide slide = lineSlides.remove(id);
+        if (slide == null) return;
+        slide.host.removeCallbacks(slide.reveal);
+        slide.reveal.run();
     }
 
     /** The pieces as views, in the preview's scale of the card. */
@@ -2777,6 +2838,7 @@ final class LyricsShareCardController {
 
     private void swapCard(Bitmap base, List<Piece> pieces, Transition transition, Bitmap code,
                           CodeArt codeArt, CodeSlot slot) {
+        settleLineSlides();
         FrameLayout incoming = new FrameLayout(activity);
         ImageView baseView = new ImageView(activity);
         baseView.setImageBitmap(base);
