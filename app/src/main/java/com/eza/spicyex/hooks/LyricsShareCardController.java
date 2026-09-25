@@ -704,40 +704,74 @@ final class LyricsShareCardController {
         candidate.add(next);
         if (!selectionFits(candidate)) return;
         FrameLayout carousel = (FrameLayout) cardHost.getParent();
-        TextView peek = new TextView(activity);
-        peek.setText("\u2191  " + safe(document.appliedLines.get(next).text));
-        peek.setTextColor(Color.WHITE);
-        peek.setTextSize(15);
-        peek.setTypeface(Typeface.DEFAULT_BOLD);
-        peek.setSingleLine(true);
-        peek.setEllipsize(TextUtils.TruncateAt.END);
-        peek.setPadding(dp(16), dp(10), dp(16), dp(10));
-        android.graphics.drawable.GradientDrawable pill = new android.graphics.drawable.GradientDrawable();
-        pill.setColor(Color.argb(150, 20, 20, 24));
-        pill.setCornerRadius(dp(22));
-        peek.setBackground(pill);
+
+        // The next line waits just under the card's foot, a small arrow over it.
+        LinearLayout pill = new LinearLayout(activity);
+        pill.setGravity(Gravity.CENTER_VERTICAL);
+        pill.setPadding(dp(12), dp(8), dp(16), dp(8));
+        android.graphics.drawable.GradientDrawable bg = glass(dp(20), 0, 40);
+        bg.setColor(Color.argb(170, 18, 18, 22));
+        pill.setBackground(bg);
+        pill.setElevation(dp(24));
+        ImageView arrow = new ImageView(activity);
+        arrow.setImageDrawable(new LineIcon(LineIcon.Kind.ARROW_UP, Color.WHITE));
+        LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(dp(16), dp(16));
+        arrowLp.rightMargin = dp(8);
+        pill.addView(arrow, arrowLp);
+        TextView text = new TextView(activity);
+        text.setText(safe(document.appliedLines.get(next).text));
+        text.setTextColor(Color.WHITE);
+        text.setTextSize(14);
+        text.setTypeface(Typeface.DEFAULT_BOLD);
+        text.setSingleLine(true);
+        text.setEllipsize(TextUtils.TruncateAt.END);
+        text.setMaxWidth(Math.max(dp(100), cardHost.getWidth() - dp(90)));
+        pill.addView(text);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        lp.bottomMargin = dp(18);
-        peek.setMaxWidth(Math.max(dp(120), cardHost.getWidth() - dp(48)));
-        carousel.addView(peek, lp);
-        peek.setAlpha(0f);
-        peek.setTranslationY(dp(26));
-        PathInterpolator ease = new PathInterpolator(0.3f, 0f, 0.2f, 1f);
-        cardHost.animate().translationY(-dp(10)).setDuration(420).setInterpolator(ease).start();
-        peek.animate().alpha(1f).translationY(0f).setDuration(420).setInterpolator(ease)
-                .withEndAction(() -> peek.postDelayed(() -> {
-                    if (cardHost != null) {
-                        cardHost.animate().translationY(0f).setDuration(380).setInterpolator(ease).start();
-                    }
-                    peek.animate().alpha(0f).translationY(dp(26)).setDuration(380).setInterpolator(ease)
-                            .withEndAction(() -> {
-                                if (peek.getParent() instanceof ViewGroup) {
-                                    ((ViewGroup) peek.getParent()).removeView(peek);
-                                }
-                            }).start();
-                }, 900)).start();
+        lp.bottomMargin = dp(14);
+        carousel.addView(pill, lp);
+        teasePill = pill;
+
+        // In: the card lifts a touch as if to make room, and the line rises into view with it.
+        PathInterpolator glide = new PathInterpolator(0.2f, 0.9f, 0.2f, 1f);
+        pill.setAlpha(0f);
+        pill.setTranslationY(dp(22));
+        pill.setScaleX(0.94f);
+        pill.setScaleY(0.94f);
+        cardHost.animate().translationY(-dp(12)).setDuration(560).setInterpolator(glide).start();
+        pill.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(560)
+                .setInterpolator(glide).start();
+        // While it waits, the arrow beckons upward twice.
+        android.animation.ObjectAnimator bob = android.animation.ObjectAnimator.ofFloat(arrow,
+                View.TRANSLATION_Y, 0f, -dp(3), 0f);
+        bob.setDuration(520);
+        bob.setRepeatCount(1);
+        bob.setStartDelay(560);
+        bob.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+        bob.start();
+        // Out: the line is drawn up toward the card and dissolves; the card settles back.
+        pill.postDelayed(() -> endTease(pill, true), 1700);
+    }
+
+    /** The swipe-up hint on screen, if any: a touch on the card ends it early. */
+    private View teasePill;
+
+    private void endTease(View pill, boolean gently) {
+        if (pill == null || pill.getParent() == null) return;
+        if (teasePill == pill) teasePill = null;
+        pill.animate().cancel();
+        if (cardHost != null) {
+            cardHost.animate().translationY(0f).setDuration(gently ? 620 : 240)
+                    .setInterpolator(gently ? new android.view.animation.OvershootInterpolator(1.1f)
+                            : new PathInterpolator(0.2f, 0.9f, 0.2f, 1f)).start();
+        }
+        pill.animate().alpha(0f).translationY(gently ? -dp(16) : 0f).scaleX(0.9f).scaleY(0.9f)
+                .setDuration(gently ? 440 : 160).setInterpolator(new PathInterpolator(0.4f, 0f, 0.2f, 1f))
+                .withEndAction(() -> {
+                    if (pill.getParent() instanceof ViewGroup) ((ViewGroup) pill.getParent()).removeView(pill);
+                }).start();
     }
 
     private static TextView firstText(View view) {
@@ -870,6 +904,12 @@ final class LyricsShareCardController {
 
         LinearLayout stageColumn = new LinearLayout(activity);
         stageColumn.setOrientation(LinearLayout.VERTICAL);
+        // Nothing on the stage is cut at its frame: the card's shadow, the card lifting or
+        // springing past its size, the hint rising from below it.
+        stageColumn.setClipChildren(false);
+        stageColumn.setClipToPadding(false);
+        page.setClipChildren(false);
+        page.setClipToPadding(false);
         // Not clickable: taps around the card fall through to the scrim and close the sheet.
         stageColumn.addView(topBar(), new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(60)));
@@ -883,8 +923,11 @@ final class LyricsShareCardController {
         this.cardWidthPx = cardWidthPx;
 
         FrameLayout stage = new FrameLayout(activity);
+        stage.setClipChildren(false);
+        stage.setClipToPadding(false);
         FrameLayout carousel = new FrameLayout(activity);
         carousel.setClipChildren(false);
+        carousel.setClipToPadding(false);
         float peekOffset = cardWidthPx + dp(16);
         peekPrev = peekView(-peekOffset);
         peekNext = peekView(peekOffset);
@@ -1320,6 +1363,9 @@ final class LyricsShareCardController {
         LinearLayout list = new LinearLayout(activity);
         list.setOrientation(LinearLayout.VERTICAL);
         list.setPadding(dp(10), dp(4), dp(10), dp(16));
+        // A row that shakes or springs is never cut at the list's edge.
+        list.setClipChildren(false);
+        list.setClipToPadding(false);
         pickRows.clear();
         for (int i = 0; i < document.appliedLines.size(); i++) {
             if (isBlankLine(i)) continue;
@@ -1598,12 +1644,13 @@ final class LyricsShareCardController {
         renderThumbs();
     }
 
+    /** "No": a short, decaying head-shake that stays within a few dp of the row's place. */
     private void nudge(View view) {
-        view.animate().cancel();
-        view.setTranslationX(0f);
-        view.animate().translationX(dp(8)).setDuration(60).withEndAction(() -> view.animate()
-                .translationX(0f).setDuration(420)
-                .setInterpolator(new android.view.animation.OvershootInterpolator(4f)).start()).start();
+        android.animation.ObjectAnimator shake = android.animation.ObjectAnimator.ofFloat(view,
+                View.TRANSLATION_X, 0f, dp(6), -dp(5), dp(3), -dp(2), 0f);
+        shake.setDuration(380);
+        shake.setInterpolator(null);
+        shake.start();
     }
 
     /** Ticks and the count follow the selection, however it changed (picker or swipes). */
@@ -1998,7 +2045,7 @@ final class LyricsShareCardController {
      */
     static final class LineIcon extends android.graphics.drawable.Drawable {
         enum Kind { CLOSE, LINK, DOWNLOAD, MORE, CHECK, ALIGN_START, ALIGN_CENTER, ALIGN_END,
-            POS_TOP, POS_MIDDLE, POS_BOTTOM, CODE, GLOBE, LYRICS }
+            POS_TOP, POS_MIDDLE, POS_BOTTOM, CODE, GLOBE, LYRICS, ARROW_UP }
 
         private final Kind kind;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -2100,6 +2147,11 @@ final class LyricsShareCardController {
                     }
                     break;
                 }
+                case ARROW_UP:
+                    c.drawLine(12, 19, 12, 5.5f, p);
+                    c.drawLine(6.5f, 11, 12, 5.5f, p);
+                    c.drawLine(17.5f, 11, 12, 5.5f, p);
+                    break;
                 case LYRICS: {
                     // A list with the first rows ticked: pick lines.
                     float[] ys = {6.5f, 12, 17.5f};
@@ -2169,8 +2221,9 @@ final class LyricsShareCardController {
                 if (document == null || picked.isEmpty()) return false;
                 // A press-and-drag already stepped through lines as it went (see below).
                 if (dragStepped) return true;
-                // Swipe up pulls the next lyric up into the card; swipe down brings back the one
-                // before.
+                // A flick, however long, brings in exactly one line: up pulls the next lyric
+                // up into the card, down brings back the one before.
+                flingHandled = true;
                 if (!expandSelection(dy < 0)) bounceText(dy < 0);
                 return true;
             }
@@ -2179,6 +2232,9 @@ final class LyricsShareCardController {
         view.setOnTouchListener((v, event) -> {
             detector.onTouchEvent(event);
             handleDrag(event, touchSlop);
+            if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN && teasePill != null) {
+                endTease(teasePill, false);
+            }
             pressCard(event);
             return true;
         });
@@ -2193,6 +2249,15 @@ final class LyricsShareCardController {
     private boolean dragging;
     private boolean dragStepped;
     private boolean dragHitEdge;
+    private boolean flingHandled;
+    private long dragDownAt;
+    private long dragStartAt;
+    /** The finger rested before it moved: a hold-and-drag, which steps through lines. */
+    private boolean dragHeld;
+    /** Rest this long before moving and a drag counts as held. */
+    private static final long HOLD_MS = 180L;
+    /** A drag still going after this long is deliberate, not a flick, and steps too. */
+    private static final long DELIBERATE_MS = 320L;
 
     private void handleDrag(android.view.MotionEvent event, int touchSlop) {
         if (document == null || picked.isEmpty()) return;
@@ -2204,6 +2269,8 @@ final class LyricsShareCardController {
                 dragging = false;
                 dragStepped = false;
                 dragHitEdge = false;
+                flingHandled = false;
+                dragDownAt = event.getEventTime();
                 break;
             case android.view.MotionEvent.ACTION_MOVE: {
                 float totalX = event.getX() - dragDownX;
@@ -2212,12 +2279,17 @@ final class LyricsShareCardController {
                     if (Math.abs(totalY) > touchSlop && Math.abs(totalY) > Math.abs(totalX) * 1.2f) {
                         dragging = true;
                         dragAnchorY = event.getY();
+                        dragStartAt = event.getEventTime();
+                        dragHeld = dragStartAt - dragDownAt >= HOLD_MS;
                     } else {
                         break;
                     }
                 }
                 float dy = event.getY() - dragAnchorY;
-                if (Math.abs(dy) >= dp(DRAG_STEP_DP) && !dragHitEdge) {
+                // Only a held or deliberate drag steps through lines as it goes; a quick swipe,
+                // however far, just leans the text and brings in one line when it lets go.
+                boolean steps = dragHeld || event.getEventTime() - dragStartAt >= DELIBERATE_MS;
+                if (steps && Math.abs(dy) >= dp(DRAG_STEP_DP) && !dragHitEdge) {
                     boolean up = dy < 0;
                     if (expandSelection(up)) {
                         dragStepped = true;
@@ -2234,8 +2306,16 @@ final class LyricsShareCardController {
             case android.view.MotionEvent.ACTION_UP:
             case android.view.MotionEvent.ACTION_CANCEL:
                 if (dragging) {
-                    if (dragHitEdge) bounceText(event.getY() - dragAnchorY < 0);
-                    else settleText();
+                    float travelled = event.getY() - dragDownY;
+                    if (dragHitEdge) {
+                        bounceText(event.getY() - dragAnchorY < 0);
+                    } else if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP
+                            && !dragStepped && !flingHandled && Math.abs(travelled) >= dp(40)) {
+                        // A swipe released too slowly to count as a flick: still one line.
+                        if (!expandSelection(travelled < 0)) bounceText(travelled < 0);
+                    } else {
+                        settleText();
+                    }
                 }
                 dragging = false;
                 break;
@@ -2586,8 +2666,13 @@ final class LyricsShareCardController {
         pieceViews = newViews;
         pieceData = newData;
 
-        PathInterpolator ease = new PathInterpolator(0.2f, 0.8f, 0.2f, 1f);
-        float travel = dp(30);
+        // One soft curve for every line, so the block moves as one list scrolling: lines that
+        // stay glide (re-sizing as the text re-fits), a line coming in follows on from the
+        // side it was added on by the same distance, and a line pushed out carries on the same
+        // way, fading as it goes.
+        PathInterpolator ease = new PathInterpolator(0.22f, 1f, 0.36f, 1f);
+        long moveMs = 540L;
+        float minTravel = dp(22);
         int oldFirst = Integer.MAX_VALUE;
         int oldLast = Integer.MIN_VALUE;
         for (int id : oldData.keySet()) {
@@ -2595,9 +2680,27 @@ final class LyricsShareCardController {
             oldLast = Math.max(oldLast, id);
         }
         int newFirst = Integer.MAX_VALUE;
-        for (int id : newData.keySet()) newFirst = Math.min(newFirst, id);
+        int newLast = Integer.MIN_VALUE;
+        for (int id : newData.keySet()) {
+            newFirst = Math.min(newFirst, id);
+            newLast = Math.max(newLast, id);
+        }
         boolean translationChange = transition == Transition.TEXT || transition == Transition.ALIGN;
         float cardScale = cardHost.getWidth() / (float) W;
+        // The old text may still lean after a drag: lines leave from where they are seen.
+        float oldLean = old != null ? old.getTranslationY() : 0f;
+        // How far the lines that stay move: the whole block's shift.
+        float shift = 0f;
+        int staying = 0;
+        for (Piece piece : pieces) {
+            Piece before = oldData.get(piece.id);
+            ImageView beforeView = oldViews.get(piece.id);
+            if (before == null || beforeView == null || piece.id < 0) continue;
+            shift += Math.round(piece.y * cardScale)
+                    - (Math.round(before.y * cardScale) + beforeView.getTranslationY() + oldLean);
+            staying++;
+        }
+        if (staying > 0) shift /= staying;
         for (Piece piece : pieces) {
             ImageView view = newViews.get(piece.id);
             Piece before = oldData.get(piece.id);
@@ -2609,44 +2712,65 @@ final class LyricsShareCardController {
                 settleLineSlide(piece.id);
             }
             if (before != null && beforeView != null && piece.id >= 0) {
-                float fromY = Math.round(before.y * cardScale) + beforeView.getTranslationY();
+                float fromY = Math.round(before.y * cardScale) + beforeView.getTranslationY() + oldLean;
                 float toY = Math.round(piece.y * cardScale);
                 float scale = before.size / Math.max(1f, piece.size);
+                // Re-sizing about the text's own anchor, so centred or right-set text stays put.
+                view.setPivotX(anchorX(piece) * cardScale);
+                beforeView.setPivotX(anchorX(before) * cardScale);
                 view.setTranslationY(fromY - toY);
                 view.setScaleX(scale);
                 view.setScaleY(scale);
-                view.animate().translationY(0f).scaleX(1f).scaleY(1f).setDuration(460)
+                view.animate().translationY(0f).scaleX(1f).scaleY(1f).setDuration(moveMs)
                         .setInterpolator(ease).start();
                 if (translationChange) {
                     // Its translation appears or leaves: the old rendering follows the move and
                     // dissolves into the new one.
                     view.setAlpha(0f);
                     view.animate().alpha(1f);
-                    beforeView.animate().translationY(toY - Math.round(before.y * cardScale))
+                    beforeView.animate().translationY(toY - Math.round(before.y * cardScale) - oldLean)
                             .scaleX(1f / scale).scaleY(1f / scale).alpha(0f)
-                            .setDuration(460).setInterpolator(ease).start();
+                            .setDuration(moveMs).setInterpolator(ease).start();
                 } else {
                     beforeView.setVisibility(View.INVISIBLE);
                 }
             } else {
                 boolean below = piece.id > oldLast;
-                view.setTranslationY(below ? travel : -travel);
+                boolean above = piece.id < oldFirst;
+                if (below || above) {
+                    // Comes on from its side, as far as the block moves (at least a little).
+                    float from = below ? Math.max(-shift, minTravel) : -Math.max(shift, minTravel);
+                    view.setTranslationY(from);
+                } else {
+                    // Picked in between: it opens up in place.
+                    view.setPivotX(anchorX(piece) * cardScale);
+                    view.setScaleX(0.92f);
+                    view.setScaleY(0.92f);
+                }
                 view.setAlpha(0f);
-                view.animate().translationY(0f).alpha(1f).setStartDelay(80).setDuration(460)
-                        .setInterpolator(ease).start();
+                view.animate().translationY(0f).scaleX(1f).scaleY(1f).setStartDelay(30)
+                        .setDuration(moveMs).setInterpolator(ease).start();
+                fadeTo(view, 1f, 380L, 90L);
             }
         }
         for (Map.Entry<Integer, ImageView> entry : oldViews.entrySet()) {
             if (newData.containsKey(entry.getKey()) && entry.getKey() >= 0) continue;
             ImageView gone = entry.getValue();
             boolean above = entry.getKey() < newFirst;
-            gone.animate().translationYBy(above ? -travel : travel).alpha(0f).setDuration(380)
-                    .setInterpolator(ease).start();
+            boolean below = entry.getKey() > newLast;
+            if (above || below) {
+                // Carries on the way the block moves, fading out before it reaches the edge.
+                float by = above ? Math.min(shift, -minTravel) : Math.max(shift, minTravel);
+                gone.animate().translationYBy(by).setDuration(moveMs).setInterpolator(ease).start();
+            } else {
+                gone.animate().scaleX(0.92f).scaleY(0.92f).setDuration(moveMs).setInterpolator(ease).start();
+            }
+            fadeTo(gone, 0f, 280L, 0L);
         }
         if (old != null) {
             old.postDelayed(() -> {
                 if (old.getParent() instanceof ViewGroup) ((ViewGroup) old.getParent()).removeView(old);
-            }, 520);
+            }, 580);
         }
     }
 
@@ -2758,6 +2882,30 @@ final class LyricsShareCardController {
         if (slide == null) return;
         slide.host.removeCallbacks(slide.reveal);
         slide.reveal.run();
+    }
+
+    /** Alpha on its own clock, so a line can fade quicker than it moves. */
+    private static void fadeTo(View view, float alpha, long duration, long delay) {
+        android.animation.ObjectAnimator fade = android.animation.ObjectAnimator.ofFloat(view, View.ALPHA, alpha);
+        fade.setDuration(duration);
+        fade.setStartDelay(delay);
+        fade.start();
+    }
+
+    /** Where a piece's text is anchored across its image: left, centre or right. */
+    private static float anchorX(Piece piece) {
+        int n = piece.lineLeft.length;
+        if (n == 0) return 0f;
+        float width = piece.bitmap.getWidth();
+        boolean left = true;
+        boolean right = true;
+        for (int k = 0; k < n; k++) {
+            if (piece.lineLeft[k] > 2f) left = false;
+            if (piece.lineRight[k] < width - 3f) right = false;
+        }
+        if (left) return 0f;
+        if (right) return width;
+        return width / 2f;
     }
 
     /** The pieces as views, in the preview's scale of the card. */
