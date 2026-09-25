@@ -193,7 +193,7 @@ public final class Settings {
             "Auto", "Apple Music", "Spicy", "Spotify", "LRCLIB", "NetEase", "QQ Music", "Musixmatch"
     );
 
-    /** Optional desktop-captured Spotify token used only by strict Spicy requests. */
+    /** Optional desktop-captured Spotify token (legacy; the retired Spicy remote is no longer queried). */
     public static final Setting<String> SPICY_MANUAL_TOKEN = stringSetting(
             "lyrics_spicy_manual_token", LYRICS_SOURCES, "Spicy manual token", ""
     );
@@ -646,11 +646,16 @@ public final class Settings {
             "lyric_background_render_quality", INTERNAL, "Background render quality", 35, 15, 100, 5
     );
 
-    // --- Romanization (transliteration controls) ---
+    // Only meaningful when BACKGROUND_STYLE is ANIMATED_TEXTURE - the AGSL noise shader renders
+    // into a downsampled offscreen surface (see AmbientArtworkBackgroundView#setRenderScale) and
+    // upscales it, since its cost is per output pixel and a full-res shader running continuously
+    // for the whole lyrics session is a real sustained heat source on weaker GPUs. Lower values
+    // trade a softer/grainier look for less GPU load; higher values render crisper at more cost.
     public static final Setting<Boolean> DOWNLOAD_LANGUAGE_MODELS = boolSetting(
             "download_language_models", TRANSLITERATION, "Download language models", false
     );
 
+    // --- Romanization (transliteration controls) ---
     public static final Setting<Boolean> TRANSLITERATION_ENABLED = boolSetting(
             "lyrics_transliteration_enabled", TRANSLITERATION, "Transliterate lyrics", false
     );

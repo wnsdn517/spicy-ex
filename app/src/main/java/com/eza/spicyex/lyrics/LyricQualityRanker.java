@@ -140,14 +140,16 @@ public final class LyricQualityRanker {
         if (source.equals("musixmatch")) return Source.MUSIXMATCH;
         if (source.contains("lrclib")) return Source.LRCLIB;
         if (source.contains("spotify_native") || source.contains("native spotify")) return Source.NATIVE;
-        if (source.contains("spicy") || source.contains("apple") || source.contains("lenerd")) return Source.SPICY;
+        if (source.contains("spicy") || source.contains("apple") || source.contains("lenerd")
+                || source.contains("amll")) return Source.SPICY;
 
         String providerLabel = LyricsDocument.safe(provider).toLowerCase(java.util.Locale.US);
         if (providerLabel.contains("lrclib")) return Source.LRCLIB;
         if (providerLabel.contains("native spotify") || providerLabel.contains("musixmatch")) {
             return Source.NATIVE;
         }
-        if (providerLabel.contains("spicy") || providerLabel.contains("apple") || providerLabel.contains("lenerd")) return Source.SPICY;
+        if (providerLabel.contains("spicy") || providerLabel.contains("apple") || providerLabel.contains("lenerd")
+                || providerLabel.contains("amll")) return Source.SPICY;
         if ("qq_music".equals(fetchSource) || "qq music".equals(provider.toLowerCase(java.util.Locale.US))) return Source.QQ_MUSIC;
         if (source.contains("netease") || providerLabel.contains("netease")) return Source.NETEASE;
         return Source.UNKNOWN;

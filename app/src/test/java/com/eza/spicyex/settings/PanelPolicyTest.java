@@ -246,6 +246,11 @@ public class PanelPolicyTest {
         assertEquals("Enable transliteration", PanelPolicy.optionUnavailableReason(
                 (Settings.StringSetting) Settings.LIVE_CARD_SECONDARY_MODE,
                 "Both", fullOff, strings()));
+        PanelSnapshot missingModel = PanelSnapshot.builder().allCapabilities()
+                .languageModelReady(false).build();
+        assertEquals("Download language models", PanelPolicy.optionUnavailableReason(
+                (Settings.StringSetting) Settings.LIVE_CARD_SECONDARY_MODE,
+                "Both", missingModel, strings()));
         PanelSnapshot fullOn = PanelSnapshot.builder().allCapabilities()
                 .put(Settings.TRANSLITERATION_ENABLED, true)
                 .put(Settings.TRANSLATION_ENABLED, true).build();

@@ -143,7 +143,7 @@ public final class PanelSnapshot {
             return this;
         }
 
-        /** All capabilities on: the Full-build, modern-device baseline tests start from. */
+        /** All capabilities on: the model-installed, modern-device baseline tests start from. */
         public Builder allCapabilities() {
             translationAvailable = true;
             transliterationAvailable = true;

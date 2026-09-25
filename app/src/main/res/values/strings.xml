@@ -694,4 +694,6 @@
     <string name="settings_search_lyric_tap_seek_mode">tap a line to jump there, play from this line</string>
     <string name="settings_search_lyrics_status_bar_hidden_portrait">hide clock and battery, fullscreen, notification bar</string>
     <string name="settings_search_lyrics_status_bar_hidden_landscape">hide clock and battery, fullscreen, notification bar</string>
+    <string name="settings_language_model_delete_desc">Delete the downloaded language model pack? This frees about %1$s MB.</string>
+    <string name="settings_language_model_tap_to_delete_size">Tap to delete · %1$s MB</string>
 </resources>

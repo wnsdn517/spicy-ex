@@ -8,6 +8,7 @@ import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
@@ -56,7 +57,10 @@ public final class SpicyCacheStore {
         Helper local = helper;
         if (local != null) return local;
         synchronized (SpicyCacheStore.class) {
-            if (helper == null) helper = new Helper(context.getApplicationContext());
+            if (helper == null) {
+                Context application = context.getApplicationContext();
+                helper = new Helper(application == null ? context : application);
+            }
             return helper;
         }
     }
@@ -83,26 +87,39 @@ public final class SpicyCacheStore {
      */
     public static boolean put(Context context, String namespace, String key, String value,
                               long quotaBytes) {
+        return put(context, namespace, key, value, quotaBytes, Integer.MAX_VALUE);
+    }
+
+    public static boolean put(Context context, String namespace, String key, String value,
+                              long quotaBytes, int maxEntries) {
         if (context == null || key == null || value == null) return false;
         try {
             Helper db = helper(context);
             db.importLegacyOnce(namespace);
-            long bytes = value.length();
+            long bytes = utf8Bytes(value);
             SQLiteDatabase writable = db.getWritableDatabase();
             synchronized (SpicyCacheStore.class) {
-                if (quotaBytes != CacheStoragePolicy.UNLIMITED) {
-                    if (bytes > quotaBytes) return false;
+                if (quotaBytes != CacheStoragePolicy.UNLIMITED && bytes > quotaBytes) return false;
+                if (quotaBytes != CacheStoragePolicy.UNLIMITED
+                        && (CANONICAL.equals(namespace) || RESPONSES.equals(namespace))
+                        && usedBytes(writable, namespace) - entryBytes(writable, namespace, key)
+                        + bytes > quotaBytes) return false;
+                writable.beginTransaction();
+                try {
                     writable.delete(TABLE, "namespace = ? AND entry_key = ?",
                             new String[]{namespace, key});
-                    evictUntilFits(writable, namespace, bytes, quotaBytes);
+                    evictUntilFits(writable, namespace, bytes, quotaBytes, maxEntries);
+                    ContentValues values = new ContentValues();
+                    values.put("namespace", namespace);
+                    values.put("entry_key", key);
+                    values.put("value", value);
+                    values.put("value_bytes", bytes);
+                    values.put("updated_at_ms", System.currentTimeMillis());
+                    writable.replaceOrThrow(TABLE, null, values);
+                    writable.setTransactionSuccessful();
+                } finally {
+                    writable.endTransaction();
                 }
-                ContentValues values = new ContentValues();
-                values.put("namespace", namespace);
-                values.put("entry_key", key);
-                values.put("value", value);
-                values.put("value_bytes", bytes);
-                values.put("updated_at_ms", System.currentTimeMillis());
-                writable.replaceOrThrow(TABLE, null, values);
             }
             return true;
         } catch (Throwable t) {
@@ -111,9 +128,10 @@ public final class SpicyCacheStore {
     }
 
     private static void evictUntilFits(SQLiteDatabase db, String namespace, long incomingBytes,
-                                       long quotaBytes) {
+                                       long quotaBytes, int maxEntries) {
         long used = usedBytes(db, namespace);
-        while (used + incomingBytes > quotaBytes) {
+        long entries = entryCount(db, namespace);
+        while (exceedsCapacity(used, incomingBytes, entries, maxEntries, quotaBytes)) {
             String oldest = null;
             long oldestBytes = 0;
             try (Cursor cursor = db.query(TABLE, new String[]{"entry_key", "value_bytes"},
@@ -125,13 +143,16 @@ public final class SpicyCacheStore {
             }
             db.delete(TABLE, "namespace = ? AND entry_key = ?", new String[]{namespace, oldest});
             used -= oldestBytes;
+            entries--;
         }
     }
 
     public static void remove(Context context, String namespace, String key) {
         if (context == null || key == null) return;
         try {
-            helper(context).getWritableDatabase().delete(TABLE,
+            Helper db = helper(context);
+            db.importLegacyOnce(namespace);
+            db.getWritableDatabase().delete(TABLE,
                     "namespace = ? AND entry_key = ?", new String[]{namespace, key});
         } catch (Throwable ignored) {
         }
@@ -192,9 +213,7 @@ public final class SpicyCacheStore {
         try {
             Helper db = helper(context);
             db.importLegacyOnce(namespace);
-            return (int) DatabaseUtils.longForQuery(db.getReadableDatabase(),
-                    "SELECT COUNT(*) FROM " + TABLE + " WHERE namespace = ?",
-                    new String[]{namespace});
+            return (int) entryCount(db.getReadableDatabase(), namespace);
         } catch (Throwable t) {
             return 0;
         }
@@ -207,6 +226,20 @@ public final class SpicyCacheStore {
                     new String[]{namespace});
         } catch (Throwable t) {
             return 0L;
+        }
+    }
+
+    private static long entryCount(SQLiteDatabase db, String namespace) {
+        return DatabaseUtils.longForQuery(db,
+                "SELECT COUNT(*) FROM " + TABLE + " WHERE namespace = ?",
+                new String[]{namespace});
+    }
+
+    private static long entryBytes(SQLiteDatabase db, String namespace, String key) {
+        try (Cursor cursor = db.query(TABLE, new String[]{"value_bytes"},
+                "namespace = ? AND entry_key = ?", new String[]{namespace, key},
+                null, null, null, "1")) {
+            return cursor.moveToFirst() ? cursor.getLong(0) : 0L;
         }
     }
 
@@ -271,7 +304,7 @@ public final class SpicyCacheStore {
                             row.put("namespace", namespace);
                             row.put("entry_key", entry.getKey());
                             row.put("value", (String) value);
-                            row.put("value_bytes", ((String) value).length());
+                            row.put("value_bytes", utf8Bytes((String) value));
                             row.put("updated_at_ms", now);
                             db.replaceOrThrow(TABLE, null, row);
                             imported++;
@@ -283,12 +316,7 @@ public final class SpicyCacheStore {
                     }
                     legacy.edit().clear().apply();
                 } catch (Throwable t) {
-                    // A cache that fails to import is a cache that refills itself. Mark it done so
-                    // a broken file cannot make every future read pay for reparsing it.
-                    try {
-                        markImported(db, namespace, imported);
-                    } catch (Throwable ignored) {
-                    }
+                    // Keep the source file for a later retry if the transaction did not commit.
                 }
             }
         }
@@ -327,5 +355,17 @@ public final class SpicyCacheStore {
             if (reserved.equals(key)) return true;
         }
         return false;
+    }
+
+    static long utf8Bytes(String value) {
+        return value.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    static boolean exceedsCapacity(long usedBytes, long incomingBytes, long entries,
+                                   int maxEntries, long quotaBytes) {
+        boolean tooManyEntries = entries >= Math.max(1, maxEntries);
+        boolean tooManyBytes = quotaBytes != CacheStoragePolicy.UNLIMITED
+                && (incomingBytes > quotaBytes || usedBytes > quotaBytes - incomingBytes);
+        return tooManyEntries || tooManyBytes;
     }
 }

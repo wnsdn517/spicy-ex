@@ -60,7 +60,8 @@ public final class LanguageModelPack {
 
     public static void attachContext(Context context) {
         if (context == null) return;
-        appContext = context.getApplicationContext();
+        Context applicationContext = context.getApplicationContext();
+        appContext = applicationContext == null ? context : applicationContext;
     }
 
     public static void setReadyListener(Runnable listener) {
@@ -69,6 +70,10 @@ public final class LanguageModelPack {
         // one-shot download callback already happened, but the newly mounted document still
         // needs a chance to reprocess against the installed resources.
         if (listener != null && isReady()) listener.run();
+    }
+
+    public static void clearReadyListener(Runnable listener) {
+        if (readyListener == listener) readyListener = null;
     }
 
     public static void clearTransientState() {
@@ -84,6 +89,7 @@ public final class LanguageModelPack {
     public static void requestDownload() {
         if (appContext == null) { transientStatus = new DownloadStatus(Phase.ERROR, 0, "NO_CONTEXT"); return; }
         if (BuildConfig.LANGUAGE_MODEL_PACK_URL.isEmpty()) { transientStatus = new DownloadStatus(Phase.ERROR, 0, "NO_DOWNLOAD_URL"); return; }
+        if (BuildConfig.LANGUAGE_MODEL_PACK_SHA256.isEmpty()) { transientStatus = new DownloadStatus(Phase.ERROR, 0, "NO_SHA256"); return; }
         if (isReady()) return;
         transientStatus = new DownloadStatus(Phase.DOWNLOADING, 0, "");
         prefetch();
@@ -101,6 +107,11 @@ public final class LanguageModelPack {
             if (!new File(root, required).isFile()) return false;
         }
         return true;
+    }
+
+    /** Size of the installed files, excluding filesystem allocation overhead. */
+    public static long installedSizeBytes() {
+        return isReady() ? sizeBytes(root()) : 0;
     }
 
     public static InputStream open(String relativePath) {
@@ -155,8 +166,7 @@ public final class LanguageModelPack {
         } finally {
             response.close();
         }
-        if (!BuildConfig.LANGUAGE_MODEL_PACK_SHA256.isEmpty()
-                && !BuildConfig.LANGUAGE_MODEL_PACK_SHA256.equalsIgnoreCase(sha256(archive))) {
+        if (!BuildConfig.LANGUAGE_MODEL_PACK_SHA256.equalsIgnoreCase(sha256(archive))) {
             archive.delete();
             transientStatus = new DownloadStatus(Phase.ERROR, 0, "SHA256");
             return;
@@ -299,5 +309,15 @@ public final class LanguageModelPack {
         File[] children = file.listFiles();
         if (children != null) for (File child : children) deleteRecursively(child);
         file.delete();
+    }
+
+    private static long sizeBytes(File file) {
+        if (file == null || !file.exists()) return 0;
+        if (file.isFile()) return file.length();
+        File[] children = file.listFiles();
+        if (children == null) return 0;
+        long total = 0;
+        for (File child : children) total += sizeBytes(child);
+        return total;
     }
 }

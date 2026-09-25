@@ -96,13 +96,16 @@ public final class LyricsFetchDiagnosticsState {
         if (fetchSource.contains("qq")) return "qq_music";
         if (fetchSource.contains("musixmatch")) return "musixmatch";
         if (fetchSource.contains("native")) return "native";
-        if (fetchSource.contains("spicy")) return "spicy";
+        if (fetchSource.contains("apple_music")) return "apple_music";
+        // Legacy cached records used the retired Spicy labels for the same remote endpoint.
+        if (fetchSource.contains("spicy")) return "apple_music";
 
         // Provider is only a compatibility fallback for records whose fetchSource was absent.
         String provider = safeLower(chosen.provider);
         if (provider.contains("lrclib")) return "lrclib";
         if (provider.contains("spotify")) return "native";
-        if (provider.contains("spicy")) return "spicy";
+        if (provider.contains("apple_music")) return "apple_music";
+        if (provider.contains("spicy")) return "apple_music";
         return "unknown";
     }
 

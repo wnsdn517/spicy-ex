@@ -434,7 +434,7 @@ public final class LyricsLineViewState {
         if (line == null) return targetBlurPx;
         AppliedLineRenderState st = state(line);
         if (st.lineBlurSpring == null) {
-            // Snappy but controlled spring (2.8Hz, 0.92 damping) for a firm, "elastic" 
+            // Snappy but controlled spring (2.8Hz, 0.92 damping) for a firm, "elastic"
             // feel when blur follows the active line transition.
             st.lineBlurSpring = new Spring(targetBlurPx, 2.8f, 0.92f);
         }

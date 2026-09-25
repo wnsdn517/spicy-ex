@@ -159,7 +159,8 @@ public final class LyricCaches {
                                          long quotaBytes, int maxEntries) {
         if (context == null || isBlank(value)) return false;
         try {
-            return SpicyCacheStore.put(context, prefsName, sha256(key), value, quotaBytes);
+            return SpicyCacheStore.put(context, prefsName, sha256(key), value, quotaBytes,
+                    maxEntries);
         } catch (Throwable t) {
             Diagnostics.warn("LyricCaches", "putBoundedRecord", t);
             return false;
@@ -267,26 +268,22 @@ public final class LyricCaches {
 
     /** Combined logical-payload usage of the Google processing store, for the settings panel. */
     public static long googleStoreUsageBytes(Context context) {
-        return CacheStoragePolicy.preferenceStoreUsage(context, PREFS_GOOGLE_CACHE,
-                PREFS_GOOGLE_CACHE_ORDER_KEY);
+        return SpicyCacheStore.usageBytes(context, PREFS_GOOGLE_CACHE);
     }
 
     /** Combined logical-payload usage of the Sound artifact store, for the settings panel. */
     public static long soundStoreUsageBytes(Context context) {
-        return CacheStoragePolicy.preferenceStoreUsage(context, PREFS_SOUND_CACHE,
-                PREFS_PROCESSED_CACHE_ORDER_KEY);
+        return SpicyCacheStore.usageBytes(context, PREFS_SOUND_CACHE);
     }
 
     /** Combined logical-payload usage of the Meaning artifact store, for the settings panel. */
     public static long meaningStoreUsageBytes(Context context) {
-        return CacheStoragePolicy.preferenceStoreUsage(context, PREFS_MEANING_CACHE,
-                PREFS_PROCESSED_CACHE_ORDER_KEY);
+        return SpicyCacheStore.usageBytes(context, PREFS_MEANING_CACHE);
     }
 
     /** Combined logical-payload usage of the detection artifact store, for the settings panel. */
     public static long detectionStoreUsageBytes(Context context) {
-        return CacheStoragePolicy.preferenceStoreUsage(context, PREFS_DETECTION_CACHE,
-                PREFS_PROCESSED_CACHE_ORDER_KEY);
+        return SpicyCacheStore.usageBytes(context, PREFS_DETECTION_CACHE);
     }
 
     private static String sha256(String value) {

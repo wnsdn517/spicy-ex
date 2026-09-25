@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -106,6 +107,8 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
      */
     private volatile boolean panelAttached;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    /** One queued download-status tick at a time, so attach/detach cannot stack polling loops. */
+    private boolean languageModelPollQueued;
 
     /** Locale lookup for the pure policy layer; reads the current uiStrings on every call. */
     private final PanelStrings panelStrings = new PanelStrings() {
@@ -159,10 +162,17 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         scroll.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
             @Override public void onViewAttachedToWindow(View v) {
                 panelAttached = true;
+                // The panel is rebuilt on every open, so an install started earlier has no loop
+                // left to continue: resume it or the row keeps the progress it was built with.
+                if (LanguageModelPack.status().phase == LanguageModelPack.Phase.DOWNLOADING) {
+                    resumeLanguageModelDownloadPolling();
+                }
             }
 
             @Override public void onViewDetachedFromWindow(View v) {
                 panelAttached = false;
+                languageModelPollQueued = false;
+                uiHandler.removeCallbacksAndMessages(null);
             }
         });
 
@@ -1212,14 +1222,29 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
     }
 
     private void refreshLanguageModelDownloadStatus() {
+        languageModelPollQueued = false;
         if (!panelAttached) return;
         LanguageModelPack.DownloadStatus status = LanguageModelPack.status();
         // Rebuild once more after the worker switches to READY or ERROR; otherwise the polling
         // loop would stop before the terminal state became visible in the panel.
         rebuildSection(Settings.TRANSLITERATION);
         if (status.phase == LanguageModelPack.Phase.DOWNLOADING) {
+            languageModelPollQueued = true;
             uiHandler.postDelayed(this::refreshLanguageModelDownloadStatus, 500);
         }
+    }
+
+    /**
+     * Starts the status loop for a panel that was built while an install was already running.
+     *
+     * <p>Detach cancels the queued tick, and the host builds a fresh panel on every open, so
+     * without this the reopened panel shows the progress it rendered once and never notices the
+     * worker reach READY — leaving the transliteration toggle disabled after a successful install.
+     */
+    private void resumeLanguageModelDownloadPolling() {
+        if (languageModelPollQueued) return;
+        languageModelPollQueued = true;
+        uiHandler.postDelayed(this::refreshLanguageModelDownloadStatus, 500);
     }
 
     private void downloadLanguageModelsRow(LinearLayout content) {
@@ -1228,9 +1253,11 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         row.setTag(PanelTags.row(Settings.DOWNLOAD_LANGUAGE_MODELS.key));
         row.setOnClickListener(v -> {
             if (LanguageModelPack.isReady()) {
+                String sizeMb = String.format(Locale.getDefault(), "%.1f",
+                        LanguageModelPack.installedSizeBytes() / 1_000_000.0);
                 new PanelDialog(context, uiStrings.get("settings_language_model_delete_title", "Delete language model"))
-                        .paragraph(uiStrings.get("settings_language_model_delete_desc",
-                                "Delete the downloaded language model pack?"))
+                        .paragraph(uiStrings.format("settings_language_model_delete_desc",
+                                "Delete the downloaded language model pack? This frees about %1$s MB.", sizeMb))
                         .primary(uiStrings.get("settings_language_model_delete", "Delete"), () -> {
                             LanguageModelPack.deleteDownload();
                             rebuildSection(Settings.TRANSLITERATION);
@@ -1256,7 +1283,10 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         String small = "";
         if (status.phase == LanguageModelPack.Phase.READY) {
             summary = uiStrings.get("settings_language_model_installed", "Downloaded");
-            small = uiStrings.get("settings_language_model_tap_to_delete", "Tap to delete");
+            String sizeMb = String.format(Locale.getDefault(), "%.1f",
+                    LanguageModelPack.installedSizeBytes() / 1_000_000.0);
+            small = uiStrings.format("settings_language_model_tap_to_delete_size",
+                    "Tap to delete · %1$s MB", sizeMb);
         } else if (status.phase == LanguageModelPack.Phase.DOWNLOADING) {
             summary = uiStrings.get("settings_language_model_downloading", "Downloading…");
             small = uiStrings.get("settings_language_model_progress", status.progressPercent + "%");
@@ -1558,13 +1588,11 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         return null;
     }
 
-    /**
-     * Why a row is greyed out. Every unavailable row is a build gap: transliteration,
-     * translation, the Apple font, and Spotify Connect are compiled into Full and absent from
-     * Lite. Device-level limits (the API-33 animated background) are reported per option
-     * through {@link PanelPolicy#optionUnavailableReason}, not here.
-     */
+    /** Explains why a row is unavailable. */
     @Override public String unavailableSummary(Settings.Setting<?> setting) {
+        if (setting == Settings.TRANSLITERATION_ENABLED && !LanguageModelPack.isReady()) {
+            return uiStrings.setting(Settings.DOWNLOAD_LANGUAGE_MODELS);
+        }
         return uiStrings.get("settings_unavailable_full_build", "Full build required");
     }
 

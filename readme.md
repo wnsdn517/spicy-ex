@@ -22,12 +22,14 @@ Xiaomi HyperOS 3 lockscreen/AOD integration: [HyperGlow](https://github.com/amar
 - Live current line in the player, with a ♪ placeholder on no-lyric tracks.
 - Transliteration: Japanese (furigana / romaji / both), Chinese (pinyin / jyutping), Korean / Cyrillic / Greek — optionally per-word.
 - Google Translate.
-- New optional AI translation and pronunciation/transliteration features in Full.
+- Optional AI translation and pronunciation/transliteration features.
 - In-Spotify settings; works even when Spotify itself has no lyrics.
 - [Read more](FEATURES_USER.md)
 
 ## Install
 APK from [Releases](../../releases). 
+
+Download language models in Settings to enable readings. Lyrics remain available without the pack.
 
 **Rooted (LSPosed):** install, enable, scope to Spotify — you know the drill.
 

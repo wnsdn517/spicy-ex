@@ -157,6 +157,9 @@ public final class PanelPolicy {
         if (needsTransliteration && !snapshot.transliterationAvailable()) {
             return fullBuildRequired(strings);
         }
+        if (needsTransliteration && !snapshot.languageModelReady()) {
+            return strings.get("settings_label_download_language_models", "Download language models");
+        }
         if (needsTranslation && !snapshot.translationAvailable()) {
             return fullBuildRequired(strings);
         }
