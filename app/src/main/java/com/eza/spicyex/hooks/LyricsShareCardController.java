@@ -101,7 +101,8 @@ final class LyricsShareCardController {
         Bitmap render(int width, int height);
     }
     /** SLIDE_UP/DOWN and TEXT move only the lyric text layer; the rest swap the whole card. */
-    private enum Transition { SLIDE_LEFT, SLIDE_RIGHT, SLIDE_UP, SLIDE_DOWN, FADE, TEXT }
+    /** ALIGN: the lines re-aligned or moved on the card, each sliding to its new place. */
+    private enum Transition { SLIDE_LEFT, SLIDE_RIGHT, SLIDE_UP, SLIDE_DOWN, FADE, TEXT, ALIGN }
 
     private static final ExecutorService RENDER = Executors.newSingleThreadExecutor();
     private static final ExecutorService THUMBS = Executors.newSingleThreadExecutor(runnable -> {
@@ -144,13 +145,36 @@ final class LyricsShareCardController {
         final float x;
         final float y;
         final float size;
+        /** Each wrapped line in the image (the lyric's, then its translation's): left, right,
+         *  top, bottom - so a re-alignment can slide every line on its own. */
+        final float[] lineLeft, lineRight, lineTop, lineBottom;
 
-        Piece(int id, Bitmap bitmap, float x, float y, float size) {
+        Piece(int id, Bitmap bitmap, float x, float y, float size, List<float[]> lines) {
             this.id = id;
             this.bitmap = bitmap;
             this.x = x;
             this.y = y;
             this.size = size;
+            int n = lines.size();
+            lineLeft = new float[n];
+            lineRight = new float[n];
+            lineTop = new float[n];
+            lineBottom = new float[n];
+            for (int i = 0; i < n; i++) {
+                float[] line = lines.get(i);
+                lineLeft[i] = line[0];
+                lineRight[i] = line[1];
+                lineTop[i] = line[2];
+                lineBottom[i] = line[3];
+            }
+        }
+    }
+
+    /** The wrapped lines of a layout drawn {@code dy} down the piece's image. */
+    private static void addLines(List<float[]> out, StaticLayout layout, float dy) {
+        for (int l = 0; l < layout.getLineCount(); l++) {
+            out.add(new float[]{layout.getLineLeft(l), layout.getLineRight(l),
+                    dy + layout.getLineTop(l), dy + layout.getLineBottom(l)});
         }
     }
     // Carousel: the neighbouring designs peek in at both edges, so sideways swiping is visible
@@ -1473,7 +1497,7 @@ final class LyricsShareCardController {
         prefs.edit().putString(PREF_ALIGN, style.align.name()).putString(PREF_POS, style.pos.name()).apply();
         updateTextControls();
         // The card stays; its lines glide to the new alignment and position.
-        render(Transition.TEXT);
+        render(Transition.ALIGN);
         renderThumbs();
     }
 
@@ -2341,7 +2365,7 @@ final class LyricsShareCardController {
                 currentRecipe = recipe;
                 setThumb(d, thumb);
                 boolean textOnly = transition == Transition.SLIDE_UP || transition == Transition.SLIDE_DOWN
-                        || transition == Transition.TEXT;
+                        || transition == Transition.TEXT || transition == Transition.ALIGN;
                 Runnable apply = () -> {
                     if (token != generation || cardHost == null) return;
                     // Only the text may change in place; a code that came or went swaps the card.
@@ -2390,13 +2414,17 @@ final class LyricsShareCardController {
         }
         int newFirst = Integer.MAX_VALUE;
         for (int id : newData.keySet()) newFirst = Math.min(newFirst, id);
-        boolean translationChange = transition == Transition.TEXT;
+        boolean translationChange = transition == Transition.TEXT || transition == Transition.ALIGN;
         float cardScale = cardHost.getWidth() / (float) W;
         for (Piece piece : pieces) {
             ImageView view = newViews.get(piece.id);
             Piece before = oldData.get(piece.id);
             ImageView beforeView = oldViews.get(piece.id);
             if (view == null) continue;
+            if (transition == Transition.ALIGN && before != null && beforeView != null
+                    && slideLines(layer, piece, view, before, beforeView, cardScale, ease)) {
+                continue;
+            }
             if (before != null && beforeView != null && piece.id >= 0) {
                 float fromY = Math.round(before.y * cardScale) + beforeView.getTranslationY();
                 float toY = Math.round(piece.y * cardScale);
@@ -2437,6 +2465,58 @@ final class LyricsShareCardController {
                 if (old.getParent() instanceof ViewGroup) ((ViewGroup) old.getParent()).removeView(old);
             }, 520);
         }
+    }
+
+    /**
+     * Re-aligned (or moved) text: the same lines at the same size, so each wrapped line is cut
+     * from the new image and slides on its own from where it was to where it goes - a centred
+     * short line and a long one travel different distances, as they should. False when the
+     * lines are not the same ones (the text was re-fitted), and the piece cross-fades instead.
+     */
+    private boolean slideLines(FrameLayout layer, Piece piece, ImageView view, Piece before,
+                               ImageView beforeView, float cardScale, PathInterpolator ease) {
+        int n = piece.lineLeft.length;
+        if (n == 0 || n != before.lineLeft.length || Math.abs(piece.size - before.size) > 0.5f
+                || Math.abs(beforeView.getScaleX() - 1f) > 0.01f) {
+            return false;
+        }
+        Bitmap image = piece.bitmap;
+        List<View> strips = new ArrayList<>();
+        for (int k = 0; k < n; k++) {
+            int left = Math.max(0, (int) Math.floor(piece.lineLeft[k]) - 6);
+            int right = Math.min(image.getWidth(), (int) Math.ceil(piece.lineRight[k]) + 6);
+            int top = Math.max(0, (int) Math.floor(piece.lineTop[k]));
+            int bottom = Math.min(image.getHeight(), (int) Math.ceil(piece.lineBottom[k]) + 2);
+            if (right <= left || bottom <= top) continue;
+            ImageView strip = new ImageView(activity);
+            strip.setImageBitmap(Bitmap.createBitmap(image, left, top, right - left, bottom - top));
+            strip.setScaleType(ImageView.ScaleType.FIT_XY);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    Math.max(1, Math.round((right - left) * cardScale)),
+                    Math.max(1, Math.round((bottom - top) * cardScale)));
+            lp.leftMargin = Math.round((piece.x + left) * cardScale);
+            lp.topMargin = Math.round((piece.y + top) * cardScale);
+            layer.addView(strip, lp);
+            strip.setTranslationX((before.x + before.lineLeft[k] - piece.x - piece.lineLeft[k]) * cardScale
+                    + beforeView.getTranslationX());
+            strip.setTranslationY((before.y + before.lineTop[k] - piece.y - piece.lineTop[k]) * cardScale
+                    + beforeView.getTranslationY());
+            // Line after line, a beat apart: the block ripples into its new shape.
+            strip.animate().translationX(0f).translationY(0f).setStartDelay(28L * k).setDuration(440)
+                    .setInterpolator(ease).start();
+            strips.add(strip);
+        }
+        if (strips.isEmpty()) return false;
+        beforeView.setVisibility(View.INVISIBLE);
+        view.setAlpha(0f);
+        // The whole piece takes over once every line has arrived.
+        view.postDelayed(() -> {
+            view.setAlpha(1f);
+            for (View strip : strips) {
+                if (strip.getParent() instanceof ViewGroup) ((ViewGroup) strip.getParent()).removeView(strip);
+            }
+        }, 440L + 28L * (n - 1) + 20L);
+        return true;
     }
 
     /** The pieces as views, in the preview's scale of the card. */
@@ -2483,7 +2563,9 @@ final class LyricsShareCardController {
             Bitmap bitmap = Bitmap.createBitmap(width, Math.max(1, (int) Math.ceil(f.height) + 4),
                     Bitmap.Config.ARGB_8888);
             drawFitted(new Canvas(bitmap), f, box.moved(0, 0, box.height), 0f);
-            out.add(new Piece(-1, bitmap, box.left, top, f.main.get(0).getPaint().getTextSize()));
+            List<float[]> lines = new ArrayList<>();
+            addLines(lines, f.main.get(0), 0f);
+            out.add(new Piece(-1, bitmap, box.left, top, f.main.get(0).getPaint().getTextSize(), lines));
             return out;
         }
         float y = top;
@@ -2503,7 +2585,10 @@ final class LyricsShareCardController {
                 canvas.restore();
             }
             int id = ids != null && i < ids.size() ? ids.get(i) : i;
-            out.add(new Piece(id, bitmap, box.left, y, size));
+            List<float[]> lines = new ArrayList<>();
+            addLines(lines, main, 0f);
+            if (sub != null) addLines(lines, sub, main.getHeight() + size * 0.18f);
+            out.add(new Piece(id, bitmap, box.left, y, size, lines));
             y += height;
             if (i < f.main.size() - 1) y += size * 0.5f;
         }
