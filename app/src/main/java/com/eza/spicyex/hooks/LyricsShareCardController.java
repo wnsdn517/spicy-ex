@@ -320,14 +320,28 @@ final class LyricsShareCardController {
                 if (overlay == teaseHost) teaseNextLine();
             }, row0Delay());
         }
-        // The pressed line flies in once the first card is on screen (see swapCard): leaving
-        // straight away, its words used to land in an empty frame while the card still rendered.
-        pendingFlyRow = sourceRow;
+        // The pressed line lifts off at once, on the sheet's first frame - waiting for the card
+        // left it hidden under the fading-in blur for a moment. If the card is not rendered yet
+        // when the words arrive, they hover in place until it fades in under them.
+        View row = sourceRow;
         sourceRow = null;
+        if (row != null && document != null && row.isAttachedToWindow()) {
+            View host = overlay;
+            host.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+                @Override
+                public boolean onPreDraw() {
+                    host.getViewTreeObserver().removeOnPreDrawListener(this);
+                    if (overlay == host) flyQuoteIn(row);
+                    return true;
+                }
+            });
+        }
     }
 
-    /** The pressed lyric row, waiting for the first card to fly its words onto. */
-    private View pendingFlyRow;
+    /** Words that landed before the first card: handed over to its text when it comes. */
+    private Runnable pendingHandOff;
+    /** The words in flight (or hovering), which the held finger's pull also moves. */
+    private View currentFlight;
     /** The Spotify Code builds itself once per opening; later cards show it whole. */
     private boolean codePlayed;
 
@@ -437,10 +451,10 @@ final class LyricsShareCardController {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         quoteFlying = true;
+        currentFlight = flight;
+        flight.setTranslationX(stageView == null ? 0f : stageView.getTranslationX());
+        flight.setTranslationY(stageView == null ? 0f : stageView.getTranslationY());
         if (currentTextLayer != null) currentTextLayer.setAlpha(0f);
-        cardHost.setAlpha(0f);
-        cardHost.animate().alpha(1f).setStartDelay(60).setDuration(320)
-                .setInterpolator(new PathInterpolator(0.3f, 0f, 0.2f, 1f)).start();
 
         int n = order;
         long stagger = n <= 1 ? 0 : Math.min(40L, 420L / (n - 1));
@@ -454,13 +468,18 @@ final class LyricsShareCardController {
             @Override
             public void onAnimationEnd(android.animation.Animator animation) {
                 quoteFlying = false;
-                // The words sit exactly on the card's text now: swap them for it.
-                if (currentTextLayer != null) {
-                    currentTextLayer.animate().alpha(1f).setDuration(120).start();
-                }
-                flight.animate().alpha(0f).setStartDelay(60).setDuration(160).withEndAction(() -> {
-                    if (flight.getParent() instanceof ViewGroup) ((ViewGroup) flight.getParent()).removeView(flight);
-                }).start();
+                // The words sit exactly on the card's text now: swap them for it - once the card
+                // is there; until then they hover where its text will be.
+                handOff(() -> {
+                    // Handing over: the pull no longer moves it (it would cancel the fade).
+                    if (currentFlight == flight) currentFlight = null;
+                    if (currentTextLayer != null) {
+                        currentTextLayer.animate().alpha(1f).setDuration(120).start();
+                    }
+                    flight.animate().alpha(0f).setStartDelay(60).setDuration(160).withEndAction(() -> {
+                        if (flight.getParent() instanceof ViewGroup) ((ViewGroup) flight.getParent()).removeView(flight);
+                    }).start();
+                });
             }
         });
         animator.start();
@@ -625,6 +644,58 @@ final class LyricsShareCardController {
         }
     }
 
+    /** Runs now if the first card is on screen, else when it arrives (see swapCard). */
+    private void handOff(Runnable run) {
+        if (currentCard != null) run.run();
+        else pendingHandOff = run;
+    }
+
+    // Still holding after the long press opened the sheet: the finger's moves pull the card (and
+    // the words flying to it) a little after it, as on a rubber band, and let go it springs back.
+    private View stageView;
+    private boolean heldTracking;
+    private float heldX0, heldY0;
+
+    /** The rest of the long-press gesture, forwarded by the lyrics view once the sheet is up. */
+    void heldDrag(android.view.MotionEvent event) {
+        if (overlay == null || stageView == null) return;
+        switch (event.getActionMasked()) {
+            case android.view.MotionEvent.ACTION_MOVE: {
+                if (!heldTracking) {
+                    heldTracking = true;
+                    heldX0 = event.getRawX();
+                    heldY0 = event.getRawY();
+                }
+                float x = rubber(event.getRawX() - heldX0, dp(26));
+                float y = rubber(event.getRawY() - heldY0, dp(26));
+                pullHeld(x, y, false);
+                break;
+            }
+            case android.view.MotionEvent.ACTION_UP:
+            case android.view.MotionEvent.ACTION_CANCEL:
+                if (heldTracking) pullHeld(0f, 0f, true);
+                heldTracking = false;
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void pullHeld(float x, float y, boolean release) {
+        View[] moved = {stageView, currentFlight};
+        for (View view : moved) {
+            if (view == null) continue;
+            view.animate().cancel();
+            if (release) {
+                view.animate().translationX(0f).translationY(0f).setDuration(460)
+                        .setInterpolator(new android.view.animation.OvershootInterpolator(1.6f)).start();
+            } else {
+                view.setTranslationX(x);
+                view.setTranslationY(y);
+            }
+        }
+    }
+
     /** The whole row as one image - when its words cannot be matched to the card's. */
     private void flySnapshotIn(View row) {
         try {
@@ -669,17 +740,14 @@ final class LyricsShareCardController {
             ghost.setY(rowLoc[1] - overlayLoc[1]);
             ghost.setElevation(dp(2));
 
-            cardHost.setAlpha(0f);
-            cardHost.animate().alpha(1f).setStartDelay(120).setDuration(320)
-                    .setInterpolator(new PathInterpolator(0.3f, 0f, 0.2f, 1f)).start();
             ghost.animate().x(targetX).y(targetY).scaleX(ghostScale).scaleY(ghostScale)
                     .setDuration(560).setInterpolator(new PathInterpolator(0.3f, 0f, 0.1f, 1f))
-                    .withEndAction(() -> ghost.animate().alpha(0f).setDuration(220)
+                    .withEndAction(() -> handOff(() -> ghost.animate().alpha(0f).setDuration(220)
                             .withEndAction(() -> {
                                 if (ghost.getParent() instanceof ViewGroup) {
                                     ((ViewGroup) ghost.getParent()).removeView(ghost);
                                 }
-                            }).start())
+                            }).start()))
                     .start();
         } catch (Throwable error) {
             XpLog.log(TAG + " quote fly-in skipped: " + error);
@@ -825,7 +893,10 @@ final class LyricsShareCardController {
         currentCode = null;
         currentCodeView = null;
         lineSlides.clear();
-        pendingFlyRow = null;
+        pendingHandOff = null;
+        currentFlight = null;
+        stageView = null;
+        heldTracking = false;
         picker = null;
         pickRows.clear();
         pieceViews = new java.util.HashMap<>();
@@ -923,6 +994,7 @@ final class LyricsShareCardController {
         this.cardWidthPx = cardWidthPx;
 
         FrameLayout stage = new FrameLayout(activity);
+        stageView = stage;
         stage.setClipChildren(false);
         stage.setClipToPadding(false);
         FrameLayout carousel = new FrameLayout(activity);
@@ -3028,8 +3100,9 @@ final class LyricsShareCardController {
         currentCard = incoming;
         currentBase = baseView;
         currentTextLayer = textLayer;
-        // The pressed line is still flying in word by word; its words land on this text.
-        if (quoteFlying) textLayer.setAlpha(0f);
+        // The pressed line is still flying in word by word (or hovering, landed before the card):
+        // its words land on this text and hand over to it.
+        if (quoteFlying || (outgoing == null && pendingHandOff != null)) textLayer.setAlpha(0f);
         pieceViews = views;
         pieceData = data;
         PathInterpolator ease = new PathInterpolator(0.2f, 0.9f, 0.2f, 1f);
@@ -3064,9 +3137,10 @@ final class LyricsShareCardController {
             // The first card: the host shows now that it has something in it, and the pressed
             // line's words leave the list to land on it.
             cardHost.animate().alpha(1f).setDuration(260).start();
-            View row = pendingFlyRow;
-            pendingFlyRow = null;
-            if (row != null && document != null && row.isAttachedToWindow()) flyQuoteIn(row);
+            Runnable waiting = pendingHandOff;
+            pendingHandOff = null;
+            // Words already hovering where the text goes: they give way as the card fades in.
+            if (waiting != null) cardHost.postDelayed(waiting, 140);
         }
         if (codeView != null && (!codePlayed || codeArt == null)) {
             // Once per opening (or per switching it on), after the words have landed; a card
