@@ -1165,6 +1165,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 () -> cycleTransliterationMode(prefs),
                 () -> {
                     if (renderConfig != null && !renderConfig.translationEnabled) return;
+                    if (translationFailedNow()) {
+                        retryTranslation();
+                        return;
+                    }
                     boolean wasVisible = showTranslation();
                     boolean hasDisplayedMeaning = hasLayerOutput(
                             com.eza.spicyex.lyrics.session.LayerKind.MEANING);
@@ -4248,6 +4252,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         boolean translationAiFailed = !translationAiPending
                 && !aiFailureToken(com.eza.spicyex.lyrics.session.LayerKind.MEANING).isEmpty()
                 && translationToggle.getVisibility() == View.VISIBLE;
+        toggleSpinnerController.setFailed(false, translationFailedNow());
         toggleSpinnerController.update(renderConfig.toggleSpinnerEnabled, romanPending,
                 translationPending,
                 hasAiLayerOutput(com.eza.spicyex.lyrics.session.LayerKind.SOUND)
@@ -4255,6 +4260,28 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 hasAiLayerOutput(com.eza.spicyex.lyrics.session.LayerKind.MEANING)
                         && showTranslation(),
                 romanAiPending, translationAiPending, romanAiFailed, translationAiFailed);
+    }
+
+    /**
+     * The translation did not come and nothing stands in for it (an AI failure has its own red
+     * mark and review path). The chip shows a red "!", and a tap retries instead of toggling.
+     */
+    private boolean translationFailedNow() {
+        return document != null && document.translationFailed && !document.translationPending
+                && showTranslation() && translationToggle.getVisibility() == View.VISIBLE
+                && aiFailureToken(com.eza.spicyex.lyrics.session.LayerKind.MEANING).isEmpty()
+                && !hasLayerOutput(com.eza.spicyex.lyrics.session.LayerKind.MEANING);
+    }
+
+    private void retryTranslation() {
+        // Shown as running at once; the session republishes when the retry settles.
+        document.translationFailed = false;
+        document.translationPending = true;
+        host.refreshLyricsLayer(com.eza.spicyex.lyrics.session.LayerKind.MEANING);
+        updateToggleSpinners();
+        android.widget.Toast.makeText(activity,
+                uiText("lyrics_translation_retrying", "Retrying translation…"),
+                android.widget.Toast.LENGTH_SHORT).show();
     }
 
     /** Desktop's primary-click policy, applied before the normal visibility toggle. */

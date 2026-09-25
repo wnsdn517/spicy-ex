@@ -64,6 +64,7 @@
     <string name="settings_source_drag">끌어서 순서 변경</string>
     <string name="settings_source_rank_smart">자동</string>
     <string name="settings_source_none_on">켜진 제공자 없음</string>
+    <string name="lyrics_translation_retrying">번역 다시 시도 중…</string>
     <string name="settings_source_refusing">계속 HTTP %1$d 오류를 보내요. 기다려도 복구되지 않는 오류라 끄는 걸 추천해요.</string>
     <string name="settings_source_busy">지금 바빠요 (HTTP %1$d). 기다리면 저절로 복구돼요.</string>
     <string name="settings_search_hint">설정 검색</string>
