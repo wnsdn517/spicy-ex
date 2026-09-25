@@ -151,12 +151,6 @@ public final class PanelPolicy {
     /** Why one option is dimmed; empty means selectable. Locale-resolved, never hardcoded. */
     public static String optionUnavailableReason(Settings.StringSetting setting, String value,
                                                  PanelSnapshot snapshot, PanelStrings strings) {
-        if (setting == Settings.TAP_SEEK_MODE) {
-            // Double tap belongs to "Double-tap to like" while that is on.
-            return "Double tap".equals(value) && Boolean.TRUE.equals(snapshot.get(Settings.DOUBLE_TAP_LIKE))
-                    ? strings.get("settings_tap_seek_double_tap_used", "Used by double-tap to like")
-                    : "";
-        }
         if (setting != Settings.LIVE_CARD_SECONDARY_MODE) return "";
         boolean needsTransliteration = "Transliteration".equals(value) || "Both".equals(value);
         boolean needsTranslation = "Translation".equals(value) || "Both".equals(value);
@@ -171,6 +165,21 @@ public final class PanelPolicy {
         }
         if (needsTranslation && !Boolean.TRUE.equals(snapshot.get(Settings.TRANSLATION_ENABLED))) {
             return strings.get("settings_enable_translation", "Enable translation");
+        }
+        return "";
+    }
+
+    /**
+     * A non-blocking note for an option: picking it is allowed, the note says what it changes.
+     * Tap-to-seek on double tap and double-tap to like share the gesture, so choosing one turns
+     * the other off.
+     */
+    public static String optionNote(Settings.StringSetting setting, String value,
+                                    PanelSnapshot snapshot, PanelStrings strings) {
+        if (setting == Settings.TAP_SEEK_MODE && "Double tap".equals(value)
+                && Boolean.TRUE.equals(snapshot.get(Settings.DOUBLE_TAP_LIKE))) {
+            return strings.get("settings_tap_seek_double_tap_turns_off_like",
+                    "Turns off double-tap to like");
         }
         return "";
     }
@@ -211,6 +220,7 @@ public final class PanelPolicy {
     public static boolean shouldRebuildSectionAfterChange(Settings.Setting<?> setting) {
         return setting == Settings.AI_ENABLED
                 || setting == Settings.DOUBLE_TAP_LIKE
+                || setting == Settings.TAP_SEEK_MODE
                 || setting == Settings.AI_PROVIDER
                 || setting == Settings.TRANSLATION_ENABLED
                 || setting == Settings.TRANSLITERATION_ENABLED

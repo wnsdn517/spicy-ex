@@ -65,7 +65,8 @@
     <string name="settings_source_rank_smart">自動</string>
     <string name="settings_source_none_on">有効なソースなし</string>
     <string name="settings_tap_seek_taken_by_like">オフ · ダブルタップはいいね</string>
-    <string name="settings_tap_seek_double_tap_used">ダブルタップでいいねに使用中</string>
+    <string name="settings_tap_seek_double_tap_turns_off_like">選ぶとダブルタップでいいねはオフになります</string>
+    <string name="settings_double_tap_like_note">ダブルタップは歌詞の移動に使われています。オンにするとそちらはオフになります。</string>
     <string name="settings_language_search">言語を検索</string>
     <string name="settings_language_suggested">おすすめ</string>
     <string name="settings_language_all">すべての言語</string>

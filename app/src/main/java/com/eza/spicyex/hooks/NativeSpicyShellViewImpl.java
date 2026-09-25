@@ -5219,7 +5219,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         getLocationInWindow(here);
         source.getLocationInWindow(from);
         new com.eza.spicyex.ui.LikeBurstView(activity, star, true,
-                from[0] - here[0] + x, from[1] - here[1] + y, dp(104)).play(this);
+                from[0] - here[0] + x, from[1] - here[1] + y, dp(92)).play(this);
         performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK);
         boolean alreadyLiked = track.saved
                 || (!pendingLikedUri.isEmpty() && pendingLikedUri.equals(safe(track.uri))
@@ -5237,8 +5237,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
     }
 
     /**
-     * The like button's own answer to a toggle: turning on, it squeezes, springs past full size
-     * and settles while a small ring and dots burst around it; turning off, a short dip.
+     * The like button's own answer to a toggle, kept quiet: turning on, a light press and a
+     * gentle spring back while a soft glow breathes out behind it; turning off, a short dip.
      */
     private void animateLikeButton(boolean liked) {
         if (likeButton == null || likeButton.getVisibility() != View.VISIBLE) return;
@@ -5253,10 +5253,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         }
         likeButton.setScaleX(1f);
         likeButton.setScaleY(1f);
-        likeButton.animate().scaleX(0.7f).scaleY(0.7f).setDuration(90)
-                .setInterpolator(new android.view.animation.AccelerateInterpolator())
-                .withEndAction(() -> likeButton.animate().scaleX(1f).scaleY(1f).setDuration(420)
-                        .setInterpolator(new android.view.animation.OvershootInterpolator(4f)).start())
+        likeButton.animate().scaleX(0.86f).scaleY(0.86f).setDuration(110)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .withEndAction(() -> likeButton.animate().scaleX(1f).scaleY(1f).setDuration(380)
+                        .setInterpolator(new android.view.animation.OvershootInterpolator(1.4f)).start())
                 .start();
         boolean star = com.eza.spicyex.ui.ActionIconDrawable.likedSongsKind(likedMode)
                 == com.eza.spicyex.ui.ActionIconDrawable.Kind.STAR;
@@ -5266,9 +5266,9 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         likeButton.getLocationInWindow(button);
         float cx = button[0] - here[0] + likeButton.getWidth() / 2f;
         float cy = button[1] - here[1] + likeButton.getHeight() / 2f;
-        // Starts as the button springs back out, not while it is squeezed.
+        // Starts as the button springs back out, not while it is pressed.
         postDelayed(() -> new com.eza.spicyex.ui.LikeBurstView(activity, star, false, cx, cy,
-                Math.max(likeButton.getWidth(), dp(36)) * 1.1f).play(this), 80);
+                Math.max(likeButton.getWidth(), dp(36)) * 1.2f).play(this), 90);
     }
 
     private void updateLikedButton(SpotifyTrack track) {

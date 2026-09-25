@@ -9,69 +9,69 @@ import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RadialGradient;
 import android.graphics.Shader;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.LinearInterpolator;
 
 /**
- * The like burst, drawn once and then removed: a ring snapping outward and a spray of dots
- * around a point, and in the big (double-tap) form a filled heart or star that pops in with an
- * overshoot, holds a beat at a slight tilt, then floats up and fades - the Instagram Reels
- * double-tap heart. The small form (no icon) plays around the like button when it turns on.
+ * The like acknowledgement, drawn once and then removed - restrained, in the manner of the
+ * system's own: no confetti, no ring, no tilt.
  *
- * <p>Add it over everything with MATCH_PARENT and call {@link #play}; it takes no touches and
- * detaches itself when done. One animator drives every part, so nothing can drift apart.
+ * <p>The big (double-tap) form is a single heart or star that springs in with only a slight
+ * overshoot over a soft glow of its own colour, rests for a moment, then dissolves - growing a
+ * touch while it fades rather than flying off. The small form is just that glow, breathing out
+ * once behind the like button as it turns on.
+ *
+ * <p>Add it over everything and call {@link #play}; it takes no touches and detaches itself when
+ * done. One animator drives every part, so nothing can drift apart.
  */
 public final class LikeBurstView extends View {
-    private static final int PARTICLES = 10;
-    private static final long BIG_MS = 1050L;
-    private static final long SMALL_MS = 560L;
+    private static final long BIG_MS = 1150L;
+    private static final long SMALL_MS = 620L;
 
     private final Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint ringPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint sheenPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path icon;
-    private final boolean star;
     private final boolean big;
     private final float cx;
     private final float cy;
-    /** Radius the ring and particles are laid out against. */
     private final float radius;
-    private final float tilt;
-    private final float density;
-    private final int[] colors;
     private float t;
 
     /**
-     * @param star  a star (gold) instead of a heart (pink)
-     * @param big   the double-tap form with the icon; false is the ring and dots only
+     * @param star  a star (gold) instead of a heart (the system pink)
+     * @param big   the double-tap form with the icon; false is the glow alone
      * @param x     centre, in the parent's coordinates
      * @param size  the icon's size in px (big), or the button's size (small)
      */
     public LikeBurstView(Context context, boolean star, boolean big, float x, float y, float size) {
         super(context);
-        this.star = star;
         this.big = big;
         this.cx = x;
         this.cy = y;
         this.radius = size * 0.5f;
-        this.density = context.getResources().getDisplayMetrics().density;
         this.icon = ActionIconDrawable.pathOf(star ? ActionIconDrawable.Kind.STAR
                 : ActionIconDrawable.Kind.HEART);
-        this.tilt = big ? (float) (Math.random() * 30.0 - 15.0) : 0f;
-        this.colors = star
-                ? new int[]{Color.rgb(255, 232, 110), Color.rgb(255, 196, 0), Color.rgb(255, 140, 0)}
-                : new int[]{Color.rgb(255, 110, 150), Color.rgb(255, 55, 95), Color.rgb(230, 20, 70)};
+        int top = star ? Color.rgb(255, 214, 10) : Color.rgb(255, 55, 95);
+        int bottom = star ? Color.rgb(255, 176, 0) : Color.rgb(230, 30, 75);
+        int glow = star ? Color.rgb(255, 204, 0) : Color.rgb(255, 45, 85);
         iconPaint.setStyle(Paint.Style.FILL);
-        // A 24-unit gradient top to bottom, so it scales with the path.
-        iconPaint.setShader(new LinearGradient(0f, 2f, 0f, 22f, colors[0], colors[2], Shader.TileMode.CLAMP));
+        // In the icon's 24-unit box, so it scales with the path: a quiet top-to-bottom depth.
+        iconPaint.setShader(new LinearGradient(0f, 3f, 0f, 21f, top, bottom, Shader.TileMode.CLAMP));
+        // A faint light across the upper half, the way a glossy system glyph catches light.
+        sheenPaint.setStyle(Paint.Style.FILL);
+        sheenPaint.setShader(new LinearGradient(0f, 3f, 0f, 13f, 0x38FFFFFF, 0x00FFFFFF,
+                Shader.TileMode.CLAMP));
         shadowPaint.setStyle(Paint.Style.FILL);
-        shadowPaint.setColor(0x40000000);
-        ringPaint.setStyle(Paint.Style.STROKE);
-        ringPaint.setColor(colors[1]);
-        dotPaint.setStyle(Paint.Style.FILL);
+        shadowPaint.setColor(Color.BLACK);
+        // A unit-radius glow, scaled per frame.
+        glowPaint.setShader(new RadialGradient(0f, 0f, 1f,
+                new int[]{withAlpha(glow, 0x66), withAlpha(glow, 0x22), withAlpha(glow, 0)},
+                new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
         setWillNotDraw(false);
         setClickable(false);
         setFocusable(false);
@@ -102,96 +102,85 @@ public final class LikeBurstView extends View {
     }
 
     @Override protected void onDraw(Canvas canvas) {
-        // Times below are fractions of the whole burst; the small form runs the same script
-        // compressed, minus the icon.
-        drawRing(canvas, phase(t, big ? 0.04f : 0f, big ? 0.40f : 0.55f));
-        drawDots(canvas, phase(t, big ? 0.08f : 0.05f, big ? 0.55f : 1f));
-        if (big) drawIcon(canvas);
+        if (big) drawBig(canvas); else drawPulse(canvas);
     }
 
-    private void drawRing(Canvas canvas, float p) {
-        if (p <= 0f || p >= 1f) return;
-        float e = easeOut(p);
-        float r = radius * (0.35f + 1.05f * e);
-        ringPaint.setStrokeWidth(Math.max(1f, radius * 0.22f * (1f - e)));
-        ringPaint.setAlpha(Math.round(230 * (1f - p)));
-        canvas.drawCircle(cx, cy, r, ringPaint);
+    /** The button form: one soft breath of light behind it. */
+    private void drawPulse(Canvas canvas) {
+        float e = easeOutCubic(t);
+        float r = radius * (0.7f + 0.9f * e);
+        float alpha = (1f - t) * (1f - t);
+        drawGlow(canvas, r, alpha);
     }
 
-    private void drawDots(Canvas canvas, float p) {
-        if (p <= 0f || p >= 1f) return;
-        float e = easeOut(p);
-        for (int i = 0; i < PARTICLES; i++) {
-            double angle = Math.toRadians(i * (360.0 / PARTICLES) + (big ? tilt : 18f));
-            // Alternate two rings of dots, the inner a touch slower, for depth.
-            boolean inner = (i & 1) == 1;
-            float reach = radius * (inner ? 1.15f : 1.45f);
-            float d = radius * 0.55f + (reach - radius * 0.55f) * e;
-            float x = cx + (float) Math.cos(angle) * d;
-            float y = cy + (float) Math.sin(angle) * d;
-            float dot = Math.max(0.6f * density, radius * (inner ? 0.07f : 0.1f) * (1f - p));
-            dotPaint.setColor(colors[i % colors.length]);
-            dotPaint.setAlpha(Math.round(255 * (1f - p * p)));
-            canvas.drawCircle(x, y, dot, dotPaint);
-        }
-    }
-
-    private void drawIcon(Canvas canvas) {
+    private void drawBig(Canvas canvas) {
+        // Timeline, as fractions of the whole: spring in over the first 38%, rest until 62%,
+        // then dissolve.
         float scale;
-        float rise = 0f;
-        float alpha = 1f;
-        if (t < 0.18f) {
-            scale = 1.25f * easeOut(t / 0.18f);                           // pop in, past full size
-        } else if (t < 0.30f) {
-            scale = 1.25f - 0.33f * easeInOut((t - 0.18f) / 0.12f);       // settle under
-        } else if (t < 0.40f) {
-            scale = 0.92f + 0.08f * easeInOut((t - 0.30f) / 0.10f);       // and back to 1
-        } else if (t < 0.68f) {
-            scale = 1f;                                                    // hold a beat
+        float alpha;
+        if (t < 0.38f) {
+            float p = t / 0.38f;
+            scale = 0.45f + 0.55f * spring(p);
+            alpha = Math.min(1f, p * 3.5f);
+        } else if (t < 0.62f) {
+            scale = 1f;
+            alpha = 1f;
         } else {
-            float p = (t - 0.68f) / 0.32f;
-            float e = easeIn(p);
-            scale = 1f - 0.35f * e;
-            rise = radius * 1.1f * e;
+            float p = (t - 0.62f) / 0.38f;
+            float e = easeInOut(p);
+            scale = 1f + 0.14f * e;
             alpha = 1f - e;
         }
-        if (scale <= 0.01f || alpha <= 0f) return;
+        if (alpha <= 0.003f) return;
+
+        drawGlow(canvas, radius * 1.55f * scale, alpha * 0.9f);
+
         float size = radius * 2f * scale;
-        // The tilt eases toward level as it holds, like a sticker settling.
-        float angle = tilt * (1f - 0.5f * Math.min(1f, t / 0.68f));
         canvas.save();
-        canvas.translate(cx, cy - rise);
-        canvas.rotate(angle);
-        // Shadow first, a little down, then the icon.
-        canvas.save();
-        canvas.translate(-size / 2f, -size / 2f + size * 0.04f);
+        canvas.translate(cx - size / 2f, cy - size / 2f);
         canvas.scale(size / 24f, size / 24f);
-        shadowPaint.setAlpha(Math.round(0x40 * alpha));
+        // A soft contact shadow: the shape again, a little lower and faint.
+        canvas.save();
+        canvas.translate(0f, 0.7f);
+        shadowPaint.setAlpha(Math.round(0x30 * alpha));
         canvas.drawPath(icon, shadowPaint);
         canvas.restore();
-        canvas.translate(-size / 2f, -size / 2f);
-        canvas.scale(size / 24f, size / 24f);
         iconPaint.setAlpha(Math.round(255 * alpha));
         canvas.drawPath(icon, iconPaint);
+        sheenPaint.setAlpha(Math.round(255 * alpha));
+        canvas.drawPath(icon, sheenPaint);
         canvas.restore();
     }
 
-    private static float phase(float t, float start, float end) {
-        if (t <= start) return 0f;
-        if (t >= end) return 1f;
-        return (t - start) / (end - start);
+    private void drawGlow(Canvas canvas, float r, float alpha) {
+        if (r <= 0f || alpha <= 0.003f) return;
+        glowPaint.setAlpha(Math.round(255 * Math.min(1f, alpha)));
+        canvas.save();
+        canvas.translate(cx, cy);
+        canvas.scale(r, r);
+        canvas.drawCircle(0f, 0f, 1f, glowPaint);
+        canvas.restore();
     }
 
-    private static float easeOut(float p) {
+    /** A lightly damped spring from 0 to 1: about 6% overshoot, settled by the end. */
+    private static float spring(float p) {
+        double damping = 0.62;
+        double omega = 11.0;
+        double decay = Math.exp(-damping * omega * p);
+        double wd = omega * Math.sqrt(1 - damping * damping);
+        return (float) (1 - decay * (Math.cos(wd * p) + damping * omega / wd * Math.sin(wd * p)));
+    }
+
+    private static float easeOutCubic(float p) {
         float q = 1f - p;
         return 1f - q * q * q;
     }
 
-    private static float easeIn(float p) {
-        return p * p;
+    private static float easeInOut(float p) {
+        return p < 0.5f ? 4f * p * p * p : 1f - (float) Math.pow(-2f * p + 2f, 3) / 2f;
     }
 
-    private static float easeInOut(float p) {
-        return p < 0.5f ? 2f * p * p : 1f - (float) Math.pow(-2f * p + 2f, 2) / 2f;
+    private static int withAlpha(int color, int alpha) {
+        return (color & 0x00FFFFFF) | (alpha << 24);
     }
 }

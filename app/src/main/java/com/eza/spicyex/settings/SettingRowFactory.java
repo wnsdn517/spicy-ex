@@ -47,6 +47,11 @@ public final class SettingRowFactory {
 
         String labelFor(Settings.StringSetting setting, String value);
 
+        /** A small note under a switch (what turning it on would change), or null. */
+        default String switchNote(Settings.BooleanSetting setting) {
+            return null;
+        }
+
         /** A selector row's summary for its stored value; the option's label unless the host
          *  knows better (a value another setting has overridden, for instance). */
         default String selectorSummary(Settings.StringSetting setting, String value) {
@@ -76,7 +81,7 @@ public final class SettingRowFactory {
         row.setTag(PanelTags.row(setting));
         boolean unavailable = host.unavailable(setting);
         style.titleColumn(row, host.strings().setting(setting),
-                unavailable ? host.unavailableSummary(setting) : null);
+                unavailable ? host.unavailableSummary(setting) : host.switchNote(setting));
         style.applyRowLead(row, setting.key);
         GlossyToggle toggle = new GlossyToggle(style.context());
         toggle.setAccent(PanelStyle.COL_ACCENT);
@@ -237,7 +242,8 @@ public final class SettingRowFactory {
                 && kind == SettingUiSpec.RowKind.TOGGLE) {
             TextView sub = row.findViewWithTag(PanelTags.ROW_SUMMARY);
             if (sub instanceof TextView) {
-                String text = unavailable ? host.unavailableSummary(setting) : null;
+                String text = unavailable ? host.unavailableSummary(setting)
+                        : host.switchNote((Settings.BooleanSetting) setting);
                 sub.setText(text == null ? "" : text);
                 sub.setVisibility(text == null || text.isEmpty() ? View.GONE : View.VISIBLE);
             }

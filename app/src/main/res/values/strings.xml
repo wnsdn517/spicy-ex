@@ -595,7 +595,8 @@
     <string name="settings_label_lyrics_long_press_share">Long-press a line to share</string>
     <string name="settings_label_lyrics_double_tap_like">Double-tap to like</string>
     <string name="settings_tap_seek_taken_by_like">Off · double tap likes</string>
-    <string name="settings_tap_seek_double_tap_used">Used by double-tap to like</string>
+    <string name="settings_tap_seek_double_tap_turns_off_like">Turns off double-tap to like</string>
+    <string name="settings_double_tap_like_note">Double tap already seeks to a line. Turning this on turns that off.</string>
     <string name="settings_label_lyrics_status_bar_hidden_portrait">Hide status bar (portrait)</string>
     <string name="settings_label_lyrics_status_bar_hidden_landscape">Hide status bar (landscape)</string>
     <string name="settings_card_editor">Now playing card editor…</string>
