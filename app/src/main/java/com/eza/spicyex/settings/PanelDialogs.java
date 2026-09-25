@@ -7,12 +7,9 @@ import android.widget.TextView;
 import com.eza.spicyex.Settings;
 import com.eza.spicyex.SettingsStore;
 import com.eza.spicyex.SettingsUiStrings;
-import com.eza.spicyex.beautifullyrics.entities.LyricsResponseCache;
 import com.eza.spicyex.lyrics.CacheStoragePolicy;
 import com.eza.spicyex.lyrics.LyricsFontValidator;
 import com.eza.spicyex.lyrics.SpicyManualTokenStore;
-import com.eza.spicyex.lyrics.session.AIPaidArtifactCache;
-import com.eza.spicyex.lyrics.session.CanonicalSourceCache;
 import com.eza.spicyex.ui.ActionIconDrawable;
 import com.eza.spicyex.ui.PanelDialog;
 
@@ -100,11 +97,6 @@ public final class PanelDialogs {
             options.add(option);
         }
         PanelDialog dialog = new PanelDialog(style.context(), strings.setting(setting));
-        if (setting == Settings.CACHE_SIZE) {
-            dialog.headerAction(ActionIconDrawable.Kind.CIRCLE_HELP,
-                    strings.get("settings_cache_details_action", "Show cache details"),
-                    this::showCacheInfo);
-        }
         dialog.listOptions(options, current, value -> {
             // Selecting the already-applied value is a true no-op. In particular,
             // opening and dismissing the language picker must not rebuild the panel.
@@ -193,24 +185,6 @@ public final class PanelDialogs {
                         strings.get("settings_language_suggested", "Suggested"),
                         strings.get("settings_language_all", "All languages"),
                         strings.get("settings_language_no_match", "No language matches"))
-                .show();
-    }
-
-    public void showCacheInfo() {
-        PanelStyle style = host.style();
-        SettingsUiStrings strings = host.strings();
-        long aiBytes = AIPaidArtifactCache.usageBytes(style.context());
-        new PanelDialog(style.context(), strings.get("settings_cache_details_title", "Cache details"))
-                .infoRow(strings.get("settings_cache_details_songs", "Cached songs"),
-                        String.valueOf(Math.max(
-                                CanonicalSourceCache.entryCount(style.context()),
-                                LyricsResponseCache.entryCount(style.context()))))
-                .infoRow(strings.get("settings_cache_details_lyrics", "Lyric data cached"),
-                        CacheStoragePolicy.formatBytes(
-                                CacheStoragePolicy.storedTotal(style.context()) - aiBytes))
-                .infoRow(strings.get("settings_cache_details_ai", "AI data cached"),
-                        CacheStoragePolicy.formatBytes(aiBytes))
-                .secondary(strings.get("settings_cache_details_close", "Close"), null)
                 .show();
     }
 

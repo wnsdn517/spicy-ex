@@ -10,7 +10,6 @@ import android.text.format.DateUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -37,9 +36,10 @@ import java.util.concurrent.Executors;
 
 /**
  * The cache, managed where the lyrics come from: a block on the Lyrics sources page with what is
- * stored (size against the limit, songs per provider) and one-tap clears, and a "See all" browser
- * listing every cached song by song or by provider, each deletable on its own, a provider's
- * songs together, or everything.
+ * stored (size against the limit, songs per provider), and a "See all" browser listing every
+ * cached song by song or by provider. Deleting lives in the browser only: a song, a provider's
+ * songs, or from "Delete all" every song's lyrics or one derived layer (translations, readings,
+ * AI results).
  *
  * <p>Every store read runs on one background thread; the views only ever get finished results.
  */
@@ -133,30 +133,6 @@ public final class CacheManager {
         LinearLayout.LayoutParams breakdownLp = wrap();
         breakdownLp.topMargin = style.dp(2);
         block.addView(breakdownText, breakdownLp);
-
-        TextView clearCaption = style.text(strings.get("settings_cache_clear", "Clear"), 12,
-                PanelStyle.COL_SECTION, true);
-        LinearLayout.LayoutParams captionLp = wrap();
-        captionLp.topMargin = style.dp(14);
-        captionLp.bottomMargin = style.dp(6);
-        block.addView(clearCaption, captionLp);
-        HorizontalScrollView chipsScroll = new HorizontalScrollView(context);
-        chipsScroll.setHorizontalScrollBarEnabled(false);
-        chipsScroll.setClipToPadding(false);
-        LinearLayout chips = new LinearLayout(context);
-        chips.addView(chip(strings.get("settings_cache_clear_lyrics", "All lyrics"), true,
-                () -> confirmClearAllLyrics(this::refresh)));
-        chips.addView(chip(strings.get("settings_cache_clear_translation", "Translations"), false,
-                () -> clearKind(CacheClearKind.TRANSLATION)));
-        chips.addView(chip(strings.get("settings_cache_clear_reading", "Readings"), false,
-                () -> clearKind(CacheClearKind.TRANSLITERATION)));
-        chips.addView(chip(strings.get("settings_cache_clear_ai", "AI results"), false,
-                () -> confirm(strings.get("settings_cache_clear_ai_confirm",
-                                "Delete saved AI translations and readings? Making them again uses your AI quota."),
-                        () -> clearKind(CacheClearKind.AI))));
-        chipsScroll.addView(chips);
-        block.addView(chipsScroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout.LayoutParams blockLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -350,11 +326,7 @@ public final class CacheManager {
             browser.sortChips.add(chip);
             sortRow.addView(chip, marginRight(style, 6));
         }
-        clearAll.setOnClickListener(v -> confirmClearAllLyrics(() -> {
-            browser.entries = new ArrayList<>();
-            render(browser);
-            refresh();
-        }));
+        clearAll.setOnClickListener(v -> openClearMenu(browser));
 
         TextView loading = style.text(strings.get("settings_cache_loading", "Loading…"), 14,
                 PanelStyle.COL_SUMMARY, false);
@@ -371,6 +343,29 @@ public final class CacheManager {
                 render(browser);
             });
         });
+    }
+
+    /** Everything deletable at once: every song's lyrics, or one derived layer for all songs. */
+    private void openClearMenu(final Browser browser) {
+        SettingsUiStrings strings = host.strings();
+        PanelDialog menu = new PanelDialog(host.style().context(),
+                strings.get("settings_cache_delete_all", "Delete all"));
+        menu.option(strings.get("settings_cache_clear_lyrics", "All lyrics"), false,
+                () -> confirmClearAllLyrics(() -> {
+                    browser.entries = new ArrayList<>();
+                    render(browser);
+                    refresh();
+                }));
+        menu.option(strings.get("settings_cache_clear_translation", "Translations"), false,
+                () -> clearKind(CacheClearKind.TRANSLATION));
+        menu.option(strings.get("settings_cache_clear_reading", "Readings"), false,
+                () -> clearKind(CacheClearKind.TRANSLITERATION));
+        menu.option(strings.get("settings_cache_clear_ai", "AI results"), false,
+                () -> confirm(strings.get("settings_cache_clear_ai_confirm",
+                                "Delete saved AI translations and readings? Making them again uses your AI quota."),
+                        () -> clearKind(CacheClearKind.AI)));
+        menu.secondary(strings.get("settings_ai_cancel", "Cancel"), null);
+        menu.show();
     }
 
     private void paintTabs(Browser browser) {
@@ -412,7 +407,6 @@ public final class CacheManager {
         long bytes = 0;
         for (CanonicalSourceCache.Entry entry : entries) bytes += entry.bytes;
         browser.total.setText(songs(entries.size()) + " · " + CacheStoragePolicy.formatBytes(bytes));
-        browser.clearAll.setVisibility(entries.isEmpty() ? View.GONE : View.VISIBLE);
         if (entries.isEmpty()) {
             TextView empty = style.text(strings.get("settings_cache_empty", "No lyrics stored yet"), 14,
                     PanelStyle.COL_SUMMARY, false);
