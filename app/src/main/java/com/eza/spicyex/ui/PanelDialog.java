@@ -49,7 +49,14 @@ public final class PanelDialog {
 
     public PanelDialog(Context context, String title) {
         this.context = context;
-        this.dialog = new Dialog(context);
+        // onBackPressed covers the gesture-back path too, where no KEYCODE_BACK is delivered
+        // and the platform default would drop the card without its exit animation.
+        this.dialog = new Dialog(context) {
+            @Override
+            public void onBackPressed() {
+                PanelDialog.this.dismiss();
+            }
+        };
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
         LinearLayout root = new LinearLayout(context);
