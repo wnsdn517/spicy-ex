@@ -2671,10 +2671,10 @@ final class LyricsShareCardController {
         // The image that is shared: drawn only when it is actually shared or saved - every
         // render used to copy and redraw a full-size card for it, most of them never used.
         // The code as it is when shared: the stand-in is swapped for the real one if it came.
-        CardRecipe recipe = new CardRecipe(() -> {
+        CardRecipe recipe = new CardRecipe(rounded -> {
             Bitmap shared = wantCode ? cachedCode(t, onPaper(d)) : null;
             return renderCard(d, style, b, shared, art, artist, lyricsBg,
-                    quotes, translations, safe(t.title), safe(t.artist), true, true);
+                    quotes, translations, safe(t.title), safe(t.artist), true, true, rounded);
         });
         RENDER.execute(() -> {
             Bitmap base;
@@ -3506,7 +3506,7 @@ final class LyricsShareCardController {
         Canvas canvas = new Canvas(bitmap);
         canvas.scale(scale, scale);
         drawCard(canvas, design, style, backdrop, null, art, artist, lyricsBg, quotes, translations,
-                title, artistName, true, false);
+                title, artistName, true, false, true);
         return bitmap;
     }
 
@@ -3538,9 +3538,22 @@ final class LyricsShareCardController {
                                      Bitmap art, Bitmap artist, Bitmap lyricsBg, List<String> quotes,
                                      List<String> translations, String title, String artistName,
                                      boolean withQuoteText, boolean drawCode) {
+        return renderCard(design, style, backdrop, code, art, artist, lyricsBg, quotes, translations,
+                title, artistName, withQuoteText, drawCode, true);
+    }
+
+    /**
+     * {@code rounded} cuts the card's corners away (transparent) - the card's shape on screen and
+     * as a story sticker; a shared or saved image keeps them, square, since chat apps and the
+     * gallery show cut corners as odd blank (or black) wedges.
+     */
+    private static Bitmap renderCard(Design design, TextStyle style, Backdrop backdrop, Bitmap code,
+                                     Bitmap art, Bitmap artist, Bitmap lyricsBg, List<String> quotes,
+                                     List<String> translations, String title, String artistName,
+                                     boolean withQuoteText, boolean drawCode, boolean rounded) {
         Bitmap bitmap = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
         drawCard(new Canvas(bitmap), design, style, backdrop, code, art, artist, lyricsBg, quotes,
-                translations, title, artistName, withQuoteText, drawCode);
+                translations, title, artistName, withQuoteText, drawCode, rounded);
         return bitmap;
     }
 
@@ -3548,12 +3561,14 @@ final class LyricsShareCardController {
                                  Bitmap code, Bitmap art, Bitmap artist, Bitmap lyricsBg,
                                  List<String> quotes, List<String> translations,
                                  String title, String artistName, boolean withQuoteText,
-                                 boolean drawCode) {
+                                 boolean drawCode, boolean rounded) {
         boolean withCode = code != null;
         Bitmap codeInk = drawCode ? code : null;
-        Path clip = new Path();
-        clip.addRoundRect(new RectF(0, 0, W, H), 64, 64, Path.Direction.CW);
-        canvas.clipPath(clip);
+        if (rounded) {
+            Path clip = new Path();
+            clip.addRoundRect(new RectF(0, 0, W, H), 64, 64, Path.Direction.CW);
+            canvas.clipPath(clip);
+        }
         // Poster paints its own full-bleed ground; the rest sit on the chosen backdrop.
         if (design != Design.POSTER) {
             drawBackdrop(canvas, backdrop, art, artist, lyricsBg,
@@ -4721,16 +4736,28 @@ final class LyricsShareCardController {
 
     /** The shared card, drawn once however often it is shared or saved. */
     private static final class CardRecipe {
-        private final java.util.concurrent.Callable<Bitmap> make;
-        private Bitmap made;
+        interface Maker {
+            Bitmap make(boolean rounded) throws Exception;
+        }
 
-        CardRecipe(java.util.concurrent.Callable<Bitmap> make) {
+        private final Maker make;
+        private Bitmap square;
+        private Bitmap rounded;
+
+        CardRecipe(Maker make) {
             this.make = make;
         }
 
+        /** The image shared, saved and sent to chats: square corners, the backdrop to the edge. */
         synchronized Bitmap get() throws Exception {
-            if (made == null) made = make.call();
-            return made;
+            if (square == null) square = make.make(false);
+            return square;
+        }
+
+        /** A story sticker: the card's own rounded shape, floating on the story's background. */
+        synchronized Bitmap sticker() throws Exception {
+            if (rounded == null) rounded = make.make(true);
+            return rounded;
         }
     }
 
@@ -4920,7 +4947,7 @@ final class LyricsShareCardController {
         if (recipe == null || t == null) return;
         RENDER.execute(() -> {
             try {
-                Bitmap card = recipe.get();
+                Bitmap card = recipe.sticker();
                 Uri sticker = shareableUri(card);
                 if (sticker == null) sticker = saveToGallery(card);
                 if (sticker == null) throw new IllegalStateException("no uri for the card");
