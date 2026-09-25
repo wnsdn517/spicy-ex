@@ -4057,6 +4057,12 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
 
     private void styleLine(int index, boolean active) {
         lineVisualController.style(document == null ? null : document.appliedLines, index);
+        // The base style puts the row back to unsung: its real state (a past line's fill) has to
+        // be drawn again, or a settled row stays drained.
+        if (document != null && document.appliedLines != null && index >= 0
+                && index < document.appliedLines.size()) {
+            LyricsLineViewState.requestFrame(document.appliedLines.get(index));
+        }
     }
 
     private void resumeFollowCurrentLine() {
