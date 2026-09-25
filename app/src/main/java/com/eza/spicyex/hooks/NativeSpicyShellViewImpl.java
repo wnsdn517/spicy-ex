@@ -1906,6 +1906,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         refreshAudioListening();
         ambientController.setPlaying(playingNow);
         ambientController.updateAudioLevel(beatReactiveBackground ? host.currentAudioBeat() : 0f);
+        ambientController.updateAudioAccent(beatReactiveBackground ? host.currentAudioAccent() : 0f);
         ambientController.updateAudioEnergy(beatReactiveBackground ? host.currentAudioLevel() : 0f);
         updateJumpToCurrentVisibility();
         updateToggleSpinners();

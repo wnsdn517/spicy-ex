@@ -27,6 +27,10 @@ public interface AmbientBackgroundLayer {
     default void setAudioLevel(float level0to1) {
     }
 
+    /** 0..1 snare/clap envelope for this instant, next to the kick in setAudioLevel; UI thread. */
+    default void setAudioAccent(float accent0to1) {
+    }
+
     /** 0..1 loudness of what is playing right now (not just the kicks); UI thread. */
     default void setAudioEnergy(float loudness0to1) {
     }

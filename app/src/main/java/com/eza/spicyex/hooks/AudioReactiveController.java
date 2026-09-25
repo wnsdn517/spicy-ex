@@ -22,18 +22,20 @@ import java.nio.ByteOrder;
  * plays already passes through this process on its way to the AudioTrack, so it is analysed
  * there - no capture, no permission, no extra audio pipeline.
  *
- * <p>Each reading takes one contiguous window of {@link #WINDOW} mono frames and produces:
+ * <p>Two kinds of output:
  * <ul>
- *   <li>loudness - plain RMS, used to tell "audio is playing" from silence;</li>
- *   <li>beat - low-end energy against its own recent average. A fixed gain on RMS barely moves
- *       on modern, heavily compressed masters; comparing the bass to where it just was turns
- *       each kick into a clear pulse whatever the mix loudness;</li>
- *   <li>spectrum - {@link #BANDS} log-spaced bands from an FFT, each auto-gained against its own
- *       recent peak so quiet and loud tracks both fill the visualizer.</li>
+ *   <li>drum onsets - every sample goes through {@link BeatTracker}, which pulls kicks and
+ *       snares/claps out of the mix and leaves vocals, pads and sustained bass alone. Read live
+ *       ({@link #beatNow}, {@link #accentNow}) against a timeline of when each bit of audio is
+ *       heard, since hits are ~10ms events and the frame loop wants this frame's value;</li>
+ *   <li>at most ~30 readings a second from one {@link #WINDOW}-frame window: loudness (plain
+ *       RMS, "audio is playing" vs silence and the song's energy) and a spectrum of
+ *       {@link #BANDS} log-spaced bands, each auto-gained against its own recent peak so quiet
+ *       and loud tracks both fill the visualizer.</li>
  * </ul>
- * The beat is tracked over every sample instead (see {@link #trackBass}). Only while the lyrics
- * screen wants it ({@link #setListeningEnabled}); spectrum at most ~30 readings a second. Writes run ahead of what is audible by the track's buffer, so each reading is
- * delivered that much later to line up with the sound.
+ * Only while the lyrics screen wants it ({@link #setListeningEnabled}). Writes run ahead of what
+ * is audible by the track's buffer, so each reading is delivered that much later to line up with
+ * the sound.
  */
 final class AudioReactiveController {
     private static final String TAG = "[SpicyAudioReactive]";
@@ -229,7 +231,7 @@ final class AudioReactiveController {
         // the estimate places slightly before the previous one's end simply follows it.
         if (startsAt < timelineEnd && timelineEnd - startsAt < 400L) startsAt = timelineEnd;
         timelineEnd = startsAt + frames * 1000L / sampleRate;
-        trackBass(chunk, frames, sampleRate, startsAt);
+        beats.process(chunk, frames, sampleRate, startsAt);
         long now = SystemClock.uptimeMillis();
         if (now - lastReadingMs < MIN_INTERVAL_MS) return;
         lastReadingMs = now;
@@ -238,84 +240,23 @@ final class AudioReactiveController {
         analyse(track, n);
     }
 
-    // ---- beat tracking: bass band (~45-130 Hz) energy per ~10ms hop, spectral-flux onsets
-    private float lpA1, lpA2, lpB1, lpB2;   // two 2-pole low-passes (high and low corner)
-    private float hopEnergy;
-    private int hopFill;
-    private float prevHop1, prevHop2;
-    private float fluxAverage;
-    private float energyAverage;
-    private float envelope;
-    // Timeline of envelope values keyed by the uptime at which that audio is heard.
-    private static final int RING = 512;
-    private final long[] ringAt = new long[RING];
-    private final float[] ringValue = new float[RING];
-    private int ringHead = -1;
+    private final BeatTracker beats = new BeatTracker();
     private long timelineEnd;
 
-    private void trackBass(float[] x, int frames, int sampleRate, long startsAtMs) {
-        int hop = Math.max(64, sampleRate / 100); // ~10ms
-        float aHigh = onePole(130f, sampleRate);
-        float aLow = onePole(45f, sampleRate);
-        float hopSeconds = hop / (float) sampleRate;
-        float decay = (float) Math.exp(-hopSeconds / 0.16f);
-        float avgRate = hopSeconds / 1.2f;   // ~1.2s running averages
-        for (int i = 0; i < frames; i++) {
-            float v = x[i];
-            lpA1 += (v - lpA1) * aHigh;
-            lpA2 += (lpA1 - lpA2) * aHigh;
-            lpB1 += (v - lpB1) * aLow;
-            lpB2 += (lpB1 - lpB2) * aLow;
-            float band = lpA2 - lpB2;
-            hopEnergy += band * band;
-            if (++hopFill < hop) continue;
-            float e = hopEnergy / hop;
-            hopEnergy = 0f;
-            hopFill = 0;
-            // Flux: how much the bass rose against the lower of the last two hops, so a kick's
-            // ~10-20ms attack registers even on a mix whose bassline never lets the level drop.
-            float rise = Math.max(0f, e - Math.min(prevHop1, prevHop2));
-            prevHop2 = prevHop1;
-            prevHop1 = e;
-            energyAverage = energyAverage == 0f ? e : energyAverage + (e - energyAverage) * avgRate;
-            fluxAverage = fluxAverage + (rise - fluxAverage) * avgRate;
-            float pulse = 0f;
-            if (energyAverage > 1e-7f) {
-                // Relative to both the song's typical rise and its bass level: quiet and loud
-                // masters pulse alike, and a near-silent passage cannot trigger on noise.
-                float norm = Math.max(fluxAverage * 2.2f, energyAverage * 0.18f);
-                pulse = Math.max(0f, Math.min(1f, (rise - norm) / (norm * 1.6f)));
-            }
-            envelope = Math.max(pulse, envelope * decay);
-            int offsetMs = Math.round(1000f * (i + 1) / sampleRate);
-            synchronized (ringAt) {
-                ringHead = (ringHead + 1) % RING;
-                ringAt[ringHead] = startsAtMs + offsetMs;
-                ringValue[ringHead] = envelope;
-            }
-        }
-    }
-
-    private static float onePole(float cutoffHz, int sampleRate) {
-        return (float) (1.0 - Math.exp(-2.0 * Math.PI * cutoffHz / sampleRate));
-    }
-
-    /** Beat envelope (0..1) for the audio being heard right now. Any thread. */
+    /** Kick envelope (0..1) for the audio being heard right now. Any thread. */
     float beatNow() {
-        if (!listeningEnabled && !AudioDebug.watching()) return 0f;
-        long now = SystemClock.uptimeMillis();
-        synchronized (ringAt) {
-            if (ringHead < 0) return 0f;
-            for (int k = 0, i = ringHead; k < RING; k++, i = (i - 1 + RING) % RING) {
-                long at = ringAt[i];
-                if (at == 0L) return 0f;
-                if (at <= now) {
-                    // Stale timeline (playback stopped): let it fall silent.
-                    return now - at > 250L ? 0f : ringValue[i];
-                }
-            }
-        }
-        return 0f;
+        return sampleBeats()[0];
+    }
+
+    /** Snare/clap envelope (0..1) for the audio being heard right now. Any thread. */
+    float accentNow() {
+        return sampleBeats()[1];
+    }
+
+    private float[] sampleBeats() {
+        float[] out = new float[2];
+        if (listeningEnabled || AudioDebug.watching()) beats.sample(SystemClock.uptimeMillis(), out);
+        return out;
     }
 
     private static long latencyMs(AudioTrack track) {
@@ -345,7 +286,7 @@ final class AudioReactiveController {
             re[i] = i < frames ? mono[i] * hann[i] : 0f;
             im[i] = 0f;
         }
-        fft(re, im);
+        BeatTracker.fft(re, im);
         float binHz = sampleRate / (float) WINDOW;
 
         float[] spectrum = new float[BANDS];
@@ -366,48 +307,13 @@ final class AudioReactiveController {
         deliver(track, loudness, spectrum);
     }
 
-    /** In-place iterative radix-2 FFT; {@code re.length} must be a power of two. */
-    private static void fft(float[] re, float[] im) {
-        int n = re.length;
-        for (int i = 1, j = 0; i < n; i++) {
-            int bit = n >> 1;
-            for (; (j & bit) != 0; bit >>= 1) j ^= bit;
-            j ^= bit;
-            if (i < j) {
-                float t = re[i]; re[i] = re[j]; re[j] = t;
-                t = im[i]; im[i] = im[j]; im[j] = t;
-            }
-        }
-        for (int len = 2; len <= n; len <<= 1) {
-            double angle = -2 * Math.PI / len;
-            float wr = (float) Math.cos(angle);
-            float wi = (float) Math.sin(angle);
-            for (int i = 0; i < n; i += len) {
-                float cr = 1f;
-                float ci = 0f;
-                for (int k = 0; k < len / 2; k++) {
-                    int a = i + k;
-                    int b = a + len / 2;
-                    float tr = re[b] * cr - im[b] * ci;
-                    float ti = re[b] * ci + im[b] * cr;
-                    re[b] = re[a] - tr;
-                    im[b] = im[a] - ti;
-                    re[a] += tr;
-                    im[a] += ti;
-                    float nr = cr * wr - ci * wi;
-                    ci = cr * wi + ci * wr;
-                    cr = nr;
-                }
-            }
-        }
-    }
-
     private void deliver(AudioTrack track, float loudness, float[] spectrum) {
         long delay = latencyMs(track);
         main.postDelayed(() -> {
             float beatNow = beatNow();
             AudioDebug.loudness = loudness;
             AudioDebug.beat = beatNow;
+            AudioDebug.accent = accentNow();
             AudioDebug.spectrum = spectrum;
             if (listeningEnabled) listener.onAnalysis(loudness, beatNow, spectrum);
         }, delay);

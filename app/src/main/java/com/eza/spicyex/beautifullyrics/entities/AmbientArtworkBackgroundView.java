@@ -125,22 +125,38 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
     private boolean thermalThrottled;
     private PowerManager.OnThermalStatusChangedListener thermalListener;
     /*
-     * Music reactivity, in two layers:
-     *  - beat: each kick "breathes" the whole background - a slight zoom and brightening that
-     *    rises quickly and eases back. Applied through the view's scale and the layer's paint,
-     *    both composite-time properties, so it moves smoothly at the display rate without
-     *    re-running the shader. (It used to jump the shader's warp amount on each kick, redrawn at
-     *    20-30fps, which read as the image twitching.)
+     * Music reactivity. The drums come in already separated from the vocals and the rest of the
+     * mix (see BeatTracker), in three layers:
+     *  - kick (and, smaller, the snare): the whole background "breathes" - a zoom driven by a
+     *    slightly under-damped spring, so a hit punches out fast, settles back with a soft
+     *    rebound, and back-to-back hits build on each other instead of restarting. The zoom is a
+     *    view property, composited at the display rate without re-running the shader. (It used
+     *    to jump the shader's warp amount on each kick, redrawn at 20-30fps, which read as the
+     *    image twitching.)
+     *  - snare/clap: a short brightening flash, and with the kick a surge in how far the flow has
+     *    travelled - the blobs lurch forward on a hit and drift on, never jump.
      *  - energy: the song's loudness, smoothed and measured against its own running level, sets
      *    how fast and how far the background flows. Quiet verses drift; a loud chorus moves.
      */
-    private static final float BEAT_ZOOM = 0.03f;
-    private static final float BEAT_BRIGHTEN = 0.17f;
-    private static final float PULSE_ATTACK_SEC = 0.045f;
-    private static final float PULSE_RELEASE_SEC = 0.32f;
+    private static final float BEAT_ZOOM = 0.034f;
+    private static final float SNARE_ZOOM_SHARE = 0.4f;
+    private static final float BEAT_BRIGHTEN = 0.12f;
+    private static final float SNARE_BRIGHTEN = 0.14f;
+    /** Spring behind the zoom: ~3.6 Hz, damping ratio 0.55 (a small, soft rebound). */
+    private static final float SPRING_OMEGA = (float) (2 * Math.PI * 3.6);
+    private static final float SPRING_DAMPING = 0.55f;
+    private static final float FLASH_ATTACK_SEC = 0.02f;
+    private static final float FLASH_RELEASE_SEC = 0.2f;
+    private static final float SURGE_ATTACK_SEC = 0.05f;
+    private static final float SURGE_RELEASE_SEC = 0.5f;
+    /** Extra flow speed at a full-strength hit (1 = the resting speed again on top). */
+    private static final float SURGE_SPEED = 2.2f;
     private volatile float audioLevel;
-    /** The beat envelope actually shown. UI thread only. */
-    private float pulse;
+    private volatile float audioAccent;
+    /** Spring position/velocity (zoom), snare flash and flow surge actually shown. UI thread. */
+    private float pulse, pulseVelocity;
+    private float flash;
+    private float surge;
     private long lastPulseNanos;
     private float appliedZoom = 1f;
     // Energy: short and long loudness averages; energy01 is 0.5 at the song's usual level.
@@ -180,6 +196,9 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
         playing = value;
         if (!playing) {
             pulse = 0f;
+            pulseVelocity = 0f;
+            flash = 0f;
+            surge = 0f;
             applyPulse();
         }
         schedule();
@@ -288,8 +307,9 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
         if (!posted) {
             posted = true;
             // ~20fps: slow drifting noise reads the same as at 33fps but wakes the GPU less often.
-            // The beat itself is not tied to this rate (see stepPulse).
-            Choreographer.getInstance().postFrameCallbackDelayed(frame, 50);
+            // The zoom is not tied to this rate (see stepPulse), but the flash and the surge ride
+            // on the shader, so ~30fps while the music is driving it - still on the small layer.
+            Choreographer.getInstance().postFrameCallbackDelayed(frame, energyLive() ? 33 : 50);
         }
     }
     private void tick(long now) {
@@ -297,7 +317,7 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
         if (!animating()) { lastFrame = 0; return; }
         if (lastFrame != 0) {
             double dt = Math.min(0.1, (now - lastFrame) / 1e9);
-            elapsedSeconds += dt * flowSpeed();
+            elapsedSeconds += dt * (flowSpeed() + SURGE_SPEED * surge);
         }
         // Keeps the beat envelope moving when nothing else calls setAudioLevel this frame.
         stepPulse(System.nanoTime());
@@ -399,6 +419,11 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
     }
 
     @Override
+    public void setAudioAccent(float accent0to1) {
+        audioAccent = Math.max(0f, Math.min(1f, accent0to1));
+    }
+
+    @Override
     public void setAudioEnergy(float loudness0to1) {
         long now = System.nanoTime();
         float dt = lastEnergyNanos == 0 ? 0f : Math.min(0.2f, (now - lastEnergyNanos) / 1e9f);
@@ -423,20 +448,45 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
     }
 
     private float flowSpeed() {
-        return energyLive() ? 0.7f + 0.8f * energy01 : 1f;
+        return energyLive() ? 0.6f + energy01 : 1f;
     }
 
-    /** Eases the shown beat envelope toward the live one: quick rise, slow release. */
+    /** Steps the zoom spring, the flash and the surge toward the live drum envelopes. */
     private void stepPulse(long now) {
         float dt = lastPulseNanos == 0 ? 0.016f : Math.min(0.1f, (now - lastPulseNanos) / 1e9f);
         lastPulseNanos = now;
-        float target = moving && playing && enabled ? audioLevel : 0f;
-        // Kicks in a quiet passage are gentler than in a loud one.
-        if (energyLive()) target *= 0.55f + 0.6f * energy01;
-        float tau = target > pulse ? PULSE_ATTACK_SEC : PULSE_RELEASE_SEC;
-        pulse += (target - pulse) * (1f - (float) Math.exp(-dt / tau));
-        if (pulse < 0.002f) pulse = 0f;
+        if (dt <= 0f) return;
+        boolean live = moving && playing && enabled;
+        float kick = live ? audioLevel : 0f;
+        float snare = live ? audioAccent : 0f;
+        // Hits in a quiet passage are gentler than in a loud one.
+        float scale = energyLive() ? 0.55f + 0.6f * energy01 : 1f;
+        kick *= scale;
+        snare *= scale;
+
+        float target = Math.min(1.2f, kick + SNARE_ZOOM_SHARE * snare);
+        // Semi-implicit Euler in <=4ms steps: stable at any frame rate, 60-120 Hz alike.
+        float k = SPRING_OMEGA * SPRING_OMEGA;
+        float c = 2f * SPRING_DAMPING * SPRING_OMEGA;
+        for (float left = dt; left > 0f; ) {
+            float h = Math.min(0.004f, left);
+            left -= h;
+            pulseVelocity += (k * (target - pulse) - c * pulseVelocity) * h;
+            pulse += pulseVelocity * h;
+        }
+        if (target == 0f && Math.abs(pulse) < 0.002f && Math.abs(pulseVelocity) < 0.01f) {
+            pulse = 0f;
+            pulseVelocity = 0f;
+        }
+        flash = ease(flash, snare, dt, FLASH_ATTACK_SEC, FLASH_RELEASE_SEC);
+        surge = ease(surge, Math.max(kick, snare), dt, SURGE_ATTACK_SEC, SURGE_RELEASE_SEC);
         applyPulse();
+    }
+
+    private static float ease(float value, float target, float dt, float attackSec, float releaseSec) {
+        float tau = target > value ? attackSec : releaseSec;
+        value += (target - value) * (1f - (float) Math.exp(-dt / tau));
+        return value < 0.002f ? 0f : value;
     }
 
     private void applyPulse() {
@@ -444,7 +494,8 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
         // background layer. The brightening rides along in the shader's own ~20fps redraw
         // (onDraw) - changing the layer's paint every frame instead damaged the layer, so the
         // shader and its blur re-rendered at the full display rate and the GPU fell behind.
-        float zoom = 1f + BEAT_ZOOM * pulse;
+        // Never below 1: the spring's rebound would otherwise pull the edges into view.
+        float zoom = 1f + BEAT_ZOOM * Math.max(0f, pulse);
         if (Math.abs(zoom - appliedZoom) > 0.0004f) {
             appliedZoom = zoom;
             setScaleX(zoom);
@@ -459,9 +510,10 @@ public final class AmbientArtworkBackgroundView extends View implements AmbientB
             // be non-zero for a beat after the shell stops advancing time.
             // Energy widens the flow a little in loud sections; the beat is applied at composite
             // time (applyPulse), not here.
-            float energyWarp = moving && playing && energyLive() ? 0.35f * (energy01 - 0.5f) : 0f;
+            float energyWarp = moving && playing && energyLive() ? 0.45f * (energy01 - 0.5f) : 0f;
             shader.setFloatUniform("warpIntensity", 1f + energyWarp);
-            shader.setFloatUniform("brightness", baseBrightness * (1f + BEAT_BRIGHTEN * pulse));
+            float lift = BEAT_BRIGHTEN * Math.max(0f, Math.min(1f, pulse)) + SNARE_BRIGHTEN * flash;
+            shader.setFloatUniform("brightness", baseBrightness * (1f + lift));
             if (offscreenNode != null && canvas.isHardwareAccelerated()) {
                 int lowW = offscreenNode.getWidth(), lowH = offscreenNode.getHeight();
                 RecordingCanvas recording = offscreenNode.beginRecording();

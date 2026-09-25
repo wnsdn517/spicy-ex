@@ -137,6 +137,12 @@ public final class LyricsAmbientController {
         if (layer != null) layer.setAudioLevel(level0to1);
     }
 
+    /** Snare/clap envelope (0..1), the second drum layer next to the kick in updateAudioLevel. */
+    public void updateAudioAccent(float accent0to1) {
+        AmbientBackgroundLayer layer = animatedBackground;
+        if (layer != null) layer.setAudioAccent(accent0to1);
+    }
+
     public void updateAudioEnergy(float loudness0to1) {
         AmbientBackgroundLayer layer = animatedBackground;
         if (layer != null) layer.setAudioEnergy(loudness0to1);

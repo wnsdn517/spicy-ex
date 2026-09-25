@@ -263,6 +263,11 @@ public class NativeSpicyLyricsHook extends SpotifyHook implements LyricsHost {
     }
 
     @Override
+    public float currentAudioAccent() {
+        return audioReactiveController.accentNow();
+    }
+
+    @Override
     public float[] currentAudioSpectrum() {
         return audioSpectrum;
     }

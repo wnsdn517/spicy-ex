@@ -1419,8 +1419,9 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
                 String[] kinds = com.eza.spicyex.hooks.AudioDebug.kinds();
                 float seconds = Math.max(0.001f, (now - previousAt[0]) / 1000f);
                 StringBuilder out = new StringBuilder();
-                out.append(String.format(java.util.Locale.ROOT, "loudness %.2f   beat %.2f%n",
-                        com.eza.spicyex.hooks.AudioDebug.loudness, com.eza.spicyex.hooks.AudioDebug.beat));
+                out.append(String.format(java.util.Locale.ROOT, "loudness %.2f   kick %.2f   snare %.2f%n",
+                        com.eza.spicyex.hooks.AudioDebug.loudness, com.eza.spicyex.hooks.AudioDebug.beat,
+                        com.eza.spicyex.hooks.AudioDebug.accent));
                 boolean reactive = Boolean.TRUE.equals(store.get(Settings.BEAT_REACTIVE_BACKGROUND));
                 out.append("beat-reactive background: ").append(reactive ? "on" : "off").append("\n");
                 String format = com.eza.spicyex.hooks.AudioDebug.format();

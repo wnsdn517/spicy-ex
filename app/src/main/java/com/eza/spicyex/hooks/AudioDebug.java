@@ -17,6 +17,7 @@ public final class AudioDebug {
 
     public static volatile float loudness;
     public static volatile float beat;
+    public static volatile float accent;
     public static volatile float[] spectrum = new float[AudioReactiveController.BANDS];
 
     private AudioDebug() {

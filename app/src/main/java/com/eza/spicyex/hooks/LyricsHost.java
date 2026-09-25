@@ -21,8 +21,11 @@ interface LyricsHost {
     /** 0..1 loudness of the playing audio; tells playing from silence. */
     float currentAudioLevel();
 
-    /** 0..1 pulse on the low end, relative to its recent level: the beat. */
+    /** 0..1 kick-drum envelope for the audio heard now: the beat. */
     float currentAudioBeat();
+
+    /** 0..1 snare/clap envelope for the audio heard now. */
+    float currentAudioAccent();
 
     /** Log-spaced band levels, 0..1 each, for the instrumental visualizer. */
     float[] currentAudioSpectrum();

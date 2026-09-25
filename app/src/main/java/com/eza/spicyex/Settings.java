@@ -621,10 +621,10 @@ public final class Settings {
             LyricsBackgroundStyle.ANIMATED_TEXTURE
     );
 
-    // Only meaningful when BACKGROUND_STYLE is ANIMATED_TEXTURE - gates whether the shader's warp
-    // intensity reacts to the live audio level measured by AudioReactiveController, independent of
-    // turning the animated texture on at all (some people want the flow without the kick). Off also
-    // means the Visualizer behind that level is never attached, so this costs nothing when unused.
+    // Only meaningful when BACKGROUND_STYLE is ANIMATED_TEXTURE - gates whether the background
+    // reacts to the drums and loudness AudioReactiveController pulls out of what Spotify plays,
+    // independent of turning the animated texture on at all (some people want the flow without the
+    // kick). Off also means that analysis never runs for the background, so it costs nothing unused.
     public static final Setting<Boolean> BEAT_REACTIVE_BACKGROUND = boolSetting(
             "lyric_beat_reactive_background", INTERNAL, "Beat-reactive background", false
     );
