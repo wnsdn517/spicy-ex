@@ -598,6 +598,7 @@
     <string name="settings_option_play_music_instead">음악으로 대체</string>
     <string name="settings_layout_editor_follow_chip_look">버튼 모양</string>
     <string name="settings_label_lyrics_long_press_share">가사를 길게 눌러 공유</string>
+    <string name="settings_label_lyrics_double_tap_like">두 번 탭해서 좋아요</string>
     <string name="settings_label_lyrics_status_bar_hidden_portrait">상태 표시줄 숨기기 (세로)</string>
     <string name="settings_label_lyrics_status_bar_hidden_landscape">상태 표시줄 숨기기 (가로)</string>
     <string name="settings_card_editor">재생 중 카드 편집기…</string>
