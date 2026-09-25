@@ -534,15 +534,15 @@ final class LyricsShareCardController {
     }
 
     /**
-     * The words leave in reading order when they travel down to the card. Travelling up (the
-     * card above the pressed line), the line nearest the card goes first: the bottom line of a
-     * wrapped lyric leads, then the one above it - each still left to right - so the words that
-     * have furthest to go do not cut across those still waiting.
+     * The line nearest the card leaves first. Travelling up to the card, that is the top line:
+     * plain reading order. Travelling down (the card below the pressed line), the bottom line of
+     * a wrapped lyric leads, then the one above it - each still left to right - so the words
+     * with furthest to go do not cut across those still waiting.
      */
     private static void orderAlongTravel(List<FlyingWord> flying) {
         float travel = 0f;
         for (FlyingWord w : flying) travel += w.toBaseline - w.fromBaseline;
-        if (travel >= 0f) return;
+        if (travel <= 0f) return;
         // Each word by where it starts: its first part's line and x.
         Map<Integer, float[]> starts = new java.util.HashMap<>();
         for (FlyingWord w : flying) {
@@ -854,74 +854,154 @@ final class LyricsShareCardController {
         java.util.TreeSet<Integer> candidate = new java.util.TreeSet<>(picked);
         candidate.add(next);
         if (!selectionFits(candidate)) return;
-        FrameLayout carousel = (FrameLayout) cardHost.getParent();
+        if (!(overlay instanceof FrameLayout)) return;
+        FrameLayout host = (FrameLayout) overlay;
 
-        // The next line waits just under the card's foot, a small arrow over it.
-        LinearLayout pill = new LinearLayout(activity);
-        pill.setGravity(Gravity.CENTER_VERTICAL);
-        pill.setPadding(dp(12), dp(8), dp(16), dp(8));
-        android.graphics.drawable.GradientDrawable bg = glass(dp(20), 0, 40);
-        bg.setColor(Color.argb(170, 18, 18, 22));
-        pill.setBackground(bg);
-        pill.setElevation(dp(24));
+        // A chip under the card (outside it, where the hint text sits): the next line, with an
+        // arrow pointing up into the card.
+        LinearLayout chip = new LinearLayout(activity);
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(dp(12), dp(7), dp(16), dp(7));
+        android.graphics.drawable.GradientDrawable bg = glass(dp(18), 0, 50);
+        bg.setColor(Color.argb(190, 22, 22, 26));
+        chip.setBackground(bg);
+        chip.setElevation(dp(30));
         ImageView arrow = new ImageView(activity);
         arrow.setImageDrawable(new LineIcon(LineIcon.Kind.ARROW_UP, Color.WHITE));
-        LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(dp(16), dp(16));
+        LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(dp(15), dp(15));
         arrowLp.rightMargin = dp(8);
-        pill.addView(arrow, arrowLp);
+        chip.addView(arrow, arrowLp);
         TextView text = new TextView(activity);
         text.setText(safe(document.appliedLines.get(next).text));
         text.setTextColor(Color.WHITE);
-        text.setTextSize(14);
+        text.setTextSize(13);
         text.setTypeface(Typeface.DEFAULT_BOLD);
         text.setSingleLine(true);
         text.setEllipsize(TextUtils.TruncateAt.END);
-        text.setMaxWidth(Math.max(dp(100), cardHost.getWidth() - dp(90)));
-        pill.addView(text);
+        text.setMaxWidth(Math.max(dp(100), cardHost.getWidth() - dp(60)));
+        chip.addView(text);
+        int[] hostAt = new int[2];
+        int[] cardAt = new int[2];
+        host.getLocationOnScreen(hostAt);
+        cardHost.getLocationOnScreen(cardAt);
+        float cardBottom = cardAt[1] - hostAt[1] + cardHost.getHeight() - cardHost.getTranslationY();
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        lp.bottomMargin = dp(14);
-        carousel.addView(pill, lp);
-        teasePill = pill;
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        lp.topMargin = Math.round(cardBottom + dp(10));
+        host.addView(chip, lp);
+        teasePill = chip;
 
-        // In: the card lifts a touch as if to make room, and the line rises into view with it.
-        PathInterpolator glide = new PathInterpolator(0.2f, 0.9f, 0.2f, 1f);
-        pill.setAlpha(0f);
-        pill.setTranslationY(dp(22));
-        pill.setScaleX(0.94f);
-        pill.setScaleY(0.94f);
-        cardHost.animate().translationY(-dp(12)).setDuration(560).setInterpolator(glide).start();
-        pill.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(560)
-                .setInterpolator(glide).start();
-        // While it waits, the arrow beckons upward twice.
-        android.animation.ObjectAnimator bob = android.animation.ObjectAnimator.ofFloat(arrow,
-                View.TRANSLATION_Y, 0f, -dp(3), 0f);
-        bob.setDuration(520);
-        bob.setRepeatCount(1);
-        bob.setStartDelay(560);
-        bob.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
-        bob.start();
-        // Out: the line is drawn up toward the card and dissolves; the card settles back.
-        pill.postDelayed(() -> endTease(pill, true), 1700);
+        View card = cardHost;
+        card.setPivotX(card.getWidth() / 2f);
+        card.setPivotY(card.getHeight());
+        card.setCameraDistance(8000f * activity.getResources().getDisplayMetrics().density);
+        float lift = dp(20);
+        float tug = dp(4);
+        float tilt = 4f;
+        chip.setAlpha(0f);
+        TextView hintText = hint;
+        // One clock for the card and the chip: the card lifts (tipping back a touch, as if being
+        // pulled up), gives an extra small tug, then is let go and springs home with a damped
+        // bounce; the chip rises in under it, beckons, and is drawn up into the card.
+        android.animation.ValueAnimator clock = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        long total = 1750L;
+        clock.setDuration(total);
+        clock.setInterpolator(null);
+        clock.addUpdateListener(a -> {
+            float t = a.getAnimatedFraction() * total;
+            float y;
+            float rot;
+            if (t < 480f) {
+                float p = 1f - (float) Math.pow(1f - t / 480f, 3);
+                y = -lift * p;
+                rot = tilt * p;
+            } else if (t < 1000f) {
+                float k = (float) Math.sin(Math.PI * (t - 480f) / 520f);
+                y = -lift - tug * k;
+                rot = tilt + 1.5f * k;
+            } else {
+                float u = t - 1000f;
+                float spring = (float) (Math.exp(-u / 120f) * Math.cos(u / 68f));
+                y = -lift * spring;
+                rot = tilt * spring;
+            }
+            card.setTranslationY(y);
+            card.setRotationX(rot);
+            float scale = 1f - 0.012f * Math.min(1f, Math.abs(y) / lift);
+            card.setScaleX(scale);
+            card.setScaleY(scale);
+            // The chip.
+            if (t < 120f) {
+                chip.setAlpha(0f);
+            } else if (t < 620f) {
+                float p = (t - 120f) / 500f;
+                float e = 1f - (float) Math.pow(1f - p, 3);
+                chip.setAlpha(Math.min(1f, p * 1.6f));
+                chip.setTranslationY(dp(18) * (1f - e));
+                float cs = 0.9f + 0.1f * e;
+                chip.setScaleX(cs);
+                chip.setScaleY(cs);
+            } else if (t < 1000f) {
+                chip.setAlpha(1f);
+                chip.setTranslationY(0f);
+                chip.setScaleX(1f);
+                chip.setScaleY(1f);
+                // The arrow beckons upward.
+                arrow.setTranslationY(-dp(3) * (float) Math.sin(Math.PI * (t - 620f) / 190f) * (t < 1000f ? 1f : 0f));
+            } else {
+                float p = Math.min(1f, (t - 1000f) / 380f);
+                float e = p * p;
+                arrow.setTranslationY(0f);
+                chip.setTranslationY(-dp(16) * e);
+                float cs = 1f - 0.15f * e;
+                chip.setScaleX(cs);
+                chip.setScaleY(cs);
+                chip.setAlpha(1f - p);
+            }
+            if (hintText != null) {
+                float hidden = t < 1000f ? Math.min(1f, t / 200f) : Math.max(0f, 1f - (t - 1150f) / 300f);
+                hintText.setAlpha(1f - Math.max(0f, Math.min(1f, hidden)));
+            }
+        });
+        clock.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                if (teasePill == chip) teasePill = null;
+                if (teaseClock == animation) teaseClock = null;
+                card.setTranslationY(0f);
+                card.setRotationX(0f);
+                card.setScaleX(1f);
+                card.setScaleY(1f);
+                if (chip.getParent() instanceof ViewGroup) ((ViewGroup) chip.getParent()).removeView(chip);
+                if (hintText != null) hintText.setAlpha(1f);
+            }
+        });
+        teaseClock = clock;
+        clock.start();
     }
 
     /** The swipe-up hint on screen, if any: a touch on the card ends it early. */
     private View teasePill;
+    private android.animation.ValueAnimator teaseClock;
 
-    private void endTease(View pill, boolean gently) {
-        if (pill == null || pill.getParent() == null) return;
-        if (teasePill == pill) teasePill = null;
-        pill.animate().cancel();
-        if (cardHost != null) {
-            cardHost.animate().translationY(0f).setDuration(gently ? 620 : 240)
-                    .setInterpolator(gently ? new android.view.animation.OvershootInterpolator(1.1f)
-                            : new PathInterpolator(0.2f, 0.9f, 0.2f, 1f)).start();
+    private void endTease(View chip, boolean gently) {
+        android.animation.ValueAnimator clock = teaseClock;
+        teaseClock = null;
+        if (clock != null) {
+            clock.removeAllListeners();
+            clock.cancel();
         }
-        pill.animate().alpha(0f).translationY(gently ? -dp(16) : 0f).scaleX(0.9f).scaleY(0.9f)
-                .setDuration(gently ? 440 : 160).setInterpolator(new PathInterpolator(0.4f, 0f, 0.2f, 1f))
+        if (teasePill == chip) teasePill = null;
+        if (cardHost != null) {
+            cardHost.animate().translationY(0f).rotationX(0f).scaleX(1f).scaleY(1f).setDuration(260)
+                    .setInterpolator(new PathInterpolator(0.2f, 0.9f, 0.2f, 1f)).start();
+        }
+        if (hint != null) hint.animate().alpha(1f).setDuration(200).start();
+        if (chip == null || chip.getParent() == null) return;
+        chip.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(160)
                 .withEndAction(() -> {
-                    if (pill.getParent() instanceof ViewGroup) ((ViewGroup) pill.getParent()).removeView(pill);
+                    if (chip.getParent() instanceof ViewGroup) ((ViewGroup) chip.getParent()).removeView(chip);
                 }).start();
     }
 
@@ -977,6 +1057,12 @@ final class LyricsShareCardController {
         currentCode = null;
         currentCodeView = null;
         lineSlides.clear();
+        if (teaseClock != null) {
+            teaseClock.removeAllListeners();
+            teaseClock.cancel();
+            teaseClock = null;
+        }
+        teasePill = null;
         // Full-size bitmaps kept only for the open sheet: the frozen lyrics background and the
         // shareable card (drawn at most twice, 5-6 MB each) go with it.
         lyricsBackground = null;
