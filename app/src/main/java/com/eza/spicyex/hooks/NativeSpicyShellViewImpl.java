@@ -807,8 +807,15 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         }
     }
 
+    /** Lyrics frozen under the share sheet: no per-frame lyric work, so no row re-blurs. */
+    private boolean lyricsFrozen;
+    /** The share sheet hides everything: nothing but it is drawn, the background is paused. */
+    private boolean lyricsCovered;
+
     private final VsyncFrameScheduler frameScheduler = new VsyncFrameScheduler(deltaTimeSeconds -> {
         if (!running) return;
+        // The share sheet is up: the lyrics hold still under it (see onShareSheet).
+        if (lyricsFrozen) return;
         float dt = deltaTimeSeconds <= 0d ? (1f / 60f) : (float) Math.max(0.001d, Math.min(0.08d, deltaTimeSeconds));
         // Order matters: the reveal publishes this frame's alpha factor, then updateState() runs
         // the renderer, which reads it. Stepping it after would show every row one frame stale.
@@ -3404,6 +3411,30 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 .setInterpolator(new android.view.animation.OvershootInterpolator(2.2f)).start();
     }
 
+    /**
+     * The share sheet over the lyrics. Long-pressing while the lyrics were blurred and moving was
+     * heavy: every blurred row kept re-rendering its blur under the sheet as it opened. The
+     * lyrics now hold still from the press until the sheet closes, and once the sheet's backdrop
+     * is opaque neither they nor the animated background are drawn at all.
+     */
+    private void onShareSheet(boolean showing, boolean covering) {
+        lyricsFrozen = showing;
+        if (covering != lyricsCovered) {
+            lyricsCovered = covering;
+            if (covering) ambientController.pauseAnimation();
+            else ambientController.resumeAnimation();
+            invalidate();
+        }
+    }
+
+    @Override
+    protected boolean drawChild(android.graphics.Canvas canvas, View child, long drawingTime) {
+        if (lyricsCovered && shareCardController != null && child != shareCardController.overlayView()) {
+            return false;
+        }
+        return super.drawChild(canvas, child, drawingTime);
+    }
+
     private void shareLyricLineAt(float yInScroll) {
         releasePressedLyric();
         if (config == null || !Boolean.TRUE.equals(config.get(Settings.LONG_PRESS_SHARE))) return;
@@ -3422,6 +3453,7 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             shareCardController = new LyricsShareCardController(activity);
             shareCardController.setBackgroundSnapshot(
                     (w, h) -> ambientController.snapshotBackground(w, h));
+            shareCardController.setSheetListener(this::onShareSheet);
         }
         Bitmap art = SpotifyArtworkCache.snapshotLarge(track.imageId, track.uri, dp(420));
         if (art == null && track.imageId != null && !track.imageId.isEmpty()) {

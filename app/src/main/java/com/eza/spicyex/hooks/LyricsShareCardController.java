@@ -232,6 +232,31 @@ final class LyricsShareCardController {
         backgroundSnapshot = snapshot;
     }
 
+    /** What the lyrics view under the sheet may skip: it is covered, or at least not visible
+     *  in motion, while the sheet is up. */
+    interface SheetListener {
+        /** @param showing the sheet is up (the lyrics can stop animating: nobody sees them move)
+         *  @param covering it hides them completely (they need not even be drawn) */
+        void onSheet(boolean showing, boolean covering);
+    }
+
+    private SheetListener sheetListener;
+    private boolean sheetCovering;
+
+    void setSheetListener(SheetListener listener) {
+        sheetListener = listener;
+    }
+
+    View overlayView() {
+        return overlay;
+    }
+
+    private void reportSheet(boolean showing, boolean covering) {
+        if (!showing) covering = false;
+        sheetCovering = covering;
+        if (sheetListener != null) sheetListener.onSheet(showing, covering);
+    }
+
     LyricsShareCardController(Activity activity) {
         this.activity = activity;
         this.prefs = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -295,6 +320,9 @@ final class LyricsShareCardController {
         overlay.setElevation(dp(64));
         root.addView(overlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // From the long press on, the lyrics underneath hold still: their blurred rows keep the
+        // blur they have instead of re-rendering it every frame under the opening sheet.
+        reportSheet(true, false);
         BackgroundSnapshot snapshot = backgroundSnapshot;
         if (snapshot != null) {
             // Off the main thread; the card redraws with it as soon as it is ready.
@@ -863,6 +891,7 @@ final class LyricsShareCardController {
 
     void dismiss() {
         generation++;
+        if (overlay != null) reportSheet(false, false);
         if (overlay != null && overlay.getParent() instanceof ViewGroup) {
             View leaving = overlay;
             leaving.animate().alpha(0f).setDuration(180).withLayer()
@@ -961,7 +990,12 @@ final class LyricsShareCardController {
         PullSheet page = new PullSheet(activity);
         page.setOrientation(landscape ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         page.setPadding(insetLeft, insetTop, insetRight, insetBottom);
-        page.onProgress = progress -> ground.setAlpha(1f - 0.7f * progress);
+        page.onProgress = progress -> {
+            ground.setAlpha(1f - 0.7f * progress);
+            // Pulled down, the lyrics show through the dimmed backdrop again; back up, covered.
+            boolean covering = progress <= 0.001f;
+            if (overlay == scrim && covering != sheetCovering) reportSheet(true, covering);
+        };
         page.onEmptyTap = this::dismiss;
         page.onDismiss = velocity -> {
             ground.animate().alpha(0f).setDuration(220).start();
@@ -1070,7 +1104,10 @@ final class LyricsShareCardController {
         if (landscape) panel.setTranslationX(dp(60));
         else panel.setTranslationY(dp(80));
         scrim.post(() -> {
-            ground.animate().alpha(1f).setDuration(220).withLayer().start();
+            ground.animate().alpha(1f).setDuration(220).withLayer().withEndAction(() -> {
+                // Opaque now: the lyrics under it need not be drawn at all.
+                if (overlay == scrim) reportSheet(true, true);
+            }).start();
             stageColumn.animate().alpha(1f).setDuration(200).start();
             carousel.animate().translationY(0f).setDuration(420).setInterpolator(ease).start();
             panel.animate().translationX(0f).translationY(0f).alpha(1f).setStartDelay(60)
