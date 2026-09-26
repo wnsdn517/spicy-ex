@@ -961,14 +961,32 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                  *  the text below spans exactly the cover's width. */
                 @Override
                 protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-                    super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-                    if (columnArtFrame == null) return;
+                    // The cover is sized from the full column width every time. Measuring it
+                    // with the previous pass's centring padding in place measured the song info
+                    // narrower, it wrapped to more lines, the cover came out smaller, the padding
+                    // grew - and every re-layout (a tap on the cover is one) shrank it again.
+                    if (columnArtFrame == null) {
+                        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+                        return;
+                    }
                     int content = MeasureSpec.getSize(widthMeasureSpec);
+                    int heightMode = MeasureSpec.getMode(heightMeasureSpec);
+                    int available = Math.max(0, MeasureSpec.getSize(heightMeasureSpec)
+                            - getPaddingTop() - getPaddingBottom());
+                    columnArtLockedSide = -1;
+                    columnArtFrame.measure(MeasureSpec.makeMeasureSpec(content, MeasureSpec.EXACTLY),
+                            heightMode == MeasureSpec.UNSPECIFIED ? heightMeasureSpec
+                                    : MeasureSpec.makeMeasureSpec(available, MeasureSpec.AT_MOST));
                     int side = columnArtFrame.getMeasuredWidth();
                     int inset = side > 0 ? Math.max(0, (content - side) / 2) : 0;
                     if (inset != getPaddingLeft() || inset != getPaddingRight()) {
                         setPadding(inset, getPaddingTop(), inset, getPaddingBottom());
+                    }
+                    columnArtLockedSide = side;
+                    try {
                         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+                    } finally {
+                        columnArtLockedSide = -1;
                     }
                 }
             };
@@ -995,7 +1013,9 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
                     int width = MeasureSpec.getSize(widthMeasureSpec);
                     int side = width;
-                    if (MeasureSpec.getMode(heightMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+                    if (columnArtLockedSide >= 0) {
+                        side = Math.min(width, columnArtLockedSide);
+                    } else if (MeasureSpec.getMode(heightMeasureSpec) != MeasureSpec.UNSPECIFIED) {
                         int reserve = dp(8);
                         if (title != null && title.getVisibility() != GONE) {
                             title.measure(widthMeasureSpec,
@@ -1791,6 +1811,10 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                 break;
         }
     }
+
+    /** Cover side fixed by the left column's first measure pass for its centred second pass;
+     *  -1 outside it. */
+    private int columnArtLockedSide = -1;
 
     private void springBackColumnArt() {
         if (columnArtFrame == null) return;
