@@ -342,7 +342,7 @@ final class LyricsShareCardController {
         renderThumbs();
         if (backdrop == Backdrop.ARTIST && artistImage == null) fetchArtistImage();
         if (spotifyCode) fetchSpotifyCode();
-        if (document != null && !picked.isEmpty()) {
+        if (document != null && !picked.isEmpty() && hintPasses() > 0) {
             View teaseHost = overlay;
             teaseHost.postDelayed(() -> {
                 if (overlay == teaseHost) teaseNextLine();
@@ -876,7 +876,8 @@ final class LyricsShareCardController {
         if (!selectionFits(candidate)) return;
         if (!(overlay instanceof FrameLayout)) return;
         FrameLayout host = (FrameLayout) overlay;
-        int passes = hintPasses();
+        int passes = consumeHintPasses();
+        if (passes <= 0) return;
 
         // The chip under the card, where the one-line hint sits: what to do, then the line.
         LinearLayout chip = new LinearLayout(activity);
@@ -1031,17 +1032,42 @@ final class LyricsShareCardController {
         clock.start();
     }
 
-    /** Full demonstration (two passes) the first few times, one pass after that. */
+    /** "Share sheet gesture hint": a full demonstration (two passes) the first few times and one
+     *  pass after that, the full one every time, or none. Does not count this showing. */
     private int hintPasses() {
+        String mode;
         try {
-            android.content.SharedPreferences prefs = activity.getSharedPreferences(
-                    "spicyex_share_hint", android.content.Context.MODE_PRIVATE);
-            int shown = prefs.getInt("swipe_up_shown", 0);
-            prefs.edit().putInt("swipe_up_shown", shown + 1).apply();
-            return shown < 3 ? 2 : 1;
+            mode = com.eza.spicyex.SpotifyPlusConfig.from(activity)
+                    .get(com.eza.spicyex.Settings.SHARE_GESTURE_HINT);
         } catch (Throwable ignored) {
-            return 2;
+            mode = "First few times";
         }
+        if ("Off".equals(mode)) return 0;
+        if ("Every time".equals(mode)) return 2;
+        return hintShownCount() < 3 ? 2 : 1;
+    }
+
+    /** {@link #hintPasses} for the hint about to play, counting it as shown. */
+    private int consumeHintPasses() {
+        int passes = hintPasses();
+        if (passes <= 0) return 0;
+        try {
+            hintPrefs().edit().putInt("swipe_up_shown", hintShownCount() + 1).apply();
+        } catch (Throwable ignored) {
+        }
+        return passes;
+    }
+
+    private int hintShownCount() {
+        try {
+            return hintPrefs().getInt("swipe_up_shown", 0);
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    private android.content.SharedPreferences hintPrefs() {
+        return activity.getSharedPreferences("spicyex_share_hint", android.content.Context.MODE_PRIVATE);
     }
 
     private View teaseFinger;
