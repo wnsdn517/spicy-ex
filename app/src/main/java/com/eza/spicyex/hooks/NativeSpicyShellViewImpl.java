@@ -4973,6 +4973,12 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
 
         jumpToCurrentController.update(shouldShow);
 
+        // The countdown starts once the list is at rest: not while it is still gliding or
+        // springing back from an end, and not while paused (it starts over on resume rather
+        // than jumping ahead by the time spent paused).
+        boolean settling = scrollInProgress || (lyricsScroll instanceof com.eza.spicyex.lyrics.ElasticScrollView
+                && ((com.eza.spicyex.lyrics.ElasticScrollView) lyricsScroll).isStretched());
+        if (shouldShow && (settling || !host.isPlayerActuallyPlaying())) followState.markManualScroll();
         if (shouldShow && host.isPlayerActuallyPlaying()) {
             int delaySeconds = config == null ? Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS.defaultValue
                     : config.get(Settings.AUTO_RESUME_FOLLOW_DELAY_SECONDS);
