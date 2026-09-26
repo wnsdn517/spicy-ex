@@ -245,6 +245,7 @@
     <string name="settings_option_bossa_nova">Bossa nova</string>
     <string name="settings_option_ambient">Ambient</string>
     <string name="share_hint">Swipe up to add lyrics · Tap to toggle translation</string>
+    <string name="share_hint_swipe_up">Swipe up on the card to add the next line</string>
     <string name="share_design_glass">Glass</string>
     <string name="share_design_classic">Classic</string>
     <string name="share_design_minimal">Minimal</string>

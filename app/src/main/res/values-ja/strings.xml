@@ -234,6 +234,7 @@
     <string name="settings_option_bossa_nova">ボサノバ</string>
     <string name="settings_option_ambient">アンビエント</string>
     <string name="share_hint">上にスワイプで歌詞を追加 · タップで翻訳の切替</string>
+    <string name="share_hint_swipe_up">カードを上にスワイプすると次の歌詞が追加されます</string>
     <string name="share_design_glass">グラス</string>
     <string name="share_design_classic">クラシック</string>
     <string name="share_design_minimal">ミニマル</string>

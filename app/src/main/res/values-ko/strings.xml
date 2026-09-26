@@ -232,6 +232,7 @@
     <string name="settings_option_bossa_nova">보사노바</string>
     <string name="settings_option_ambient">앰비언트</string>
     <string name="share_hint">위로 밀어 가사 추가 · 탭하여 번역 켜기/끄기</string>
+    <string name="share_hint_swipe_up">카드를 위로 밀면 다음 가사가 추가돼요</string>
     <string name="share_design_glass">글래스</string>
     <string name="share_design_classic">클래식</string>
     <string name="share_design_minimal">미니멀</string>
