@@ -626,6 +626,7 @@
     <string name="settings_layout_editor_font_pick_file">Pick file…</string>
     <string name="settings_layout_editor_font_pick_failed">Couldn\'t read that font file</string>
     <string name="lyrics_ad_position" formatted="false">%1$d of %2$d</string>
+    <string name="lyrics_ad_break_left" formatted="false">%1$s left in the break</string>
     <!-- Settings search: words people might type for each idea, comma-separated, in this language. -->
     <string name="search_terms_blur">blur, blurry, soft focus, fuzzy</string>
     <string name="search_terms_font">font, typeface, typography</string>

@@ -646,4 +646,5 @@
     <string name="search_terms_notification">通知, ロック画面</string>
     <string name="settings_label_lyrics_share_gesture_hint">共有画面のジェスチャーヒント</string>
     <string name="settings_search_lyrics_share_gesture_hint">上スワイプのヒント, 歌詞の追加方法, ガイド, チュートリアル</string>
+    <string name="lyrics_ad_break_left" formatted="false">広告 残り %1$s</string>
 </resources>

@@ -630,6 +630,7 @@
     <string name="settings_layout_editor_card_caption">재생 중 카드</string>
     <string name="settings_layout_editor_font_pick_failed">글꼴 파일을 읽을 수 없어요</string>
     <string name="lyrics_ad_position" formatted="false">%2$d개 중 %1$d번째</string>
+    <string name="lyrics_ad_break_left" formatted="false">광고 %1$s 남음</string>
     <!-- Settings search: words people might type for each idea, comma-separated, in this language. -->
     <string name="search_terms_blur">블러, 흐림, 흐리게, 뿌옇게, 흐릿</string>
     <string name="search_terms_font">글꼴, 폰트, 서체, 글씨체</string>

@@ -2004,7 +2004,12 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         }
         boolean clockPlayingNow = playingNow || audioRescueActive;
         long pos = playbackClock.getPosition(track, clockPlayingNow);
-        if (adTrack) updateAdCard(track, pos);
+        if (adTrack) {
+            AdBreakInfo.notePaused(!clockPlayingNow);
+            updateAdCard(track, pos);
+        } else {
+            AdBreakInfo.noteBreakOver();
+        }
 
         String trackTitle = emptyFallback(track.title, "Unknown title");
         String trackArtist = emptyFallback(track.artist, "Unknown artist");
@@ -2113,7 +2118,8 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         updateFrameDemand(true);
     }
 
-    /** "1 of 3 · 0:23" under the ad card: where this ad sits in the break and how long it has left. */
+    /** "1 of 3 · 0:37" under the ad card: where this ad sits in the break and how long the
+     *  whole break has left (this ad's own time left when Spotify has not said). */
     private void updateAdCard(SpotifyTrack track, long positionMs) {
         StringBuilder text = new StringBuilder();
         AdBreakInfo info = AdBreakInfo.current(track.uri);
@@ -2123,10 +2129,18 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
                     .replace("%1$d", String.valueOf(info.index))
                     .replace("%2$d", String.valueOf(info.count)));
         }
-        if (track.duration > 0 && positionMs >= 0) {
-            long left = Math.max(0L, (track.duration - positionMs + 999L) / 1000L);
+        long breakLeftMs = AdBreakInfo.breakRemainingMs();
+        long adLeftMs = track.duration > 0 && positionMs >= 0 ? track.duration - positionMs : -1L;
+        boolean wholeBreak = breakLeftMs >= 0 || (info != null && info.isLast());
+        long leftMs = breakLeftMs >= 0 ? Math.max(breakLeftMs, adLeftMs) : adLeftMs;
+        if (leftMs >= 0) {
+            long left = Math.max(0L, (leftMs + 999L) / 1000L);
+            String clock = (left / 60) + ":" + (left % 60 < 10 ? "0" : "") + (left % 60);
             if (text.length() > 0) text.append("  ·  ");
-            text.append(left / 60).append(':').append(left % 60 < 10 ? "0" : "").append(left % 60);
+            text.append(wholeBreak
+                    ? com.eza.spicyex.UiLanguage.strings(activity, config.get(Settings.UI_LANGUAGE))
+                            .get("lyrics_ad_break_left", "%1$s left in the break").replace("%1$s", clock)
+                    : clock);
         }
         emptyStateController.updateAdProgress(text.toString());
     }
