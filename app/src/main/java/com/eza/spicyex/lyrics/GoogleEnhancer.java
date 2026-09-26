@@ -46,55 +46,6 @@ public final class GoogleEnhancer {
     private GoogleEnhancer() {
     }
 
-    public static Enhancement enhanceLine(
-            Context context,
-            OkHttpClient http,
-            int processingVersion,
-            String trackId,
-            String sourceLang,
-            String targetLang,
-            String text,
-            boolean needRomanize,
-            boolean needTranslate,
-            String cancelTag
-    ) {
-        Enhancement result = new Enhancement();
-        if (isBlank(text) || (!needRomanize && !needTranslate)) return result;
-
-        String source = LyricCaches.sourceLanguageForCache(sourceLang);
-        String target = isBlank(targetLang) ? "en" : targetLang;
-        String romanKey = LyricCaches.romanizationKey(trackId, sourceLang, text);
-        String translateKey = LyricCaches.translationKey(trackId, sourceLang, target, text);
-        String cachedRomanized = needRomanize ? LyricCaches.getProcessingValue(context, processingVersion, romanKey) : null;
-        if (!isBlank(cachedRomanized) && SpicyTextDetection.hasRomanizableScript(cachedRomanized)) cachedRomanized = null;
-        String cachedTranslated = needTranslate ? LyricCaches.getProcessingValue(context, processingVersion, translateKey) : null;
-        if ((!needRomanize || cachedRomanized != null) && (!needTranslate || cachedTranslated != null)) {
-            result.romanized = cachedRomanized == null ? "" : cachedRomanized;
-            result.translated = cachedTranslated == null ? "" : cachedTranslated;
-            return result;
-        }
-
-        String url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl="
-                + Uri.encode(source)
-                + "&tl=" + Uri.encode(target)
-                + "&dt=t" + (needRomanize ? "&dt=rm" : "")
-                + "&q=" + Uri.encode(text);
-        String body = executeRequestBody(http, taggedRequest(url, cancelTag));
-        if (isBlank(body)) {
-            result.romanized = cachedRomanized == null ? "" : cachedRomanized;
-            result.translated = cachedTranslated == null ? "" : cachedTranslated;
-            return result;
-        }
-        String parsedRomanized = needRomanize ? parseRomanization(body) : "";
-        if (!isBlank(parsedRomanized) && SpicyTextDetection.hasRomanizableScript(parsedRomanized)) parsedRomanized = "";
-        result.romanized = firstNonBlank(cachedRomanized, parsedRomanized);
-        result.translated = firstNonBlank(cachedTranslated, needTranslate ? parseTranslation(body) : "");
-        if (!shouldDisplayTranslation(text, result.translated)) result.translated = "";
-        if (needRomanize && !isBlank(result.romanized)) LyricCaches.putProcessingValue(context, processingVersion, romanKey, result.romanized);
-        if (needTranslate && !isBlank(result.translated)) LyricCaches.putProcessingValue(context, processingVersion, translateKey, result.translated);
-        return result;
-    }
-
     public static BatchResult translateBatch(
             Context context,
             OkHttpClient http,
@@ -162,6 +113,134 @@ public final class GoogleEnhancer {
     }
 
     /**
+     * Romanizes many lines in one request, the way {@link #translateBatch} translates them:
+     * each line goes in behind its own marker, and Google's romanization of the whole text keeps
+     * the markers ("[[SPX_000]] YA tebya lyublyu\n[[SPX_001]] My idom domoy"), so it splits back
+     * into lines. Replaces one request per line - 60 for a 60-line song, which is what kept
+     * running into the endpoint's per-address rate limit. Lines must share one source language.
+     *
+     * @return romanized text by line index, for the lines it could romanize (cached ones too)
+     */
+    public static Map<Integer, String> romanizeBatch(
+            Context context,
+            OkHttpClient http,
+            int processingVersion,
+            String trackId,
+            String sourceLang,
+            List<BatchLine> lines,
+            String cancelTag
+    ) {
+        Map<Integer, String> result = new LinkedHashMap<>();
+        if (lines == null || lines.isEmpty()) return result;
+        List<BatchLine> pending = new ArrayList<>();
+        for (BatchLine line : lines) {
+            if (line == null || isBlank(line.text)) continue;
+            String cached = LyricCaches.getProcessingValue(context, processingVersion,
+                    LyricCaches.romanizationKey(trackId, sourceLang, line.text));
+            if (!isBlank(cached) && !SpicyTextDetection.hasRomanizableScript(cached)) {
+                result.put(line.index, cached);
+            } else {
+                pending.add(line);
+            }
+        }
+        if (pending.isEmpty()) return result;
+
+        String url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl="
+                + Uri.encode(LyricCaches.sourceLanguageForCache(sourceLang))
+                + "&tl=en&dt=t&dt=rm&q=" + Uri.encode(batchQuery(pending));
+        HttpResult response = executeRequest(taggedRequest(url, cancelTag), http);
+        if (isBlank(response.body)) return result;
+        Map<Integer, String> parsed = parseBatchRomanization(response.body);
+        Map<String, String> cacheWrites = new LinkedHashMap<>();
+        for (int i = 0; i < pending.size(); i++) {
+            BatchLine line = pending.get(i);
+            String romanized = parsed.get(i);
+            if (isBlank(romanized) || SpicyTextDetection.hasRomanizableScript(romanized)) continue;
+            result.put(line.index, romanized);
+            cacheWrites.put(LyricCaches.romanizationKey(trackId, sourceLang, line.text), romanized);
+        }
+        LyricCaches.putProcessingValues(context, processingVersion, cacheWrites);
+        return result;
+    }
+
+    /** "[[SPX_000]] first line\n[[SPX_001]] second line..." - the batch request's text. */
+    static String batchQuery(List<BatchLine> lines) {
+        StringBuilder query = new StringBuilder();
+        for (int i = 0; i < lines.size(); i++) {
+            if (i > 0) query.append('\n');
+            query.append(marker(i)).append(' ').append(lines.get(i).text);
+        }
+        return query.toString();
+    }
+
+    /**
+     * Splits a batch into requests no longer than {@code maxLines} lines / {@code maxChars}
+     * characters of query (the endpoint takes a GET, so the URL has a practical limit).
+     */
+    public static List<List<BatchLine>> chunk(List<BatchLine> lines, int maxLines, int maxChars) {
+        List<List<BatchLine>> chunks = new ArrayList<>();
+        List<BatchLine> current = new ArrayList<>();
+        int chars = 0;
+        for (BatchLine line : lines) {
+            if (line == null || isBlank(line.text)) continue;
+            int size = line.text.length() + 14;
+            if (!current.isEmpty() && (current.size() >= Math.max(1, maxLines)
+                    || chars + size > Math.max(128, maxChars))) {
+                chunks.add(current);
+                current = new ArrayList<>();
+                chars = 0;
+            }
+            current.add(line);
+            chars += size;
+        }
+        if (!current.isEmpty()) chunks.add(current);
+        return chunks;
+    }
+
+    /** The source-side romanization of a batch response, split back into lines by marker. */
+    static Map<Integer, String> parseBatchRomanization(String body) {
+        StringBuilder all = new StringBuilder();
+        try {
+            JsonArray sentences = JsonParser.parseString(body).getAsJsonArray().get(0).getAsJsonArray();
+            for (JsonElement element : sentences) {
+                if (!element.isJsonArray()) continue;
+                JsonArray sentence = element.getAsJsonArray();
+                if (sentence.size() > 3 && !sentence.get(3).isJsonNull()) {
+                    all.append(sentence.get(3).getAsString());
+                }
+            }
+        } catch (Throwable ignored) {
+            return new LinkedHashMap<>();
+        }
+        return splitByMarkers(all.toString());
+    }
+
+    private static Map<Integer, String> splitByMarkers(String text) {
+        Map<Integer, String> result = new LinkedHashMap<>();
+        if (isBlank(text)) return result;
+        Matcher matcher = BATCH_MARKER_PATTERN.matcher(text);
+        int current = -1;
+        int textStart = -1;
+        while (matcher.find()) {
+            if (current >= 0 && textStart >= 0) {
+                String value = text.substring(textStart, matcher.start()).trim();
+                if (!isBlank(value)) result.put(current, value);
+            }
+            try {
+                current = Integer.parseInt(matcher.group(1));
+            } catch (NumberFormatException ignored) {
+                current = -1;
+            }
+            textStart = matcher.end();
+        }
+        if (current >= 0 && textStart >= 0) {
+            String value = text.substring(textStart).trim();
+            if (!isBlank(value)) result.put(current, value);
+        }
+        return result;
+    }
+
+    /**
      * Tags the call so a retired lane run can cancel it. Untagged calls stay uncancellable, which
      * is why every lyric request goes through here.
      */
@@ -192,10 +271,6 @@ public final class GoogleEnhancer {
             }
         }
         return cancelled;
-    }
-
-    private static String executeRequestBody(OkHttpClient http, Request request) {
-        return executeRequest(request, http).body;
     }
 
     private static HttpResult executeRequest(Request request, OkHttpClient http) {
@@ -314,32 +389,6 @@ public final class GoogleEnhancer {
         return result;
     }
 
-    private static String parseRomanization(String body) {
-        try {
-            JsonArray root = JsonParser.parseString(body).getAsJsonArray();
-            JsonArray sentences = root.get(0).getAsJsonArray();
-            for (JsonElement element : sentences) {
-                if (!element.isJsonArray()) continue;
-                JsonArray sentence = element.getAsJsonArray();
-                if (sentence.size() > 3 && !sentence.get(3).isJsonNull()) {
-                    String value = sentence.get(3).getAsString();
-                    if (!isBlank(value)) return value.trim();
-                }
-            }
-            return "";
-        } catch (Throwable t) {
-            return "";
-        }
-    }
-
-    private static String firstNonBlank(String... values) {
-        if (values == null) return "";
-        for (String value : values) {
-            if (!isBlank(value)) return value;
-        }
-        return "";
-    }
-
     private static String marker(int index) {
         return String.format(java.util.Locale.US, "[[SPX_%03d]]", index);
     }
@@ -451,10 +500,5 @@ public final class GoogleEnhancer {
         int attempts;
         int status;
         String failureReason = "";
-    }
-
-    public static final class Enhancement {
-        public String romanized = "";
-        public String translated = "";
     }
 }
