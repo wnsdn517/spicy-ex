@@ -2675,8 +2675,13 @@ final class LyricsLayoutEditController {
 
             if ("Animated texture".equals(store.get(Settings.BACKGROUND_STYLE))) {
                 endGroup();
+                // Labs: it follows the audio as Spotify writes it, which only estimates when that
+                // audio is heard, so it can lead or trail the sound a little.
                 addOption(toggleRow(Settings.BEAT_REACTIVE_BACKGROUND,
-                        strings.setting(Settings.BEAT_REACTIVE_BACKGROUND), null), matchWrap(12));
+                        strings.setting(Settings.BEAT_REACTIVE_BACKGROUND) + "  ·  "
+                                + s("labs", "Labs"), null), matchWrap(4));
+                addOption(text(s("labs_audio_sync_hint", "Experimental - it may not stay in sync "
+                        + "with what you hear."), 12, 0x80FFFFFF, false), matchWrap(12));
 
                 endGroup();
                 beginGroup(strings.setting(Settings.BACKGROUND_RENDER_QUALITY));

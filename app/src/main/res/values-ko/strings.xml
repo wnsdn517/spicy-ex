@@ -271,6 +271,9 @@
     <string name="share_save_failed">카드를 저장하지 못했어요</string>
     <string name="share_chooser">가사 공유</string>
     <string name="lyrics_instrumental">연주곡</string>
+    <string name="settings_layout_editor_labs">실험실</string>
+    <string name="settings_layout_editor_labs_audio_sync_hint">실험실 기능이에요. 실제로 들리는 소리와 싱크가 맞지 않을 수 있어요.</string>
+    <string name="lyrics_visualizer_labs_note">실험실 기능 · 소리와 싱크가 맞지 않을 수 있어요</string>
     <string name="lyrics_ad_title">광고</string>
     <string name="lyrics_ad_muted">광고 소리 음소거됨 · 광고가 끝나면 가사가 다시 표시됩니다</string>
     <string name="lyrics_ad_music">광고 대신 음악 재생 중 · 광고가 끝나면 가사가 다시 표시됩니다</string>

@@ -263,6 +263,20 @@ final class LyricsShellEmptyStateController {
         visualizerLp.leftMargin = dp(20);
         visualizerLp.rightMargin = dp(20);
         box.addView(visualizer, visualizerLp);
+        // Labs: the visualizer follows the audio as Spotify writes it, which only estimates when
+        // that audio is heard.
+        TextView labs = textFactory.createText(activity,
+                com.eza.spicyex.UiLanguage.strings(activity,
+                        config.get(com.eza.spicyex.Settings.UI_LANGUAGE))
+                        .get("lyrics_visualizer_labs_note",
+                                "Labs · may not stay in sync with the audio"),
+                11, Color.WHITE, textFactory.resolveTypeface(false));
+        labs.setGravity(Gravity.CENTER);
+        labs.setAlpha(0.45f);
+        LinearLayout.LayoutParams labsLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        labsLp.topMargin = dp(10);
+        box.addView(labs, labsLp);
         lyricsColumn.addView(box, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         // A slow breath on the note, so the screen reads as music playing rather than an error.

@@ -272,6 +272,9 @@
     <string name="share_save_failed">カードを保存できませんでした</string>
     <string name="share_chooser">歌詞を共有</string>
     <string name="lyrics_instrumental">インストゥルメンタル</string>
+    <string name="settings_layout_editor_labs">ラボ</string>
+    <string name="settings_layout_editor_labs_audio_sync_hint">試験的な機能です。聞こえている音とずれることがあります。</string>
+    <string name="lyrics_visualizer_labs_note">ラボ機能 · 音とずれることがあります</string>
     <string name="lyrics_ad_title">広告</string>
     <string name="lyrics_ad_muted">広告の音声をミュート中 · 広告の後に歌詞が戻ります</string>
     <string name="lyrics_ad_music">広告の代わりに音楽を再生中 · 広告の後に歌詞が戻ります</string>
