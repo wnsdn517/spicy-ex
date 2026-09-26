@@ -235,6 +235,16 @@ final class LyricsShellEmptyStateController {
 
     /** An instrumental track: a quiet, centred note and label in place of "No lyrics found". */
     void showInstrumental(LinearLayout lyricsColumn, java.util.function.Supplier<float[]> spectrum) {
+        showMusicOnly(lyricsColumn, spectrum, true);
+    }
+
+    /**
+     * The same screen for a track no source has lyrics for: the music plays on, so it gets the
+     * visualizer too, under "No lyrics" instead of an error page. {@code instrumental} picks the
+     * label.
+     */
+    void showMusicOnly(LinearLayout lyricsColumn, java.util.function.Supplier<float[]> spectrum,
+                       boolean instrumental) {
         ++stateToken;
         lyricsColumn.removeAllViews();
         LinearLayout box = new LinearLayout(activity);
@@ -248,7 +258,8 @@ final class LyricsShellEmptyStateController {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         String label = com.eza.spicyex.UiLanguage.strings(activity,
                 config.get(com.eza.spicyex.Settings.UI_LANGUAGE))
-                .get("lyrics_instrumental", "Instrumental");
+                .get(instrumental ? "lyrics_instrumental" : "lyrics_no_lyrics",
+                        instrumental ? "Instrumental" : "No lyrics");
         TextView title = textFactory.createText(activity, label, 22, Color.WHITE,
                 textFactory.resolveTypeface(true));
         title.setGravity(Gravity.CENTER);

@@ -293,6 +293,7 @@
     <string name="share_save_failed">Could not save the card</string>
     <string name="share_chooser">Share lyric</string>
     <string name="lyrics_instrumental">Instrumental</string>
+    <string name="lyrics_no_lyrics">No lyrics</string>
     <string name="settings_layout_editor_labs">Labs</string>
     <string name="settings_layout_editor_labs_audio_sync_hint">Experimental - it may not stay in sync with what you hear.</string>
     <string name="lyrics_visualizer_labs_note">Labs · may not stay in sync with the audio</string>

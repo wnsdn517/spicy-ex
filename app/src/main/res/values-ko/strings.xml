@@ -271,6 +271,7 @@
     <string name="share_save_failed">카드를 저장하지 못했어요</string>
     <string name="share_chooser">가사 공유</string>
     <string name="lyrics_instrumental">연주곡</string>
+    <string name="lyrics_no_lyrics">가사 없음</string>
     <string name="settings_layout_editor_labs">실험실</string>
     <string name="settings_layout_editor_labs_audio_sync_hint">실험실 기능이에요. 실제로 들리는 소리와 싱크가 맞지 않을 수 있어요.</string>
     <string name="lyrics_visualizer_labs_note">실험실 기능 · 소리와 싱크가 맞지 않을 수 있어요</string>

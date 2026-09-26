@@ -2387,8 +2387,38 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
             status.setText("Instrumental");
             return;
         }
+        if (!com.eza.spicyex.lyrics.LyricsFetchErrors.isTransient(error)) {
+            // Every source was asked and none has lyrics: the music plays on, so show it
+            // playing rather than an error page.
+            instrumentalShown = true;
+            emptyStateController.showMusicOnly(lyricsColumn, host::currentAudioSpectrum, false);
+            status.setText("No lyrics: " + safe(error));
+            return;
+        }
         emptyStateController.showError(lyricsColumn, error);
         status.setText("Lyrics error: " + safe(error));
+    }
+
+    /** True when no line carries a letter or digit - only blanks, notes or dots. */
+    private static boolean hasNoLyricText(java.util.List<com.eza.spicyex.lyrics.LyricsLine> lines) {
+        for (com.eza.spicyex.lyrics.LyricsLine line : lines) {
+            if (line == null) continue;
+            if (hasLetterOrDigit(line.text)) return false;
+            for (com.eza.spicyex.lyrics.SyllableSegment syllable : line.syllables) {
+                if (syllable != null && hasLetterOrDigit(syllable.text)) return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean hasLetterOrDigit(String value) {
+        if (value == null) return false;
+        for (int i = 0; i < value.length(); ) {
+            int cp = value.codePointAt(i);
+            if (Character.isLetterOrDigit(cp)) return true;
+            i += Character.charCount(cp);
+        }
+        return false;
     }
 
     private void renderDocument() {
@@ -2404,6 +2434,13 @@ final class NativeSpicyShellViewImpl extends FrameLayout {
         followState.resetActive();
         if (document == null || document.lines.isEmpty()) {
             showError("Empty lyrics response");
+            return;
+        }
+        // A document with no words in it (only "♪", dots or blank lines, as some providers
+        // publish for instrumentals) would render as a lone interlude: it is an instrumental.
+        if (hasNoLyricText(document.lines)) {
+            com.eza.spicyex.lyrics.InstrumentalTracks.mark(document.trackId);
+            showError("No lyric text");
             return;
         }
         staticDoc = LyricsRenderMode.isStatic(document);
