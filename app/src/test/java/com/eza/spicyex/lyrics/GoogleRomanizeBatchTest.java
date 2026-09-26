@@ -46,6 +46,25 @@ public class GoogleRomanizeBatchTest {
     }
 
     @Test
+    public void markersGoogleSpacedOutStillSplit() throws Exception {
+        // Real: Google's Japanese romanization returns "[ [SPX _ 000] ] yoru ni kakeru [ [SPX _
+        // 001] ] ..." - markers spaced out and the line breaks gone.
+        Map<Integer, String> ja = GoogleEnhancer.parseBatchRomanization(
+                fixture("romanize_batch_ja_spaced_markers.json"));
+        assertEquals("yoru ni kakeru", ja.get(0));
+        assertEquals("shizumu yō ni tokete yuku yō ni", ja.get(1));
+        assertEquals("sayonara dakedatta", ja.get(2));
+    }
+
+    @Test
+    public void fullWidthMarkersInTranslationsStillSplit() {
+        String body = "[[[\"［［ＳＰＸ＿０００］］ 愛してる\\n［［SPX_001］］ 帰ろう\",\"x\",null,null]]]";
+        Map<Integer, String> parsed = GoogleEnhancer.parseBatchTranslation(body);
+        assertEquals("愛してる", parsed.get(0));
+        assertEquals("帰ろう", parsed.get(1));
+    }
+
+    @Test
     public void aWholeSongIsOneRequest() {
         List<GoogleEnhancer.BatchLine> song = new ArrayList<>();
         for (int i = 0; i < 60; i++) song.add(new GoogleEnhancer.BatchLine(i, "Ночь, улица, фонарь, аптека"));

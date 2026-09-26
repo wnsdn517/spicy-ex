@@ -41,7 +41,14 @@ public final class GoogleEnhancer {
     private static final Map<String, long[]> LANE_THROTTLES = new java.util.concurrent.ConcurrentHashMap<>();
     /** Shared by every lane: the endpoint's rate limit is per network address, not per lane. */
     private static final GoogleCooldown COOLDOWN = new GoogleCooldown();
-    private static final Pattern BATCH_MARKER_PATTERN = Pattern.compile("\\[\\[SPX_(\\d{3})\\]\\]");
+    /**
+     * A batch marker as Google may hand it back, not only as sent: its Japanese romanization
+     * spaces it out ("[ [SPX _ 000] ]"), and CJK output can turn brackets, underscore and digits
+     * full-width. The number is what matters.
+     */
+    private static final Pattern BATCH_MARKER_PATTERN = Pattern.compile(
+            "[\\[［]\\s*[\\[［]\\s*(?:SPX|ＳＰＸ)\\s*[_＿]?\\s*([0-9０-９]{3})\\s*[\\]］]\\s*[\\]］]",
+            Pattern.CASE_INSENSITIVE);
 
     private GoogleEnhancer() {
     }
@@ -145,22 +152,42 @@ public final class GoogleEnhancer {
         }
         if (pending.isEmpty()) return result;
 
-        String url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl="
-                + Uri.encode(LyricCaches.sourceLanguageForCache(sourceLang))
-                + "&tl=en&dt=t&dt=rm&q=" + Uri.encode(batchQuery(pending));
-        HttpResult response = executeRequest(taggedRequest(url, cancelTag), http);
-        if (isBlank(response.body)) return result;
-        Map<Integer, String> parsed = parseBatchRomanization(response.body);
         Map<String, String> cacheWrites = new LinkedHashMap<>();
-        for (int i = 0; i < pending.size(); i++) {
-            BatchLine line = pending.get(i);
-            String romanized = parsed.get(i);
-            if (isBlank(romanized) || SpicyTextDetection.hasRomanizableScript(romanized)) continue;
-            result.put(line.index, romanized);
-            cacheWrites.put(LyricCaches.romanizationKey(trackId, sourceLang, line.text), romanized);
+        List<BatchLine> missing = romanizeRequest(http, sourceLang, pending, cancelTag, trackId,
+                result, cacheWrites);
+        // A line whose marker still did not survive gets one more try, in a batch of its own
+        // kind - once, and only when the first request did work (a refused or garbled request
+        // is not asked again).
+        if (!missing.isEmpty() && missing.size() < pending.size()) {
+            romanizeRequest(http, sourceLang, missing, cancelTag, trackId, result, cacheWrites);
         }
         LyricCaches.putProcessingValues(context, processingVersion, cacheWrites);
         return result;
+    }
+
+    /** One batch request; fills {@code result} and returns the lines it did not get back. */
+    private static List<BatchLine> romanizeRequest(OkHttpClient http, String sourceLang,
+                                                   List<BatchLine> lines, String cancelTag,
+                                                   String trackId, Map<Integer, String> result,
+                                                   Map<String, String> cacheWrites) {
+        String url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl="
+                + Uri.encode(LyricCaches.sourceLanguageForCache(sourceLang))
+                + "&tl=en&dt=t&dt=rm&q=" + Uri.encode(batchQuery(lines));
+        HttpResult response = executeRequest(taggedRequest(url, cancelTag), http);
+        if (isBlank(response.body)) return lines;
+        Map<Integer, String> parsed = parseBatchRomanization(response.body);
+        List<BatchLine> missing = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            BatchLine line = lines.get(i);
+            String romanized = parsed.get(i);
+            if (isBlank(romanized) || SpicyTextDetection.hasRomanizableScript(romanized)) {
+                missing.add(line);
+                continue;
+            }
+            result.put(line.index, romanized);
+            cacheWrites.put(LyricCaches.romanizationKey(trackId, sourceLang, line.text), romanized);
+        }
+        return missing;
     }
 
     /** "[[SPX_000]] first line\n[[SPX_001]] second line..." - the batch request's text. */
@@ -215,6 +242,18 @@ public final class GoogleEnhancer {
         return splitByMarkers(all.toString());
     }
 
+    private static int markerNumber(String digits) {
+        if (digits == null) return -1;
+        int value = 0;
+        for (int i = 0; i < digits.length(); i++) {
+            char c = digits.charAt(i);
+            int d = c >= '０' && c <= '９' ? c - '０' : c - '0';
+            if (d < 0 || d > 9) return -1;
+            value = value * 10 + d;
+        }
+        return value;
+    }
+
     private static Map<Integer, String> splitByMarkers(String text) {
         Map<Integer, String> result = new LinkedHashMap<>();
         if (isBlank(text)) return result;
@@ -226,11 +265,7 @@ public final class GoogleEnhancer {
                 String value = text.substring(textStart, matcher.start()).trim();
                 if (!isBlank(value)) result.put(current, value);
             }
-            try {
-                current = Integer.parseInt(matcher.group(1));
-            } catch (NumberFormatException ignored) {
-                current = -1;
-            }
+            current = markerNumber(matcher.group(1));
             textStart = matcher.end();
         }
         if (current >= 0 && textStart >= 0) {
@@ -364,29 +399,7 @@ public final class GoogleEnhancer {
     }
 
     static Map<Integer, String> parseBatchTranslation(String body) {
-        Map<Integer, String> result = new LinkedHashMap<>();
-        String translated = parseTranslation(body);
-        if (isBlank(translated)) return result;
-        Matcher matcher = BATCH_MARKER_PATTERN.matcher(translated);
-        int current = -1;
-        int textStart = -1;
-        while (matcher.find()) {
-            if (current >= 0 && textStart >= 0) {
-                String value = translated.substring(textStart, matcher.start()).trim();
-                if (!isBlank(value)) result.put(current, value);
-            }
-            try {
-                current = Integer.parseInt(matcher.group(1));
-            } catch (NumberFormatException ignored) {
-                current = -1;
-            }
-            textStart = matcher.end();
-        }
-        if (current >= 0 && textStart >= 0) {
-            String value = translated.substring(textStart).trim();
-            if (!isBlank(value)) result.put(current, value);
-        }
-        return result;
+        return splitByMarkers(parseTranslation(body));
     }
 
     private static String marker(int index) {
@@ -395,7 +408,7 @@ public final class GoogleEnhancer {
 
     private static String stripMarkerEcho(String text, int index) {
         if (text == null) return "";
-        return text.replace(marker(index), "").trim();
+        return BATCH_MARKER_PATTERN.matcher(text).replaceAll("").trim();
     }
 
     public static boolean sameText(String a, String b) {
