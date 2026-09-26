@@ -286,9 +286,14 @@ public final class GoogleEnhancer {
     }
 
     /**
-     * Cancels every queued and running call carrying {@code cancelTag}. Called when a lane run is
-     * retired by a track, source, or configuration change, so an abandoned run stops costing
-     * requests instead of merely having its callback ignored.
+     * Cancels the calls carrying {@code cancelTag} that have not been sent yet. Called when a
+     * lane run is retired by a track, source, or configuration change.
+     *
+     * <p>A call already on its way is left to finish: Google has counted it either way, and
+     * finishing is what writes its lines to the cache - the run that replaced this one (the
+     * same song, restarted because a better copy of its lyrics arrived) then finds them there,
+     * or joins the same request in flight, instead of asking again. Cancelling it made every
+     * restart cost another request.
      */
     public static int cancelTagged(OkHttpClient http, String cancelTag) {
         if (http == null || cancelTag == null || cancelTag.isEmpty()) return 0;
@@ -299,16 +304,55 @@ public final class GoogleEnhancer {
                 cancelled++;
             }
         }
-        for (okhttp3.Call call : http.dispatcher().runningCalls()) {
-            if (cancelTag.equals(call.request().tag(String.class))) {
-                call.cancel();
-                cancelled++;
-            }
-        }
         return cancelled;
     }
 
+    /** Requests on the wire, by URL: an identical request joins the one in flight. */
+    private static final Map<String, java.util.concurrent.CompletableFuture<HttpResult>> IN_FLIGHT =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long JOIN_TIMEOUT_MS = 30_000L;
+
+    /**
+     * {@link #sendRequest}, but a request identical to one already on the wire (same text, same
+     * languages - a lane restarted for the same song) waits for that one's answer instead of
+     * sending its own.
+     */
     private static HttpResult executeRequest(Request request, OkHttpClient http) {
+        if (request == null) return sendRequest(null, http);
+        String key = request.url().toString();
+        java.util.concurrent.CompletableFuture<HttpResult> mine = new java.util.concurrent.CompletableFuture<>();
+        java.util.concurrent.CompletableFuture<HttpResult> theirs = IN_FLIGHT.putIfAbsent(key, mine);
+        if (theirs != null) {
+            try {
+                HttpResult shared = theirs.get(JOIN_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+                HttpResult copy = new HttpResult();
+                copy.body = shared.body;
+                copy.status = shared.status;
+                copy.failureReason = shared.failureReason;
+                copy.attempts = 0; // this caller sent nothing
+                return copy;
+            } catch (Throwable ignored) {
+                HttpResult failed = new HttpResult();
+                failed.failureReason = "joined_request_failed";
+                return failed;
+            }
+        }
+        HttpResult result = null;
+        try {
+            result = sendRequest(request, http);
+            return result;
+        } finally {
+            IN_FLIGHT.remove(key, mine);
+            HttpResult done = result;
+            if (done == null) {
+                done = new HttpResult();
+                done.failureReason = "failed";
+            }
+            mine.complete(done);
+        }
+    }
+
+    private static HttpResult sendRequest(Request request, OkHttpClient http) {
         HttpResult result = new HttpResult();
         if (http == null || request == null) {
             result.failureReason = "client_unavailable";
@@ -324,7 +368,8 @@ public final class GoogleEnhancer {
             }
             result.attempts++;
             throttleGoogleRequest(lane);
-            try (Response response = http.newCall(request).execute()) {
+            okhttp3.Call call = http.newCall(request);
+            try (Response response = call.execute()) {
                 result.status = response.code();
                 if (response.isSuccessful() && response.body() != null) {
                     COOLDOWN.onSuccess();
@@ -342,6 +387,12 @@ public final class GoogleEnhancer {
                 if (response.code() < 500) return result;
             } catch (IOException failure) {
                 result.failureReason = failure.getClass().getSimpleName();
+                // Cancelled on purpose (its run was retired): sending it again a second later
+                // is exactly the request the cancel was meant to save.
+                if (call.isCanceled()) {
+                    result.failureReason = "cancelled";
+                    return result;
+                }
             }
             if (attempt < GOOGLE_REQUEST_RETRIES) quietSleep(GOOGLE_REQUEST_RETRY_DELAY_MS);
         }
