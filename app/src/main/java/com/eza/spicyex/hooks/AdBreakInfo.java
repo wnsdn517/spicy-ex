@@ -1,12 +1,8 @@
 package com.eza.spicyex.hooks;
 
-import android.app.Activity;
 import android.os.SystemClock;
-import android.view.View;
-import android.view.ViewGroup;
 import android.widget.TextView;
 
-import com.eza.spicyex.References;
 import com.eza.spicyex.xposed.XpLog;
 
 import java.util.Locale;
@@ -28,7 +24,6 @@ public final class AdBreakInfo {
             "(?i)(?:advertisement|ad|광고|広告|annonce|anuncio|werbung)?\\D{0,6}?(\\d{1,2})\\s*(?:of|/|de|von)\\s*(\\d{1,2})\\b");
     private static final Pattern COUNT_THEN_INDEX = Pattern.compile("(\\d{1,2})\\s*(?:개\\s*중|件中|個中)\\s*(\\d{1,2})");
     private static final Pattern AD_WORD = Pattern.compile("(?i)advertisement|\\bad\\b|광고|広告|annonce|anuncio|werbung");
-    private static final long UI_SCAN_INTERVAL_MS = 1000L;
 
     /** 1-based position in the break; 0 when unknown. */
     final int index;
@@ -50,8 +45,6 @@ public final class AdBreakInfo {
 
     private static volatile String metadataUri = "";
     private static volatile AdBreakInfo fromMetadata;
-    private static String uiUri = "";
-    private static long uiScannedAt;
 
     /** Called by References for every ad track it reads. Logs the fields once per ad. */
     public static void noteMetadata(String uri, Map<String, String> metadata) {
@@ -70,34 +63,26 @@ public final class AdBreakInfo {
     /**
      * Best current reading for the ad {@code uri}, or null when nothing says where it is.
      *
-     * <p>Spotify's own "2 of 3" is read from every window of the process, not just the current
-     * activity - with the lyrics screen on top, the player showing it sits in the window behind.
-     * That screen may also stop updating while hidden, so its label is only trusted when it
-     * changes: an ad that starts while the label still reads what it read for the previous ad
-     * is taken to be the next one in the same break.
+     * <p>Nothing is scanned: Spotify's own "2 of 3" and "37s left in the break" are caught as
+     * Spotify posts them - the media notification, the media session, and a label's text being
+     * set while an ad plays (see {@link #installHooks}). A label on a hidden screen may still
+     * stop updating, so a position is only trusted when its text changes: an ad that starts
+     * while the text still reads what it read for the previous ad is taken to be the next one
+     * in the same break.
      */
     static synchronized AdBreakInfo current(String uri) {
         if (uri == null) return null;
-        AdBreakInfo meta = uri.equals(metadataUri) ? fromMetadata : null;
-        if (meta != null && meta.known()) {
-            lastAskedAt = SystemClock.uptimeMillis();
-            remember(uri, meta, null);
-            return meta;
-        }
         long now = SystemClock.uptimeMillis();
         // Asked about continuously through a break (ad card, ad music): a long silence means a
         // song played in between, so this is a new break even if nobody said the last one ended.
         if (lastAskedAt > 0L && now - lastAskedAt > 20_000L) noteBreakOver();
         lastAskedAt = now;
-        if (!uri.equals(uiUri) || now - uiScannedAt >= UI_SCAN_INTERVAL_MS) {
-            uiScannedAt = now;
-            uiUri = uri;
-            Scan scan = scanWindows();
-            remember(uri, scan.position, scan.positionText);
-            if (scan.breakLeftSec >= 0 && !scan.breakLeftText.equals(lastBreakText)) {
-                lastBreakText = scan.breakLeftText;
-                breakEndsAt = now + scan.breakLeftSec * 1000L;
-            }
+        adPlaying = true;
+        AdBreakInfo meta = uri.equals(metadataUri) ? fromMetadata : null;
+        if (meta != null && meta.known()) {
+            remember(uri, meta, null);
+        } else {
+            remember(uri, heardPosition, heardPositionText);
         }
         return breakUri.equals(uri) ? breakPosition : null;
     }
@@ -132,6 +117,13 @@ public final class AdBreakInfo {
 
     /** A song is playing: the break is over. */
     static synchronized void noteBreakOver() {
+        adPlaying = false;
+        // The session and notification announce the next break's first ad a moment before the
+        // player reports the ad itself: a reading that fresh belongs to the new break.
+        if (SystemClock.uptimeMillis() - heardAt > 3000L) {
+            heardPosition = null;
+            heardPositionText = "";
+        }
         breakUri = "";
         breakPosition = null;
         lastPositionText = "";
@@ -165,6 +157,11 @@ public final class AdBreakInfo {
     private static long breakEndsAt;
     private static long pausedAt;
     private static long lastAskedAt;
+    /** Set while an ad plays, so the text hooks cost one volatile read the rest of the time. */
+    private static volatile boolean adPlaying;
+    private static AdBreakInfo heardPosition;
+    private static String heardPositionText = "";
+    private static long heardAt;
 
     static AdBreakInfo parseMetadata(Map<String, String> metadata) {
         int index = -1;
@@ -205,14 +202,6 @@ public final class AdBreakInfo {
         return new AdBreakInfo(index, count);
     }
 
-    /** What one pass over the windows found. */
-    private static final class Scan {
-        AdBreakInfo position;
-        String positionText = "";
-        int breakLeftSec = -1;
-        String breakLeftText = "";
-    }
-
     /** "37s left in the break", "1:05 left in the break", "광고 시간 37초 남음"... */
     private static final Pattern BREAK_WORD = Pattern.compile(
             "(?i)\\bbreak\\b|left|remaining|남음|남았|残り|restant|restan|verbleib");
@@ -230,84 +219,89 @@ public final class AdBreakInfo {
         return -1;
     }
 
-    private static Scan scanWindows() {
-        Scan scan = new Scan();
-        java.util.List<View> roots = windowRoots();
-        if (roots.isEmpty()) {
-            Activity activity = References.currentActivity();
-            if (activity != null && activity.getWindow() != null) roots.add(activity.getWindow().getDecorView());
+    /**
+     * Where the text comes from, all event-driven: the media notification and media session
+     * (which carry "Advertisement · 2 of 3" whatever screen is showing), and label text set in
+     * Spotify's own UI while an ad plays (the only place "37s left in the break" appears).
+     */
+    static void installHooks() {
+        try {
+            com.eza.spicyex.xposed.XpHooks.findAfter(android.media.session.MediaSession.class,
+                    "setMetadata", "adBreak:MediaSession#setMetadata",
+                    param -> offerMetadata((android.media.MediaMetadata) param.args[0]),
+                    android.media.MediaMetadata.class);
+        } catch (Throwable t) {
+            XpLog.log(TAG + " session hook unavailable: " + t.getClass().getSimpleName());
         }
-        for (View root : roots) {
+        try {
+            com.eza.spicyex.xposed.XpHooks.findBefore(android.app.NotificationManager.class,
+                    "notify", "adBreak:NotificationManager#notify",
+                    param -> offerNotification((android.app.Notification) param.args[2]),
+                    String.class, int.class, android.app.Notification.class);
+        } catch (Throwable t) {
+            XpLog.log(TAG + " notification hook unavailable: " + t.getClass().getSimpleName());
+        }
+        try {
+            com.eza.spicyex.xposed.XpHooks.findAfter(TextView.class, "setText", "adBreak:TextView#setText",
+                    param -> {
+                        if (adPlaying) offerLabel((CharSequence) param.args[0]);
+                    },
+                    CharSequence.class, TextView.BufferType.class, boolean.class, int.class);
+        } catch (Throwable t) {
+            XpLog.log(TAG + " label hook unavailable: " + t.getClass().getSimpleName());
+        }
+    }
+
+    private static void offerMetadata(android.media.MediaMetadata metadata) {
+        if (metadata == null) return;
+        for (String key : new String[]{android.media.MediaMetadata.METADATA_KEY_ARTIST,
+                android.media.MediaMetadata.METADATA_KEY_ALBUM,
+                android.media.MediaMetadata.METADATA_KEY_TITLE,
+                android.media.MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE,
+                android.media.MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION}) {
             try {
-                scan(root, 0, scan);
+                CharSequence text = metadata.getText(key);
+                if (text != null) offerText(text.toString());
             } catch (Throwable ignored) {
             }
-            if (scan.position != null && scan.breakLeftSec >= 0) break;
         }
-        return scan;
     }
 
-    /** Every window's root view in this process (the player behind the lyrics screen too). */
-    @SuppressWarnings("unchecked")
-    private static java.util.List<View> windowRoots() {
-        java.util.List<View> roots = new java.util.ArrayList<>();
-        try {
-            Class<?> global = Class.forName("android.view.WindowManagerGlobal");
-            Object instance = global.getMethod("getInstance").invoke(null);
-            java.lang.reflect.Field views = global.getDeclaredField("mViews");
-            views.setAccessible(true);
-            Object value = views.get(instance);
-            if (value instanceof java.util.List) {
-                synchronized (instance) {
-                    for (Object view : (java.util.List<Object>) value) {
-                        if (view instanceof View) roots.add((View) view);
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
+    private static void offerNotification(android.app.Notification notification) {
+        if (notification == null || notification.extras == null) return;
+        for (String key : new String[]{android.app.Notification.EXTRA_TEXT,
+                android.app.Notification.EXTRA_SUB_TEXT, android.app.Notification.EXTRA_TITLE,
+                android.app.Notification.EXTRA_INFO_TEXT}) {
+            CharSequence text = notification.extras.getCharSequence(key);
+            if (text != null) offerText(text.toString());
         }
-        // The current activity first: when it shows the label, it is the live one.
-        Activity activity = References.currentActivity();
-        View current = activity == null || activity.getWindow() == null ? null
-                : activity.getWindow().getDecorView();
-        if (current != null) {
-            roots.remove(current);
-            roots.add(0, current);
-        }
-        return roots;
     }
 
-    private static void scan(View view, int depth, Scan out) {
-        if (view == null || depth > 60) return;
-        if (view instanceof TextView) {
-            read(String.valueOf(((TextView) view).getText()), out);
-        }
-        CharSequence description = view.getContentDescription();
-        if (description != null) read(description.toString(), out);
-        if (out.position != null && out.breakLeftSec >= 0) return;
-        if (view instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                scan(group.getChildAt(i), depth + 1, out);
-                if (out.position != null && out.breakLeftSec >= 0) return;
+    private static void offerLabel(CharSequence text) {
+        if (text == null) return;
+        int length = text.length();
+        if (length == 0 || length > 60) return;
+        for (int i = 0; i < length; i++) {
+            char c = text.charAt(i);
+            if (c >= '0' && c <= '9') {
+                offerText(text.toString());
+                return;
             }
         }
     }
 
-    private static void read(String text, Scan out) {
-        if (out.position == null) {
-            AdBreakInfo info = parseText(text);
-            if (info != null) {
-                out.position = info;
-                out.positionText = text;
-            }
+    /** One piece of text Spotify just showed; keeps what it says about the break. */
+    static synchronized void offerText(String text) {
+        AdBreakInfo position = parseText(text);
+        if (position != null) {
+            heardPosition = position;
+            heardPositionText = text;
+            heardAt = SystemClock.uptimeMillis();
         }
-        if (out.breakLeftSec < 0) {
-            int left = parseBreakLeft(text);
-            if (left >= 0) {
-                out.breakLeftSec = left;
-                out.breakLeftText = text;
-            }
+        int left = parseBreakLeft(text);
+        if (left >= 0 && !text.equals(lastBreakText)) {
+            lastBreakText = text;
+            breakEndsAt = SystemClock.uptimeMillis() + left * 1000L;
         }
     }
 
