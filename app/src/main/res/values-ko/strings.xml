@@ -614,6 +614,7 @@
     <string name="settings_tap_seek_taken_by_like">꺼짐 · 두 번 탭은 좋아요</string>
     <string name="settings_tap_seek_double_tap_turns_off_like">선택하면 두 번 탭해서 좋아요가 꺼져요</string>
     <string name="settings_double_tap_like_note">두 번 탭은 가사 이동에 사용 중이에요. 켜면 그 기능은 꺼져요.</string>
+    <string name="settings_karaoke_labs_note">실험실 기능 · 원곡 가사를 가져오기 때문에 카라오케 음원과 싱크가 맞지 않을 수 있어요.</string>
     <string name="settings_label_lyrics_status_bar_hidden_portrait">상태 표시줄 숨기기 (세로)</string>
     <string name="settings_label_lyrics_status_bar_hidden_landscape">상태 표시줄 숨기기 (가로)</string>
     <string name="settings_card_editor">재생 중 카드 편집기…</string>

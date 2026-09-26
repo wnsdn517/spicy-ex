@@ -75,6 +75,7 @@
     <string name="settings_tap_seek_taken_by_like">オフ · ダブルタップはいいね</string>
     <string name="settings_tap_seek_double_tap_turns_off_like">選ぶとダブルタップでいいねはオフになります</string>
     <string name="settings_double_tap_like_note">ダブルタップは歌詞の移動に使われています。オンにするとそちらはオフになります。</string>
+    <string name="settings_karaoke_labs_note">ラボ機能 · 原曲の歌詞を使うため、カラオケ音源とずれることがあります。</string>
     <string name="settings_language_search">言語を検索</string>
     <string name="settings_language_suggested">おすすめ</string>
     <string name="settings_language_all">すべての言語</string>
