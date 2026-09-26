@@ -1403,6 +1403,7 @@ public final class SettingsPanel implements SettingRowFactory.Host, PanelDialogs
         com.eza.spicyex.lyrics.InstrumentalVisualizerView bars =
                 new com.eza.spicyex.lyrics.InstrumentalVisualizerView(context,
                         () -> com.eza.spicyex.hooks.AudioDebug.spectrum);
+        bars.setBands(true);
         bars.setLayoutParams(new LinearLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                 Math.round(140 * context.getResources().getDisplayMetrics().density)));

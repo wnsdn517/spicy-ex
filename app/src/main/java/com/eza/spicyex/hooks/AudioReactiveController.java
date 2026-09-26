@@ -55,7 +55,6 @@ final class AudioReactiveController {
     private final Listener listener;
     private volatile boolean listeningEnabled;
     private boolean started;
-    private long lastReadingMs;
 
     // Analysis state, audio-thread only.
     private final float[] mono = new float[WINDOW];
@@ -221,7 +220,9 @@ final class AudioReactiveController {
      * Every write: the beat tracker runs over ALL of it (Spotify hands over large chunks, and
      * looking only at the first 1024 frames of each - as before - saw a kick only when one
      * happened to land in that sliver, so real songs barely pulsed). The FFT spectrum and
-     * loudness stay at ~30 readings a second from the head of the chunk.
+     * loudness are read every {@link #MIN_INTERVAL_MS} of audio across the whole chunk, each
+     * delivered when that part of the chunk is heard. Reading only the chunk's head gave one
+     * reading per write - a few a second, in bursts - which is what made the visualizer jerk.
      */
     private void process(AudioTrack track, int frames) {
         if (frames <= 0) return;
@@ -232,13 +233,22 @@ final class AudioReactiveController {
         if (startsAt < timelineEnd && timelineEnd - startsAt < 400L) startsAt = timelineEnd;
         timelineEnd = startsAt + frames * 1000L / sampleRate;
         beats.process(chunk, frames, sampleRate, startsAt);
-        long now = SystemClock.uptimeMillis();
-        if (now - lastReadingMs < MIN_INTERVAL_MS) return;
-        lastReadingMs = now;
-        int n = Math.min(WINDOW, frames);
-        System.arraycopy(chunk, 0, mono, 0, n);
-        analyse(track, n);
+        if (!listeningEnabled && !AudioDebug.watching()) return;
+        // A jump back (seek, new track) restarts the reading clock.
+        if (nextReadingAt - startsAt > 1000L) nextReadingAt = 0L;
+        int hop = Math.max(64, (int) (sampleRate * MIN_INTERVAL_MS / 1000L));
+        for (int offset = 0; offset + 64 <= frames; offset += hop) {
+            long heardAt = startsAt + offset * 1000L / sampleRate;
+            if (heardAt < nextReadingAt) continue;
+            nextReadingAt = heardAt + MIN_INTERVAL_MS;
+            int n = Math.min(WINDOW, frames - offset);
+            System.arraycopy(chunk, offset, mono, 0, n);
+            analyse(track, n, heardAt);
+        }
     }
+
+    /** Audio-timeline time of the next spectrum reading; audio-thread only. */
+    private long nextReadingAt;
 
     private final BeatTracker beats = new BeatTracker();
     private long timelineEnd;
@@ -268,7 +278,7 @@ final class AudioReactiveController {
         return 0L;
     }
 
-    private void analyse(AudioTrack track, int frames) {
+    private void analyse(AudioTrack track, int frames, long heardAt) {
         if (frames < 64) return;
         int sampleRate = Math.max(8000, track.getSampleRate());
         if (AudioDebug.watching()) {
@@ -298,24 +308,24 @@ final class AudioReactiveController {
             float energy = 0f;
             for (int k = from; k < to && k < WINDOW / 2; k++) energy += re[k] * re[k] + im[k] * im[k];
             float magnitude = (float) Math.sqrt(energy / (to - from));
-            // Auto-gain per band: its recent peak decays slowly, so a quiet passage still fills
-            // the bars and a loud one does not pin them at the top.
-            bandPeak[b] = Math.max(magnitude, bandPeak[b] * 0.995f);
+            // Auto-gain per band: its recent peak decays slowly (half in ~8s at 30 readings a
+            // second), so a quiet passage still fills the visualizer and a loud one does not
+            // pin it at the top.
+            bandPeak[b] = Math.max(magnitude, bandPeak[b] * 0.997f);
             spectrum[b] = bandPeak[b] <= 1e-6f ? 0f
                     : (float) Math.pow(Math.min(1f, magnitude / bandPeak[b]), 1.4);
         }
-        deliver(track, loudness, spectrum);
+        deliver(loudness, spectrum, heardAt);
     }
 
-    private void deliver(AudioTrack track, float loudness, float[] spectrum) {
-        long delay = latencyMs(track);
-        main.postDelayed(() -> {
+    private void deliver(float loudness, float[] spectrum, long heardAt) {
+        main.postAtTime(() -> {
             float beatNow = beatNow();
             AudioDebug.loudness = loudness;
             AudioDebug.beat = beatNow;
             AudioDebug.accent = accentNow();
             AudioDebug.spectrum = spectrum;
             if (listeningEnabled) listener.onAnalysis(loudness, beatNow, spectrum);
-        }, delay);
+        }, heardAt);
     }
 }
