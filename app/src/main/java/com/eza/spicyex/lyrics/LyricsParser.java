@@ -246,21 +246,51 @@ public final class LyricsParser implements LyricsRepository.Parser {
         return current;
     }
 
+    /**
+     * The LRCLIB search hit to show, or -1. A record with lyrics beats one marked instrumental
+     * (a title search for a karaoke track's original also returns other karaoke releases),
+     * synced beats plain, then the runtime closest to the playing track's, then LRCLIB's own
+     * relevance order. Runtime matters most when the search went by title alone.
+     */
+    static int pickLrclibCandidate(java.util.List<JsonObject> candidates, long trackDurationMs) {
+        int best = -1;
+        int bestRank = -1;
+        double bestGap = Double.MAX_VALUE;
+        for (int i = 0; i < candidates.size(); i++) {
+            JsonObject candidate = candidates.get(i);
+            JsonElement instrumental = candidate.get("instrumental");
+            boolean marked = instrumental != null && instrumental.isJsonPrimitive()
+                    && instrumental.getAsJsonPrimitive().isBoolean() && instrumental.getAsBoolean();
+            boolean synced = !isBlank(Json.optString(candidate, "syncedLyrics"));
+            boolean plain = !isBlank(Json.optString(candidate, "plainLyrics"));
+            int rank = (marked ? 0 : 4) + (synced ? 2 : plain ? 1 : 0);
+            double gap = 60d;
+            JsonElement duration = candidate.get("duration");
+            if (trackDurationMs > 0 && duration != null && duration.isJsonPrimitive()
+                    && duration.getAsJsonPrimitive().isNumber()) {
+                gap = Math.min(60d, Math.abs(duration.getAsDouble() - trackDurationMs / 1000d));
+            }
+            // Within a couple of seconds counts as the same length: keep LRCLIB's order there.
+            if (rank > bestRank || (rank == bestRank && gap < bestGap - 2d)) {
+                best = i;
+                bestRank = rank;
+                bestGap = gap;
+            }
+        }
+        return best;
+    }
+
     @Override
     public LyricsDocument parseLrclibLyrics(Context context, SpotifyTrack track, String body) {
         JsonElement root = JsonParser.parseString(body);
         JsonObject best = null;
         if (root.isJsonArray()) {
-            JsonArray array = root.getAsJsonArray();
-            for (JsonElement element : array) {
-                if (!element.isJsonObject()) continue;
-                JsonObject candidate = element.getAsJsonObject();
-                if (best == null) best = candidate;
-                if (!isBlank(Json.optString(candidate, "syncedLyrics"))) {
-                    best = candidate;
-                    break;
-                }
+            java.util.List<JsonObject> candidates = new java.util.ArrayList<>();
+            for (JsonElement element : root.getAsJsonArray()) {
+                if (element.isJsonObject()) candidates.add(element.getAsJsonObject());
             }
+            int index = pickLrclibCandidate(candidates, track == null ? 0L : track.duration);
+            if (index >= 0) best = candidates.get(index);
         } else if (root.isJsonObject()) {
             best = root.getAsJsonObject();
         }
